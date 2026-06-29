@@ -1,0 +1,94 @@
+// ─── Agent Execution Types ─────────────────────────────────────────────────
+
+export interface AgentExecutionInput {
+  agentId: string;
+  executionId: string;
+  namespace: string;
+  systemPrompt?: string;
+  initialMessages?: Message[];
+  tools?: ToolDefinition[];
+  maxIterations?: number;
+  requiresApproval?: boolean;
+}
+
+export interface Message {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  name?: string;
+  toolCallId?: string;
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+export interface LLMResponse {
+  type: "final_answer" | "tool_call";
+  content: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  modelUsed: string;
+  cost: string;
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+export interface ToolResult {
+  toolName: string;
+  status: "succeeded" | "failed";
+  result?: unknown;
+  errorMessage?: string;
+  latencyMs: number;
+}
+
+export interface AgentResult {
+  status: "SUCCEEDED" | "MAX_ITERATIONS_REACHED" | "CANCELLED" | "ERROR";
+  output: string;
+  totalCost: string;
+  iterations: number;
+  toolCalls: ToolCallRecord[];
+  error?: string;
+}
+
+export interface ToolCallRecord {
+  iteration: number;
+  toolName: string;
+  args: Record<string, unknown>;
+  status: "succeeded" | "failed";
+  latencyMs: number;
+}
+
+export interface WorkflowStatus {
+  iteration: number;
+  lastAction: string;
+  startTime: string;
+}
+
+// ─── HITL Types ────────────────────────────────────────────────────────────
+
+export interface HITLApprovalInput {
+  agentId: string;
+  executionId: string;
+  namespace: string;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  requesterNotes?: string;
+  timeoutMs?: number;
+}
+
+export interface ApprovalDecision {
+  approver: string;
+  decision: "approve" | "reject";
+  reason?: string;
+}
+
+export interface HITLResult {
+  decision: "approve" | "reject" | "timeout";
+  approver?: string;
+  reason?: string;
+}
