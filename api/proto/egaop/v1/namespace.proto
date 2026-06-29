@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package egaop.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/egaop/egaop/api/generated/go/egaop/v1";
+
+message Namespace {
+  string id = 1;
+  string slug = 2;
+  string display_name = 3;
+  NamespaceTier tier = 4;
+  string owner_id = 5;
+  NamespaceQuotas quotas = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  google.protobuf.Timestamp suspended_at = 9;
+}
+
+enum NamespaceTier {
+  NAMESPACE_TIER_UNSPECIFIED = 0;
+  NAMESPACE_TIER_SANDBOX = 1;
+  NAMESPACE_TIER_STANDARD = 2;
+  NAMESPACE_TIER_ENTERPRISE = 3;
+}
+
+message NamespaceQuotas {
+  int32 max_agents = 1;
+  int32 max_concurrent_executions = 2;
+  int32 max_memory_mb = 3;
+  int32 max_tool_calls_per_minute = 4;
+}
+
+service NamespaceService {
+  rpc CreateNamespace(CreateNamespaceRequest) returns (Namespace);
+  rpc GetNamespace(GetNamespaceRequest) returns (Namespace);
+  rpc ListNamespaces(ListNamespacesRequest) returns (ListNamespacesResponse);
+  rpc UpdateNamespace(UpdateNamespaceRequest) returns (Namespace);
+  rpc SuspendNamespace(SuspendNamespaceRequest) returns (Namespace);
+  rpc DeleteNamespace(DeleteNamespaceRequest) returns (google.protobuf.Empty);
+}
+
+message CreateNamespaceRequest {
+  string slug = 1;
+  string display_name = 2;
+  NamespaceTier tier = 3;
+  string owner_id = 4;
+  NamespaceQuotas quotas = 5;
+}
+
+message GetNamespaceRequest {
+  string slug = 1;
+}
+
+message ListNamespacesRequest {
+  string owner_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListNamespacesResponse {
+  repeated Namespace namespaces = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+message UpdateNamespaceRequest {
+  string slug = 1;
+  string display_name = 2;
+  NamespaceQuotas quotas = 3;
+}
+
+message SuspendNamespaceRequest {
+  string slug = 1;
+  string reason = 2;
+}
+
+message DeleteNamespaceRequest {
+  string slug = 1;
+}

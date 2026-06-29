@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package egaop.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/egaop/egaop/api/generated/go/egaop/v1";
+
+// Memory Plane Service
+service MemoryService {
+  rpc Read (ReadRequest) returns (ReadResponse);
+  rpc Write (WriteRequest) returns (WriteResponse);
+  rpc Delete (DeleteRequest) returns (DeleteResponse);
+  rpc List (ListRequest) returns (ListResponse);
+}
+
+message ReadRequest {
+  string agent_id = 1;
+  string namespace = 2;
+  string memory_type = 3; // working, session, entity, semantic
+  string entity_type = 4;
+  string key = 5;
+}
+
+message ReadResponse {
+  google.protobuf.Struct data = 1;
+  bool found = 2;
+}
+
+message WriteRequest {
+  string agent_id = 1;
+  string namespace = 2;
+  string memory_type = 3;
+  string entity_type = 4;
+  string key = 5;
+  google.protobuf.Struct data = 6;
+}
+
+message WriteResponse {
+  string status = 1; // success, forbidden
+  string version = 2; // optimistic locking
+}
+
+// MemoryGrant resource definition
+message MemoryGrant {
+  string api_version = 1;
+  string kind = 2;
+  Metadata metadata = 3;
+  MemoryGrantSpec spec = 4;
+}
+
+message Metadata {
+  string name = 1;
+}
+
+message MemoryGrantSpec {
+  string agent_ref = 1;
+  repeated Grant grants = 2;
+}
+
+message Grant {
+  string memory_type = 1;
+  repeated string entity_types = 2;
+  repeated string operations = 3; // read, write, summarize
+  string namespace = 4;
+  map<string, FieldRestriction> field_restrictions = 5;
+}
+
+message FieldRestriction {
+  repeated string deny = 1;
+}
+
+message DeleteRequest {
+  string agent_id = 1;
+  string namespace = 2;
+  string memory_type = 3;
+  string entity_type = 4;
+  string key = 5;
+}
+
+message DeleteResponse {
+  string status = 1;
+}
+
+message ListRequest {
+  string agent_id = 1;
+  string namespace = 2;
+  string memory_type = 3;
+  string entity_type = 4;
+}
+
+message ListResponse {
+  repeated MemoryEntry entries = 1;
+}
+
+message MemoryEntry {
+  string key = 1;
+  google.protobuf.Struct data = 2;
+}

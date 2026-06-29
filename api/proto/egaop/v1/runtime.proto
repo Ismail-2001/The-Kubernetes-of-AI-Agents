@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package egaop.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/egaop/egaop/api/generated/go/egaop/v1";
+
+// Runtime Service
+service RuntimeService {
+  rpc CreateSandbox (CreateSandboxRequest) returns (CreateSandboxResponse);
+  rpc TerminateSandbox (TerminateSandboxRequest) returns (TerminateSandboxResponse);
+  rpc GetSandboxStatus (GetSandboxStatusRequest) returns (GetSandboxStatusResponse);
+}
+
+message CreateSandboxRequest {
+  string agent_id = 1;
+  string execution_id = 2;
+  string image = 3;
+  string isolation_level = 4; // Standard, Enhanced, Maximum
+  Resources resources = 5;
+  string timeout = 6;
+  google.protobuf.Struct env_vars = 7;
+}
+
+message Resources {
+  string cpu = 1;
+  string memory = 2;
+}
+
+message CreateSandboxResponse {
+  string sandbox_id = 1;
+  string status = 2; // running, starting, failed
+  string ip_address = 3;
+}
+
+message TerminateSandboxRequest {
+  string sandbox_id = 1;
+  string reason = 2;
+}
+
+message TerminateSandboxResponse {
+  bool success = 1;
+}
+
+message GetSandboxStatusRequest {
+  string sandbox_id = 1;
+}
+
+message GetSandboxStatusResponse {
+  string status = 1;
+  double cpu_usage = 2;
+  double memory_usage = 3;
+  google.protobuf.Timestamp started_at = 4;
+}

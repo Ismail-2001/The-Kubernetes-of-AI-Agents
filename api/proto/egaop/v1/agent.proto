@@ -1,0 +1,206 @@
+syntax = "proto3";
+
+package egaop.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/egaop/egaop/api/generated/go/egaop/v1";
+
+message Agent {
+  string api_version = 1;
+  string kind = 2;
+  Metadata metadata = 3;
+  AgentSpec spec = 4;
+  AgentStatus status = 5;
+}
+
+message Metadata {
+  string uid = 1;
+  string name = 2;
+  string namespace = 3;
+  map<string, string> labels = 4;
+  map<string, string> annotations = 5;
+  int32 version = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  string created_by = 9;
+  string fingerprint = 10;
+}
+
+message AgentSpec {
+  string version = 1;
+  string description = 2;
+  RuntimeConfig runtime = 3;
+  LLMConfig llm = 4;
+  repeated ToolBinding tools = 5;
+  MemoryConfig memory = 6;
+  repeated PolicyBinding policies = 7;
+  CostBudget cost_budget = 8;
+  DelegationConfig delegation = 9;
+  RollbackConfig rollback = 10;
+  Manifest manifest = 11;
+}
+
+message RuntimeConfig {
+  string image = 1;
+  string isolation_level = 2;
+  Resources resources = 3;
+  string timeout = 4;
+  int32 max_concurrent_executions = 5;
+}
+
+message Resources {
+  string cpu = 1;
+  string memory = 2;
+  string ephemeral_storage = 3;
+}
+
+message LLMConfig {
+  repeated string allowed_models = 1;
+  string default_model = 2;
+  int32 max_tokens_per_execution = 3;
+  int32 max_llm_calls_per_execution = 4;
+  float temperature = 5;
+  string system_prompt = 6;
+  string response_format = 7;
+}
+
+message ToolBinding {
+  string ref = 1;
+  repeated string permissions = 2;
+  string rate_limit = 3;
+  double max_amount = 4;
+}
+
+message MemoryConfig {
+  WorkingMemory working = 1;
+  SessionMemory session = 2;
+  EntityMemory entity = 3;
+  SemanticMemory semantic = 4;
+}
+
+message WorkingMemory {
+  string max_size = 1;
+}
+
+message SessionMemory {
+  int32 max_entries = 1;
+  string ttl = 2;
+}
+
+message EntityMemory {
+  repeated string read = 1;
+  repeated string write = 2;
+  map<string, DenyFields> deny_fields = 3;
+}
+
+message SemanticMemory {
+  repeated string read = 1;
+  repeated string write = 2;
+}
+
+message DenyFields {
+  repeated string fields = 1;
+}
+
+message PolicyBinding {
+  string ref = 1;
+}
+
+message CostBudget {
+  string per_execution = 1;
+  string per_hour = 2;
+  string per_day = 3;
+}
+
+message DelegationConfig {
+  repeated string can_delegate_to = 1;
+  map<string, float> trust_score = 2;
+  int32 max_delegation_depth = 3;
+}
+
+message RollbackConfig {
+  string strategy = 1;
+  HealthCheck health_check = 2;
+  string previous_version = 3;
+}
+
+message HealthCheck {
+  string metric = 1;
+  float threshold = 2;
+  string window = 3;
+}
+
+message Manifest {
+  string signature = 1;
+  string signed_by = 2;
+  google.protobuf.Timestamp signed_at = 3;
+}
+
+message AgentStatus {
+  string phase = 1;
+  int32 active_executions = 2;
+  google.protobuf.Timestamp last_execution = 3;
+  string health_status = 4;
+  string current_version = 5;
+  bool rollback_available = 6;
+  string cost_today = 7;
+  float error_rate_last_1h = 8;
+}
+
+service AgentService {
+  rpc CreateAgent(CreateAgentRequest) returns (Agent);
+  rpc GetAgent(GetAgentRequest) returns (Agent);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc UpdateAgent(UpdateAgentRequest) returns (Agent);
+  rpc DeleteAgent(DeleteAgentRequest) returns (google.protobuf.Empty);
+}
+
+message CreateAgentRequest {
+  string api_version = 1;
+  string kind = 2;
+  Metadata metadata = 3;
+  AgentSpec spec = 4;
+}
+
+message GetAgentRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message ListAgentsRequest {
+  string namespace = 1;
+  AgentFilters filters = 2;
+  Pagination pagination = 3;
+}
+
+message AgentFilters {
+  string phase = 1;
+  map<string, string> labels = 2;
+  string search = 3;
+}
+
+message Pagination {
+  string cursor = 1;
+  int32 page_size = 2;
+}
+
+message ListAgentsResponse {
+  repeated Agent agents = 1;
+  string next_cursor = 2;
+  int32 total_count = 3;
+}
+
+message UpdateAgentRequest {
+  string namespace = 1;
+  string name = 2;
+  AgentSpec spec = 3;
+  map<string, string> labels = 4;
+}
+
+message DeleteAgentRequest {
+  string namespace = 1;
+  string name = 2;
+}

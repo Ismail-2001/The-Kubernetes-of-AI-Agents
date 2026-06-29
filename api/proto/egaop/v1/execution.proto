@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package egaop.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/egaop/egaop/api/generated/go/egaop/v1";
+
+// Observability Service (Trace Collector)
+service ObservabilityService {
+  rpc ExportTrace (ExportTraceRequest) returns (ExportTraceResponse);
+  rpc GetExecutionReplay (GetExecutionReplayRequest) returns (ExecutionRecord);
+}
+
+message ExportTraceRequest {
+  string execution_id = 1;
+  string span_id = 2;
+  string parent_span_id = 3;
+  string name = 4;
+  google.protobuf.Timestamp start_time = 5;
+  google.protobuf.Timestamp end_time = 6;
+  google.protobuf.Struct attributes = 7; // metadata (cost, model, tool, tokens)
+}
+
+message ExportTraceResponse {
+  bool success = 1;
+}
+
+message GetExecutionReplayRequest {
+  string execution_id = 1;
+}
+
+// ExecutionRecord resource definition (The Replay Bundle)
+message ExecutionRecord {
+  string execution_id = 1;
+  string agent_ref = 2;
+  google.protobuf.Struct inputs = 3;
+  repeated ExecutionStep steps = 4;
+  google.protobuf.Struct outputs = 5;
+  string total_cost = 6;
+  int64 total_duration_ms = 7;
+  int32 policy_violations = 8;
+}
+
+message ExecutionStep {
+  int32 step = 1;
+  string type = 2; // llm_call, tool_call, memory_write, policy_eval
+  string name = 3;
+  google.protobuf.Struct input = 4;
+  google.protobuf.Struct output = 5;
+  string cost = 6;
+  int64 duration_ms = 7;
+  string status = 8;
+  string policy_decision = 9;
+}

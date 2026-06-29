@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package egaop.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/egaop/egaop/api/generated/go/egaop/v1";
+
+// LLM Router Service
+service LLMService {
+  rpc Generate (GenerateRequest) returns (GenerateResponse);
+}
+
+message GenerateRequest {
+  string agent_id = 1;
+  string execution_id = 2;
+  string model = 3; // Preferred model
+  repeated Message messages = 4;
+  float temperature = 5;
+  int32 max_tokens = 6;
+  google.protobuf.Struct response_format = 7;
+}
+
+message Message {
+  string role = 1; // system, user, assistant, tool
+  string content = 2;
+  string name = 3; // optional, for speaker identification
+  string tool_call_id = 4; // optional
+}
+
+message GenerateResponse {
+  string content = 1;
+  string model_used = 2;
+  TokenUsage usage = 3;
+  string cost = 4;
+  string finish_reason = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message TokenUsage {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 total_tokens = 3;
+}
+
+// LLMRoutingPolicy resource definition
+message LLMRoutingPolicy {
+  string api_version = 1;
+  string kind = 2;
+  Metadata metadata = 3;
+  LLMRoutingPolicySpec spec = 4;
+}
+
+message Metadata {
+  string name = 1;
+  string namespace = 2;
+}
+
+message LLMRoutingPolicySpec {
+  repeated ModelDefinition models = 1;
+  string default_model = 2;
+  repeated string fallback_chain = 3;
+  CostCeiling cost_ceiling = 4;
+}
+
+message ModelDefinition {
+  string name = 1;
+  string provider = 2;
+  double cost_per_1k_input = 3;
+  double cost_per_1k_output = 4;
+  int32 max_tokens = 5;
+  int32 latency_p95_ms = 6;
+  repeated string data_classification = 7;
+  int32 priority = 8;
+  string role = 9; // primary, fallback_cheap
+}
+
+message CostCeiling {
+  string per_request = 1;
+  string per_execution = 2;
+  string per_day = 3;
+}
