@@ -1,0 +1,60 @@
+# Dependencies
+**/node_modules
+**/.pnp
+**/.pnp.js
+
+# Testing
+/coverage
+
+# Next.js
+**/.next/
+**/out/
+
+# Build output
+**/dist/
+**/build/
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Local env files
+.env
+.env*.local
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+**/next-env.d.ts
+
+# Platform Specific
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+bin/
+pkg/
+vendor/
+
+# Protobuf Generated
+api/generated/
+
+# TLS certificates (generated — NEVER commit private keys)
+certs/*.pem
+certs/*.srl
+
+# Jest
+**/jest.config.js
+
+# OS
+Thumbs.db
