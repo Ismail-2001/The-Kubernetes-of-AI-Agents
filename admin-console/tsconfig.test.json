@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true,
+    "types": ["jest", "node", "@testing-library/react"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "__tests__/**/*.ts", "__tests__/**/*.tsx"],
+  "exclude": ["node_modules", "dist", ".next"]
+}
