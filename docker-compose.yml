@@ -1,0 +1,377 @@
+# =============================================================================
+# E-GAOP Docker Compose — All 8 services + infrastructure
+# =============================================================================
+# Usage:
+#   docker compose up -d                     # Start all services
+#   docker compose up -d --build <service>   # Rebuild a single service
+#   docker compose logs -f <service>         # Tail logs
+#   docker compose down -v                   # Stop and remove volumes
+#
+# Prerequisites:
+#   - Docker Engine 24+ with Compose v2
+#   - Copy .env.example to .env and fill in secrets (OPENAI_API_KEY, etc.)
+#   - Docker socket available for sandbox-runtime
+# =============================================================================
+
+services:
+  # ─── Infrastructure ───────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis-data:/data
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-egaop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egaop_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-egaop}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-egaop}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/dev-server:latest
+    ports:
+      - "7233:7233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "health-check", "--address", "localhost:7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  opa:
+    image: openpolicyagent/opa:latest
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./policy-plane/policies:/policies:ro
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "/policies"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8181/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  # ─── Observability Infrastructure ─────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # zpages
+      - "8889:8889"   # Prometheus exporter
+      - "13133:13133" # health check
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/e-gaop-dashboard.json:/var/lib/grafana/dashboards/e-gaop.json:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  # ─── Control Plane ────────────────────────────────────────────────────────
+  api-server:
+    build:
+      context: ./control-plane/api-server
+    ports:
+      - "${API_SERVER_GRPC_PORT:-50051}:50051"
+      - "${API_SERVER_HEALTH_PORT:-15051}:15051"
+      - "${API_SERVER_REST_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      API_SERVER_GRPC_PORT: "50051"
+      API_SERVER_HEALTH_PORT: "15051"
+      API_SERVER_REST_PORT: "3001"
+      REDIS_URL: redis://redis:6379
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-api-server
+    volumes:
+      - ./api/proto:/api/proto:ro
+      - ./certs:/etc/egaop/certs:ro
+    depends_on:
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  secret-store:
+    build:
+      context: ./control-plane/secret-store
+    ports:
+      - "${SECRET_STORE_PORT:-50057}:50057"
+      - "${SECRET_STORE_HEALTH_PORT:-15057}:15057"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      SECRET_STORE_PORT: "50057"
+      SECRET_STORE_HEALTH_PORT: "15057"
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY:-dev-key-do-not-use-in-production}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-secret-store
+    volumes:
+      - ./api/proto:/api/proto:ro
+      - ./certs:/etc/egaop/certs:ro
+    depends_on:
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  workflow-engine:
+    build:
+      context: ./control-plane/workflow-engine
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      TEMPORAL_HOST: temporal
+      TEMPORAL_PORT: "7233"
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-egaop-agent-queue}
+      API_SERVER_ADDR: api-server:50051
+      SANDBOX_RUNTIME_ADDR: sandbox-runtime:50054
+      OBSERVABILITY_PLANE_ADDR: observability-plane:50056
+      LLM_ROUTER_ADDR: llm-router:50053
+      MEMORY_PLANE_ADDR: memory-plane:50055
+      WORKFLOW_ENGINE_HEALTH_PORT: "15058"
+      REDIS_URL: redis://redis:6379
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-workflow-engine
+    volumes:
+      - ./api/proto:/api/proto:ro
+      - ./certs:/etc/egaop/certs:ro
+    depends_on:
+      temporal:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  # ─── Execution Plane ──────────────────────────────────────────────────────
+  llm-router:
+    build:
+      context: ./execution-plane/llm-router
+    ports:
+      - "${LLM_ROUTER_PORT:-50053}:50053"
+      - "${LLM_ROUTER_HEALTH_PORT:-15053}:15053"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      RATE_LIMIT_RPM: ${RATE_LIMIT_LLM_RPM:-30}
+      LLM_ROUTER_PORT: "50053"
+      LLM_ROUTER_HEALTH_PORT: "15053"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_FALLBACK_CHAIN: ${LLM_FALLBACK_CHAIN:-gpt-4o,gpt-4o-mini,gpt-3.5-turbo}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-llm-router
+    volumes:
+      - ./api/proto:/api/proto:ro
+      - ./certs:/etc/egaop/certs:ro
+    depends_on:
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  tool-proxy:
+    build:
+      context: ./execution-plane/tool-proxy
+    ports:
+      - "${TOOL_PROXY_PORT:-50052}:50052"
+      - "${TOOL_PROXY_HEALTH_PORT:-15052}:15052"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      RATE_LIMIT_RPM: ${RATE_LIMIT_TOOL_PROXY_RPM:-60}
+      TOOL_PROXY_PORT: "50052"
+      TOOL_PROXY_HEALTH_PORT: "15052"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-tool-proxy
+    volumes:
+      - ./api/proto:/api/proto:ro
+      - ./certs:/etc/egaop/certs:ro
+    depends_on:
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  sandbox-runtime:
+    build:
+      context: ./execution-plane/sandbox-runtime
+    ports:
+      - "${SANDBOX_RUNTIME_PORT:-50054}:50054"
+      - "${SANDBOX_RUNTIME_HEALTH_PORT:-15054}:15054"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      SANDBOX_RUNTIME_PORT: "50054"
+      SANDBOX_RUNTIME_HEALTH_PORT: "15054"
+      DOCKER_HOST: ${DOCKER_HOST:-unix:///var/run/docker.sock}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-sandbox-runtime
+    volumes:
+      - ./api/proto:/api/proto:ro
+      - ./certs:/etc/egaop/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  # ─── Data / Observability Planes ──────────────────────────────────────────
+  memory-plane:
+    build:
+      context: ./memory-plane
+    ports:
+      - "${MEMORY_PLANE_PORT:-50055}:50055"
+      - "${MEMORY_PLANE_HEALTH_PORT:-15055}:15055"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      MEMORY_PLANE_PORT: "50055"
+      MEMORY_PLANE_HEALTH_PORT: "15055"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_URL: redis://redis:6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-egaop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egaop_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-egaop}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-memory-plane
+    volumes:
+      - ./api/proto:/api/proto:ro
+      - ./certs:/etc/egaop/certs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  observability-plane:
+    build:
+      context: ./observability-plane
+    ports:
+      - "${OBSERVABILITY_PLANE_PORT:-50056}:50056"
+      - "${OBSERVABILITY_PLANE_HEALTH_PORT:-15056}:15056"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      OBSERVABILITY_PLANE_PORT: "50056"
+      OBSERVABILITY_PLANE_HEALTH_PORT: "15056"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-observability-plane
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-egaop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egaop_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-egaop}
+    volumes:
+      - ./api/proto:/api/proto:ro
+      - ./certs:/etc/egaop/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  egaop-net:
+    driver: bridge
