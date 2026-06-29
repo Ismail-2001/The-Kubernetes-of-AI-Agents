@@ -1,0 +1,26 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "egaop-services"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets:
+          - "api-server:9464"
+          - "memory-plane:9464"
+          - "observability-plane:9464"
+          - "llm-router:9464"
+          - "tool-proxy:9464"
+          - "policy-plane:9464"
+          - "secret-store:9464"
+          - "sandbox-runtime:9464"
+          - "workflow-engine:9464"
+
+  - job_name: "otel-collector"
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
