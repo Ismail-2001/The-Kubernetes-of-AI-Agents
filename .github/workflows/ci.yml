@@ -1,0 +1,116 @@
+name: E-GAOP CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  lint-typecheck:
+    name: Lint & TypeCheck
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - control-plane/api-server
+          - control-plane/secret-store
+          - control-plane/workflow-engine
+          - execution-plane/llm-router
+          - execution-plane/sandbox-runtime
+          - execution-plane/tool-proxy
+          - memory-plane
+          - observability-plane
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - control-plane/api-server
+          - control-plane/secret-store
+          - control-plane/workflow-engine
+          - execution-plane/llm-router
+          - execution-plane/sandbox-runtime
+          - execution-plane/tool-proxy
+          - memory-plane
+          - observability-plane
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+      - run: npm ci
+      - run: npx jest --passWithNoTests --coverage
+      - uses: davelosert/vitest-coverage-report-action@v2
+        if: always()
+
+  admin-console:
+    name: Admin Console
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: admin-console/package-lock.json
+      - run: npm ci
+      - run: npx next lint
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Audit control-plane/api-server
+        working-directory: control-plane/api-server
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      - name: Audit control-plane/secret-store
+        working-directory: control-plane/secret-store
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      - name: Audit execution-plane/llm-router
+        working-directory: execution-plane/llm-router
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      - name: Audit memory-plane
+        working-directory: memory-plane
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      - name: Audit observability-plane
+        working-directory: observability-plane
+        run: npm audit --audit-level=high
+        continue-on-error: true
