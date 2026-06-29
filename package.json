@@ -1,0 +1,28 @@
+{
+  "name": "egaop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise-Grade Agent Orchestration Platform — The Kubernetes of AI Agents",
+  "workspaces": [
+    "packages/shared",
+    "control-plane/api-server",
+    "control-plane/secret-store",
+    "control-plane/workflow-engine",
+    "execution-plane/llm-router",
+    "execution-plane/tool-proxy",
+    "execution-plane/sandbox-runtime",
+    "memory-plane",
+    "observability-plane",
+    "policy-plane"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w control-plane/api-server\" \"npm run dev -w control-plane/secret-store\" \"npm run dev -w execution-plane/llm-router\" \"npm run dev -w execution-plane/sandbox-runtime\" \"npm run dev -w execution-plane/tool-proxy\" \"npm run dev -w memory-plane\" \"npm run dev -w observability-plane\"",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
