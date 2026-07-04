@@ -1,0 +1,13 @@
+enabled: true
+image: egaop/memory-plane
+tag: latest
+replicas: 2
+grpcPort: 50055
+healthPort: 15055
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

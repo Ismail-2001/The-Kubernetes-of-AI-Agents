@@ -5,6 +5,7 @@ global:
 scrape_configs:
   - job_name: "egaop-services"
     metrics_path: "/metrics"
+    scrape_interval: 10s
     static_configs:
       - targets:
           - "api-server:9464"
@@ -12,12 +13,12 @@ scrape_configs:
           - "observability-plane:9464"
           - "llm-router:9464"
           - "tool-proxy:9464"
-          - "policy-plane:9464"
           - "secret-store:9464"
           - "sandbox-runtime:9464"
           - "workflow-engine:9464"
 
   - job_name: "otel-collector"
+    scrape_interval: 10s
     static_configs:
       - targets: ["otel-collector:8889"]
 

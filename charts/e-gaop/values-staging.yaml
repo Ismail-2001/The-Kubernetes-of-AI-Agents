@@ -1,0 +1,104 @@
+# =============================================================================
+# E-GAOP Helm Values — Staging
+# =============================================================================
+
+global:
+  imageRegistry: ghcr.io
+  imagePullSecrets:
+    - name: ghcr-pull-secret
+  storageClass: gp3
+
+ingress:
+  enabled: true
+  className: nginx
+  adminHost: admin-staging.egaop.dev
+  apiHost: api-staging.egaop.dev
+  certManagerIssuer: letsencrypt-staging
+  rateLimit: "200"
+
+externalSecrets:
+  enabled: true
+  vault:
+    address: "http://vault.egaop-ops:8200"
+    path: "secret/data/egaop/staging"
+    secretsPath: "secret/data/egaop/staging"
+
+defaults:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9464"
+
+api-server:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+secret-store:
+  replicas: 2
+
+workflow-engine:
+  replicas: 2
+
+llm-router:
+  replicas: 2
+  rateLimitRpm: 60
+
+tool-proxy:
+  replicas: 2
+  rateLimitRpm: 120
+
+memory-plane:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+observability-plane:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+admin-console:
+  replicas: 2
+
+postgresql:
+  enabled: true
+  auth:
+    existingSecret: e-gaop-managed-secrets
+  primary:
+    persistence:
+      size: 50Gi
+
+redis:
+  enabled: true
+  architecture: replication
+  master:
+    persistence:
+      size: 10Gi
+
+temporal:
+  enabled: true
+  server:
+    replicaCount: 2

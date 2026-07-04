@@ -61,5 +61,6 @@ export {
   BaseConfigSchema,
   type BaseConfig,
 } from "./config/index.js";
+export { validateSecrets } from "./config/validate-secrets.js";
 export { RateLimiter } from "./rate-limiter.js";
 export { getServerCredentials, getClientCredentials } from "./tls.js";

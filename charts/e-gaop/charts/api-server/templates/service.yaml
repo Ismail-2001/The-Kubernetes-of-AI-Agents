@@ -1,0 +1,29 @@
+{{- if .Values.api-server.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: api-server
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.api-server.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    - port: {{ .Values.api-server.restPort }}
+      targetPort: rest
+      protocol: TCP
+      name: rest
+    - port: {{ .Values.api-server.healthPort }}
+      targetPort: health
+      protocol: TCP
+      name: health
+  selector:
+    app.kubernetes.io/name: api-server
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

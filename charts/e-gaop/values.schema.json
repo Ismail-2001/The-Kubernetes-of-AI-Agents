@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["defaults"],
+  "properties": {
+    "defaults": {
+      "type": "object",
+      "required": ["replicas", "resources"],
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "resources": {
+          "type": "object",
+          "required": ["requests", "limits"],
+          "properties": {
+            "requests": {
+              "type": "object",
+              "required": ["cpu", "memory"],
+              "properties": {
+                "cpu": { "type": "string" },
+                "memory": { "type": "string" }
+              }
+            },
+            "limits": {
+              "type": "object",
+              "required": ["cpu", "memory"],
+              "properties": {
+                "cpu": { "type": "string" },
+                "memory": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "api-server": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas", "resources"]
+    },
+    "secret-store": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas"]
+    },
+    "workflow-engine": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas"]
+    },
+    "llm-router": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas"]
+    },
+    "tool-proxy": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas"]
+    },
+    "sandbox-runtime": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas"]
+    },
+    "memory-plane": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas"]
+    },
+    "observability-plane": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas"]
+    },
+    "admin-console": {
+      "type": "object",
+      "required": ["enabled", "image", "tag", "replicas"]
+    }
+  }
+}

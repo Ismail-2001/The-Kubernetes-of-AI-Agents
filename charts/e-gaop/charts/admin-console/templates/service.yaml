@@ -1,0 +1,21 @@
+{{- if .Values.admin-console.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-admin-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: admin-console
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.admin-console.port | default 3000 }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: admin-console
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

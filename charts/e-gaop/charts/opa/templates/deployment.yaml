@@ -1,0 +1,66 @@
+{{- if .Values.opa.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-opa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/instance: {{ .Release.Name }}-opa
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opa
+      app.kubernetes.io/instance: {{ .Release.Name }}-opa
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opa
+        app.kubernetes.io/instance: {{ .Release.Name }}-opa
+        app.kubernetes.io/part-of: e-gaop
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: opa
+          image: "{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
+          imagePullPolicy: {{ .Values.opa.image.pullPolicy }}
+          args:
+            - "run"
+            - "--server"
+            - "--addr=0.0.0.0:{{ .Values.opa.port }}"
+            - "--log-level=info"
+            - "/policies/"
+          ports:
+            - name: http
+              containerPort: {{ .Values.opa.port }}
+              protocol: TCP
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.opa.resources | nindent 12 }}
+          volumeMounts:
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+      volumes:
+        - name: policies
+          configMap:
+            name: {{ .Release.Name }}-opa-policies
+{{- end }}

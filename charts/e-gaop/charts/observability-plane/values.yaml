@@ -1,0 +1,13 @@
+enabled: true
+image: egaop/observability-plane
+tag: latest
+replicas: 2
+grpcPort: 50056
+healthPort: 15056
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

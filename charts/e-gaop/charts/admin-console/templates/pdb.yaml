@@ -1,0 +1,17 @@
+{{- if .Values.admin-console.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-admin-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: admin-console
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admin-console
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

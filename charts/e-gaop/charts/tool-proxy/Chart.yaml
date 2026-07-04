@@ -1,0 +1,6 @@
+apiVersion: v2
+name: tool-proxy
+description: E-GAOP tool-proxy
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

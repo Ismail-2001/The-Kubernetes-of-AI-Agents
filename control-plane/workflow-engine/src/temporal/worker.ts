@@ -79,7 +79,7 @@ export async function createTemporalWorker(
     connection,
     namespace,
     taskQueue,
-    workflowsPath: path.join(__dirname, "workflows"),
+    workflowsPath: path.join(__dirname, "..", "workflows"),
     activities: path.join(__dirname, "activities") as string & object,
     maxConcurrentActivityTaskExecutions,
     maxConcurrentWorkflowTaskExecutions,

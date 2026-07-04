@@ -138,11 +138,27 @@ export class QuotaEnforcer {
   }
 
   async reset(namespace: string, resource: string): Promise<void> {
-    const client = (await this.getRedis()) as { del: (key: string) => Promise<number> } | null;
+    const client = (await this.getRedis()) as { del: (key: string) => Promise<number>; decr: (key: string) => Promise<number> } | null;
     if (client) {
       await client.del(`quota:${namespace}:${resource}`);
     } else {
       this.fallbackCounts.delete(this.getFallbackKey(namespace, resource));
+    }
+  }
+
+  async release(namespace: string, resource: string, amount: number = 1): Promise<void> {
+    const client = (await this.getRedis()) as { decr: (key: string) => Promise<number> } | null;
+    const key = `quota:${namespace}:${resource}`;
+    if (client) {
+      for (let i = 0; i < amount; i++) {
+        await client.decr(key);
+      }
+    } else {
+      const fKey = this.getFallbackKey(namespace, resource);
+      const entry = this.fallbackCounts.get(fKey);
+      if (entry) {
+        entry.count = Math.max(0, entry.count - amount);
+      }
     }
   }
 

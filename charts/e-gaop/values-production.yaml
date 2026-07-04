@@ -1,0 +1,129 @@
+# =============================================================================
+# E-GAOP Helm Values — Production
+# =============================================================================
+# Secrets MUST come from External Secrets Operator — never hardcoded here
+# =============================================================================
+
+global:
+  imageRegistry: ghcr.io
+  imagePullSecrets:
+    - name: ghcr-pull-secret
+  storageClass: premium-rwo
+
+ingress:
+  enabled: true
+  className: nginx
+  adminHost: admin.egaop.dev
+  apiHost: api.egaop.dev
+  certManagerIssuer: letsencrypt-prod
+  rateLimit: "100"
+
+externalSecrets:
+  enabled: true
+  vault:
+    address: "https://vault.egaop-ops:8200"
+    path: "secret/data/egaop/production"
+    secretsPath: "secret/data/egaop/production"
+
+defaults:
+  replicas: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9464"
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels: {}
+
+api-server:
+  replicas: 3
+  resources:
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+
+secret-store:
+  replicas: 3
+
+workflow-engine:
+  replicas: 3
+
+llm-router:
+  replicas: 3
+  rateLimitRpm: 100
+  resources:
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+
+tool-proxy:
+  replicas: 3
+  rateLimitRpm: 200
+
+sandbox-runtime:
+  replicas: 2
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+
+memory-plane:
+  replicas: 3
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+
+observability-plane:
+  replicas: 3
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+
+admin-console:
+  replicas: 3
+
+postgresql:
+  enabled: true
+  auth:
+    existingSecret: e-gaop-managed-secrets
+  primary:
+    persistence:
+      size: 200Gi
+
+redis:
+  enabled: true
+  architecture: replication
+  master:
+    persistence:
+      size: 50Gi
+
+temporal:
+  enabled: true
+  server:
+    replicaCount: 3

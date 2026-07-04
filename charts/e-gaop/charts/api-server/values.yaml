@@ -1,0 +1,14 @@
+enabled: true
+image: egaop/api-server
+tag: latest
+replicas: 2
+grpcPort: 50051
+healthPort: 15051
+restPort: 3001
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

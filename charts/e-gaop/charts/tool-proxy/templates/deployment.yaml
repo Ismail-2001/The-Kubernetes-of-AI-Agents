@@ -1,0 +1,73 @@
+{{- if .Values.tool-proxy.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-tool-proxy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tool-proxy
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  replicas: {{ .Values.tool-proxy.replicas | default 2 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tool-proxy
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tool-proxy
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: e-gaop
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.tool-proxy.healthPort }}"
+    spec:
+      containers:
+        - name: tool-proxy
+          image: "{{ .Values.tool-proxy.image }}:{{ .Values.tool-proxy.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ .Values.tool-proxy.grpcPort }}
+              name: grpc
+              protocol: TCP
+            - containerPort: {{ .Values.tool-proxy.healthPort }}
+              name: health
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-e-gaop-shared
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: OTEL_SERVICE_NAME
+              value: egaop-tool-proxy
+            - name: SERVICE_GRPC_PORT
+              value: "{{ .Values.tool-proxy.grpcPort }}"
+            - name: SERVICE_HEALTH_PORT
+              value: "{{ .Values.tool-proxy.healthPort }}"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.tool-proxy.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+      securityContext:
+        fsGroup: 1001
+{{- end }}

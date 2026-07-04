@@ -1,0 +1,195 @@
+# =============================================================================
+# E-GAOP Helm Values — Default (Development)
+# =============================================================================
+# ⚠️  No secrets in this file — use External Secrets Operator for all secrets
+# =============================================================================
+
+global:
+  imageRegistry: ghcr.io
+  imagePullSecrets: []
+  storageClass: ""
+  otelEndpoint: "http://otel-collector-collector:4317"
+
+# ─── External Secrets Operator ──────────────────────────────────────────────
+externalSecrets:
+  enabled: true
+  vault:
+    address: "http://vault:8200"
+    path: "secret/data/egaop"
+    kubernetesMountPath: "kubernetes"
+    kubernetesRole: "egaop"
+    secretsPath: "secret/data/egaop"
+
+# ─── Ingress ────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  adminHost: admin.egaop.dev
+  apiHost: api.egaop.dev
+  certManagerIssuer: letsencrypt-prod
+  rateLimit: "100"
+
+# ─── Community Charts (infrastructure) ──────────────────────────────────────
+postgresql:
+  enabled: true
+  auth:
+    existingSecret: e-gaop-managed-secrets
+    secretKeys:
+      adminPasswordKey: database-url
+  primary:
+    persistence:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  metrics:
+    enabled: true
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    existingSecret: e-gaop-managed-secrets
+    existingPasswordKey: redis-password
+  master:
+    persistence:
+      size: 5Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  metrics:
+    enabled: true
+
+temporal:
+  enabled: true
+  server:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  admintools:
+    enabled: false
+
+# ─── OPA + OTel (custom subcharts) ─────────────────────────────────────────
+opa:
+  enabled: true
+  image: openpolicyagent/opa:latest
+  port: 8181
+
+otelCollector:
+  enabled: true
+  image: otel/opentelemetry-collector-contrib:latest
+
+# ─── Service Defaults ───────────────────────────────────────────────────────
+defaults:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+
+# ─── Service Overrides ──────────────────────────────────────────────────────
+api-server:
+  enabled: true
+  image: egaop/api-server
+  tag: latest
+  replicas: 1
+  grpcPort: 50051
+  healthPort: 15051
+  restPort: 3001
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+secret-store:
+  enabled: true
+  image: egaop/secret-store
+  tag: latest
+  replicas: 1
+  grpcPort: 50057
+  healthPort: 15057
+
+workflow-engine:
+  enabled: true
+  image: egaop/workflow-engine
+  tag: latest
+  replicas: 1
+  healthPort: 15058
+  temporalNamespace: default
+  taskQueue: egaop-agent-queue
+
+llm-router:
+  enabled: true
+  image: egaop/llm-router
+  tag: latest
+  replicas: 1
+  grpcPort: 50053
+  healthPort: 15053
+  rateLimitRpm: 30
+
+tool-proxy:
+  enabled: true
+  image: egaop/tool-proxy
+  tag: latest
+  replicas: 1
+  grpcPort: 50052
+  healthPort: 15052
+  rateLimitRpm: 60
+
+sandbox-runtime:
+  enabled: true
+  image: egaop/sandbox-runtime
+  tag: latest
+  replicas: 1
+  grpcPort: 50054
+  healthPort: 15054
+
+memory-plane:
+  enabled: true
+  image: egaop/memory-plane
+  tag: latest
+  replicas: 1
+  grpcPort: 50055
+  healthPort: 15055
+
+observability-plane:
+  enabled: true
+  image: egaop/observability-plane
+  tag: latest
+  replicas: 1
+  grpcPort: 50056
+  healthPort: 15056
+
+admin-console:
+  enabled: true
+  image: egaop/admin-console
+  tag: latest
+  replicas: 1
+  port: 3000

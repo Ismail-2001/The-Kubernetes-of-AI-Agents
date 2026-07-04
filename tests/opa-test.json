@@ -1,0 +1,1 @@
+{"input":{"subject":{"namespace":"test-ns","tier":"sandbox","clearance":1},"resource":{"namespace":"other-ns"},"action":"read"}}

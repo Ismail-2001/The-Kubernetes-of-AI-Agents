@@ -1,0 +1,73 @@
+{{- if .Values.observability-plane.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-observability-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: observability-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  replicas: {{ .Values.observability-plane.replicas | default 2 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: observability-plane
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: observability-plane
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: e-gaop
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.observability-plane.healthPort }}"
+    spec:
+      containers:
+        - name: observability-plane
+          image: "{{ .Values.observability-plane.image }}:{{ .Values.observability-plane.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ .Values.observability-plane.grpcPort }}
+              name: grpc
+              protocol: TCP
+            - containerPort: {{ .Values.observability-plane.healthPort }}
+              name: health
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-e-gaop-shared
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: OTEL_SERVICE_NAME
+              value: egaop-observability-plane
+            - name: SERVICE_GRPC_PORT
+              value: "{{ .Values.observability-plane.grpcPort }}"
+            - name: SERVICE_HEALTH_PORT
+              value: "{{ .Values.observability-plane.healthPort }}"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.observability-plane.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+      securityContext:
+        fsGroup: 1001
+{{- end }}

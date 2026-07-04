@@ -1,0 +1,17 @@
+{{- if .Values.memory-plane.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-memory-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: memory-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-plane
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

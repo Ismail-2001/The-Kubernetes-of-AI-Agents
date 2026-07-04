@@ -112,7 +112,7 @@ export const agentHandlers = {
     const filters = (req.filters as Record<string, unknown>) ?? {};
     const pagination = (req.pagination as Record<string, unknown>) ?? {};
 
-    const pageSize = Math.min((pagination.page_size as number) ?? 50, 100);
+    const pageSize = Math.min((pagination.page_size as number) || 50, 100);
     const cursor = (pagination.cursor as string) ?? "";
 
     let results = Array.from(agents.values()).filter(

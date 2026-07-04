@@ -1,0 +1,33 @@
+suite: E-GAOP Helm Chart Tests
+templates:
+  - templates/namespace.yaml
+  - templates/configmap-shared.yaml
+  - templates/networkpolicy.yaml
+  - templates/external-secrets.yaml
+  - templates/ingress.yaml
+tests:
+  - it: should create namespace
+    asserts:
+      - isKind:
+          of: Namespace
+      - matchRegex:
+          path: metadata.name
+          pattern: ^egaop$
+
+  - it: should create shared configmap with required keys
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - contains:
+          path: data
+          content:
+            key: OTEL_EXPORTER_OTLP_ENDPOINT
+          any: true
+
+  - it: should create default deny network policy
+    set:
+      release:
+        name: egaop
+    asserts:
+      - hasDocuments:
+          count: 1

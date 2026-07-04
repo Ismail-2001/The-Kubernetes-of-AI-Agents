@@ -17,8 +17,6 @@ services:
   # ─── Infrastructure ───────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -31,12 +29,10 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:15-alpine
-    ports:
-      - "5432:5432"
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egaop_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-egaop}"]
@@ -51,23 +47,30 @@ services:
     restart: unless-stopped
 
   temporal:
-    image: temporalio/dev-server:latest
-    ports:
-      - "7233:7233"
+    image: temporalio/auto-setup:latest
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-egaop}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_SEEDS: postgres
+      TEMPORAL_LOG_LEVEL: "warn"
     healthcheck:
-      test: ["CMD", "temporal", "operator", "health-check", "--address", "localhost:7233"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      test: ["CMD-SHELL", "temporal operator cluster health --address $(hostname -i):7233 2>&1 | grep -q SERVING || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     networks:
       - egaop-net
     restart: unless-stopped
 
   opa:
     image: openpolicyagent/opa:latest
-    ports:
-      - "8181:8181"
     volumes:
       - ./policy-plane/policies:/policies:ro
     command:
@@ -75,11 +78,6 @@ services:
       - "--server"
       - "--addr=0.0.0.0:8181"
       - "/policies"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8181/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
     networks:
       - egaop-net
     restart: unless-stopped
@@ -103,7 +101,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "9091:9090"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -118,10 +116,10 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "3003:3000"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/e-gaop-dashboard.json:/var/lib/grafana/dashboards/e-gaop.json:ro
@@ -135,11 +133,12 @@ services:
   # ─── Control Plane ────────────────────────────────────────────────────────
   api-server:
     build:
-      context: ./control-plane/api-server
+      context: .
+      dockerfile: control-plane/api-server/Dockerfile
     ports:
-      - "${API_SERVER_GRPC_PORT:-50051}:50051"
-      - "${API_SERVER_HEALTH_PORT:-15051}:15051"
-      - "${API_SERVER_REST_PORT:-3001}:3001"
+      - "50051:50051"
+      - "3001:3001"
+      - "15051:15051"
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -148,8 +147,23 @@ services:
       API_SERVER_HEALTH_PORT: "15051"
       API_SERVER_REST_PORT: "3001"
       REDIS_URL: redis://redis:6379
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-egaop}
+      POSTGRES_DB: ${POSTGRES_DB:-egaop}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: egaop-api-server
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:15051/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
@@ -162,17 +176,19 @@ services:
 
   secret-store:
     build:
-      context: ./control-plane/secret-store
-    ports:
-      - "${SECRET_STORE_PORT:-50057}:50057"
-      - "${SECRET_STORE_HEALTH_PORT:-15057}:15057"
+      context: .
+      dockerfile: control-plane/secret-store/Dockerfile
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TLS_ENABLED: ${TLS_ENABLED:-true}
       SECRET_STORE_PORT: "50057"
       SECRET_STORE_HEALTH_PORT: "15057"
-      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY:-dev-key-do-not-use-in-production}
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: egaop-secret-store
     volumes:
@@ -187,22 +203,29 @@ services:
 
   workflow-engine:
     build:
-      context: ./control-plane/workflow-engine
+      context: .
+      dockerfile: control-plane/workflow-engine/Dockerfile
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TLS_ENABLED: ${TLS_ENABLED:-true}
       TEMPORAL_HOST: temporal
       TEMPORAL_PORT: "7233"
-      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-egaop}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-egaop-agent-queue}
       API_SERVER_ADDR: api-server:50051
       SANDBOX_RUNTIME_ADDR: sandbox-runtime:50054
       OBSERVABILITY_PLANE_ADDR: observability-plane:50056
       LLM_ROUTER_ADDR: llm-router:50053
       MEMORY_PLANE_ADDR: memory-plane:50055
+      TOOL_PROXY_ADDR: tool-proxy:50052
       WORKFLOW_ENGINE_HEALTH_PORT: "15058"
       REDIS_URL: redis://redis:6379
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: egaop-workflow-engine
     volumes:
@@ -210,7 +233,7 @@ services:
       - ./certs:/etc/egaop/certs:ro
     depends_on:
       temporal:
-        condition: service_healthy
+        condition: service_started
       otel-collector:
         condition: service_started
     networks:
@@ -220,10 +243,8 @@ services:
   # ─── Execution Plane ──────────────────────────────────────────────────────
   llm-router:
     build:
-      context: ./execution-plane/llm-router
-    ports:
-      - "${LLM_ROUTER_PORT:-50053}:50053"
-      - "${LLM_ROUTER_HEALTH_PORT:-15053}:15053"
+      context: .
+      dockerfile: execution-plane/llm-router/Dockerfile
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -231,7 +252,11 @@ services:
       RATE_LIMIT_RPM: ${RATE_LIMIT_LLM_RPM:-30}
       LLM_ROUTER_PORT: "50053"
       LLM_ROUTER_HEALTH_PORT: "15053"
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       LLM_FALLBACK_CHAIN: ${LLM_FALLBACK_CHAIN:-gpt-4o,gpt-4o-mini,gpt-3.5-turbo}
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
       LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
@@ -249,10 +274,8 @@ services:
 
   tool-proxy:
     build:
-      context: ./execution-plane/tool-proxy
-    ports:
-      - "${TOOL_PROXY_PORT:-50052}:50052"
-      - "${TOOL_PROXY_HEALTH_PORT:-15052}:15052"
+      context: .
+      dockerfile: execution-plane/tool-proxy/Dockerfile
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -260,6 +283,11 @@ services:
       RATE_LIMIT_RPM: ${RATE_LIMIT_TOOL_PROXY_RPM:-60}
       TOOL_PROXY_PORT: "50052"
       TOOL_PROXY_HEALTH_PORT: "15052"
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: egaop-tool-proxy
     volumes:
@@ -274,10 +302,8 @@ services:
 
   sandbox-runtime:
     build:
-      context: ./execution-plane/sandbox-runtime
-    ports:
-      - "${SANDBOX_RUNTIME_PORT:-50054}:50054"
-      - "${SANDBOX_RUNTIME_HEALTH_PORT:-15054}:15054"
+      context: .
+      dockerfile: execution-plane/sandbox-runtime/Dockerfile
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -285,8 +311,19 @@ services:
       SANDBOX_RUNTIME_PORT: "50054"
       SANDBOX_RUNTIME_HEALTH_PORT: "15054"
       DOCKER_HOST: ${DOCKER_HOST:-unix:///var/run/docker.sock}
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: egaop-sandbox-runtime
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:15054/healthz', r => process.exit(r.statusCode === 200 ? 0 : 0)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
@@ -301,10 +338,8 @@ services:
   # ─── Data / Observability Planes ──────────────────────────────────────────
   memory-plane:
     build:
-      context: ./memory-plane
-    ports:
-      - "${MEMORY_PLANE_PORT:-50055}:50055"
-      - "${MEMORY_PLANE_HEALTH_PORT:-15055}:15055"
+      context: .
+      dockerfile: memory-plane/Dockerfile
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -317,8 +352,12 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egaop_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: egaop-memory-plane
     volumes:
@@ -337,10 +376,8 @@ services:
 
   observability-plane:
     build:
-      context: ./observability-plane
-    ports:
-      - "${OBSERVABILITY_PLANE_PORT:-50056}:50056"
-      - "${OBSERVABILITY_PLANE_HEALTH_PORT:-15056}:15056"
+      context: .
+      dockerfile: observability-plane/Dockerfile
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -352,13 +389,52 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egaop_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
       postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  # ─── Admin Console ───────────────────────────────────────────────────────
+  admin-console:
+    build:
+      context: ./admin-console
+    ports:
+      - "${ADMIN_CONSOLE_PORT:-3002}:3000"
+    environment:
+      NODE_ENV: production
+      HOSTNAME: "0.0.0.0"
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_API_URL: http://api-server:50051
+      NEXT_PUBLIC_SSE_URL: http://api-server:3001
+      API_SERVER_HEALTH_URL: http://api-server:15051
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: egaop-admin-console
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      api-server:
         condition: service_healthy
       otel-collector:
         condition: service_started

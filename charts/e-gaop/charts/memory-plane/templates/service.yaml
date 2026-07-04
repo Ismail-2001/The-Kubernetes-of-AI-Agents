@@ -1,0 +1,25 @@
+{{- if .Values.memory-plane.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-memory-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: memory-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.memory-plane.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    - port: {{ .Values.memory-plane.healthPort }}
+      targetPort: health
+      protocol: TCP
+      name: health
+  selector:
+    app.kubernetes.io/name: memory-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

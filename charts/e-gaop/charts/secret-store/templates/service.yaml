@@ -1,0 +1,25 @@
+{{- if .Values.secret-store.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-secret-store
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: secret-store
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.secret-store.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    - port: {{ .Values.secret-store.healthPort }}
+      targetPort: health
+      protocol: TCP
+      name: health
+  selector:
+    app.kubernetes.io/name: secret-store
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

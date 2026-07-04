@@ -1,0 +1,12 @@
+enabled: true
+image: egaop/admin-console
+tag: latest
+replicas: 2
+port: 3000
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

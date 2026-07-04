@@ -1,0 +1,80 @@
+{{- if .Values.otelCollector.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}-otel-collector
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+      app.kubernetes.io/instance: {{ .Release.Name }}-otel-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-collector
+        app.kubernetes.io/instance: {{ .Release.Name }}-otel-collector
+        app.kubernetes.io/part-of: e-gaop
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: otel-collector
+          image: "{{ .Values.otelCollector.image.repository }}:{{ .Values.otelCollector.image.tag }}"
+          imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
+          args:
+            - "--config=/etc/otelcol/config.yaml"
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.otelCollector.ports.grpc }}
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.otelCollector.ports.http }}
+              protocol: TCP
+            - name: prometheus
+              containerPort: {{ .Values.otelCollector.ports.prometheus }}
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.otelCollector.ports.health }}
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.otelCollector.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-otel-collector-config
+{{- end }}

@@ -26,6 +26,8 @@
 
   --shadow-premium: 0 0 40px -10px rgba(99, 102, 241, 0.2);
   --shadow-premium-hover: 0 0 60px -5px rgba(99, 102, 241, 0.3);
+
+  --animate-gradient-x: gradient-x 6s ease infinite;
 }
 
 :root {
@@ -84,10 +86,6 @@
     background-size: 200% 200%;
     background-position: right center;
   }
-}
-
-.animate-gradient-x {
-  animation: gradient-x 6s ease infinite;
 }
 
 /* Custom scrollbar */

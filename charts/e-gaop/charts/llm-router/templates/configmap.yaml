@@ -1,0 +1,13 @@
+{{- if .Values.llm-router.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-llm-router
+  namespace: {{ .Release.Namespace }}
+data:
+  LLM_ROUTER_PORT: "{{ .Values.llm-router.grpcPort }}"
+  LLM_ROUTER_HEALTH_PORT: "{{ .Values.llm-router.healthPort }}"
+  LLM_FALLBACK_CHAIN: "openai,anthropic,local"
+  LLM_TIMEOUT_MS: "30000"
+  LLM_MAX_RETRIES: "3"
+{{- end }}

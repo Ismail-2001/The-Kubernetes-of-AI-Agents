@@ -1,0 +1,10 @@
+{{- if .Values.tool-proxy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-tool-proxy
+  namespace: {{ .Release.Namespace }}
+data:
+  TOOL_PROXY_PORT: "{{ .Values.tool-proxy.grpcPort }}"
+  TOOL_PROXY_HEALTH_PORT: "{{ .Values.tool-proxy.healthPort }}"
+{{- end }}

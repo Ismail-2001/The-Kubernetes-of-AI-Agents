@@ -1,0 +1,13 @@
+enabled: true
+image: egaop/llm-router
+tag: latest
+replicas: 2
+grpcPort: 50053
+healthPort: 15053
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

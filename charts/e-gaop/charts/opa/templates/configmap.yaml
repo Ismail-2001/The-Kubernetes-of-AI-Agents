@@ -1,0 +1,74 @@
+{{- if .Values.opa.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-opa-policies
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/instance: {{ .Release.Name }}-opa
+    app.kubernetes.io/part-of: e-gaop
+data:
+  agent_execution.rego: |
+    package egaop.agent.execution
+
+    import future.keywords.in
+
+    default allow = false
+
+    # Allow agent execution if policy checks pass
+    allow {
+        input.agent.type in allowed_agent_types
+        input.task.type in allowed_task_types
+        input.actor.role in allowed_roles
+    }
+
+    allowed_agent_types := ["llm", "tool", "orchestrator", "evaluator"]
+
+    allowed_task_types := ["inference", "training", "evaluation", "deployment"]
+
+    allowed_roles := ["admin", "operator", "viewer"]
+
+    # Deny execution if agent is blacklisted
+    deny {
+        input.agent.id in blacklisted_agents
+    }
+
+    blacklisted_agents := []
+
+    # Resource limits check
+    allow {
+        input.task.resource_limits.cpu <= max_cpu_limit
+        input.task.resource_limits.memory <= max_memory_limit
+    }
+
+    max_cpu_limit := 8
+    max_memory_limit := "16Gi"
+
+    # Audit logging requirement
+    audit_required {
+        input.task.type == "deployment"
+    }
+
+    audit_required {
+        input.agent.type == "orchestrator"
+    }
+
+  rate_limiting.rego: |
+    package egaop.rate_limiting
+
+    default allowed = false
+
+    allowed {
+        count_recent_requests(input.actor.id) < rate_limit
+    }
+
+    rate_limit := 100
+
+    count_recent_requests(actor_id) = count {
+        timestamps := [t | t := input.request_timestamp; t > now - window_seconds]
+        count(timestamps)
+    }
+
+    window_seconds := 60
+{{- end }}

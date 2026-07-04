@@ -1,0 +1,10 @@
+{{- if .Values.workflow-engine.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-workflow-engine
+  namespace: {{ .Release.Namespace }}
+data:
+  WORKFLOW_ENGINE_HEALTH_PORT: "{{ .Values.workflow-engine.healthPort }}"
+  TEMPORAL_TASK_QUEUE: "e-gaop-workflows"
+{{- end }}

@@ -1,0 +1,10 @@
+{{- if .Values.memory-plane.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-memory-plane
+  namespace: {{ .Release.Namespace }}
+data:
+  MEMORY_PLANE_PORT: "{{ .Values.memory-plane.grpcPort }}"
+  MEMORY_PLANE_HEALTH_PORT: "{{ .Values.memory-plane.healthPort }}"
+{{- end }}

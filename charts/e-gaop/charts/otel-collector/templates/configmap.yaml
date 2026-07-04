@@ -1,0 +1,86 @@
+{{- if .Values.otelCollector.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-otel-collector-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}-otel-collector
+    app.kubernetes.io/part-of: e-gaop
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:{{ .Values.otelCollector.ports.grpc }}
+          http:
+            endpoint: 0.0.0.0:{{ .Values.otelCollector.ports.http }}
+
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'egaop-agents'
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names:
+                      - {{ .Release.Namespace }}
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_part_of]
+                  regex: e-gaop
+                  action: keep
+
+    processors:
+      batch:
+        send_batch_size: 1000
+        timeout: 10s
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
+
+      attributes:
+        actions:
+          - key: service.name
+            value: egaop
+            action: upsert
+          - key: deployment.environment
+            value: production
+            action: upsert
+
+    exporters:
+      logging:
+        loglevel: info
+
+      prometheus:
+        endpoint: "0.0.0.0:{{ .Values.otelCollector.ports.prometheus }}"
+        namespace: egaop_otel
+
+      otlp/temporal:
+        endpoint: temporal:7233
+        tls:
+          insecure: true
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:{{ .Values.otelCollector.ports.health }}
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, attributes]
+          exporters: [logging, otlp/temporal]
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, batch, attributes]
+          exporters: [logging, prometheus]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, attributes]
+          exporters: [logging]
+{{- end }}

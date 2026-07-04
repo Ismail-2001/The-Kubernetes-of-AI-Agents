@@ -1,0 +1,73 @@
+{{- if .Values.sandbox-runtime.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-sandbox-runtime
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: sandbox-runtime
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  replicas: {{ .Values.sandbox-runtime.replicas | default 2 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-runtime
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sandbox-runtime
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: e-gaop
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.sandbox-runtime.healthPort }}"
+    spec:
+      containers:
+        - name: sandbox-runtime
+          image: "{{ .Values.sandbox-runtime.image }}:{{ .Values.sandbox-runtime.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ .Values.sandbox-runtime.grpcPort }}
+              name: grpc
+              protocol: TCP
+            - containerPort: {{ .Values.sandbox-runtime.healthPort }}
+              name: health
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-e-gaop-shared
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: OTEL_SERVICE_NAME
+              value: egaop-sandbox-runtime
+            - name: SERVICE_GRPC_PORT
+              value: "{{ .Values.sandbox-runtime.grpcPort }}"
+            - name: SERVICE_HEALTH_PORT
+              value: "{{ .Values.sandbox-runtime.healthPort }}"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.sandbox-runtime.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+      securityContext:
+        fsGroup: 1001
+{{- end }}

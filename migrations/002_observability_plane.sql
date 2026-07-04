@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS spans (
     trace_id VARCHAR(64) NOT NULL,
-    span_id VARCHAR(32) PRIMARY KEY,
+    span_id VARCHAR(32) NOT NULL,
     parent_span_id VARCHAR(32),
     service_name VARCHAR(255) NOT NULL,
     operation_name VARCHAR(512) NOT NULL,
@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS spans (
     end_time TIMESTAMPTZ,
     status VARCHAR(32) DEFAULT 'ok',
     attributes JSONB DEFAULT '{}',
-    events JSONB DEFAULT '[]'
+    events JSONB DEFAULT '[]',
+    PRIMARY KEY (span_id, start_time)
 ) PARTITION BY RANGE (start_time);
 
 -- Create partitions for current and next 2 months

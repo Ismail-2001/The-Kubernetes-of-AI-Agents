@@ -1,6 +1,6 @@
 import type { ApiResponse, ApiErrorData } from "@/lib/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://api-server:3000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://api-server:3001";
 
 export class ApiError extends Error {
   public readonly code: string;

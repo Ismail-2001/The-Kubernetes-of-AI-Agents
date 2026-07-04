@@ -1,6 +1,7 @@
 import { context, trace, diag, DiagConsoleLogger, DiagLogLevel, type Span, type Tracer } from "@opentelemetry/api";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
 import { CompressionAlgorithm } from "@opentelemetry/otlp-exporter-base";
 import { type Resource, resourceFromAttributes } from "@opentelemetry/resources";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
@@ -11,6 +12,7 @@ import os from "os";
 let initialized = false;
 let sdk: NodeSDK | null = null;
 let tracerInstance: Tracer | null = null;
+let prometheusExporter: PrometheusExporter | null = null;
 
 diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.ERROR);
 
@@ -18,6 +20,7 @@ export interface TelemetryConfig {
   serviceName: string;
   serviceVersion?: string;
   endpoint?: string;
+  metricsPort?: number;
 }
 
 export function initTracing(config: TelemetryConfig | string): void {
@@ -26,13 +29,24 @@ export function initTracing(config: TelemetryConfig | string): void {
 
   const serviceName = typeof config === "string" ? config : config.serviceName;
   const serviceVersion =
-    typeof config === "string" ? (process.env.SERVICE_VERSION ?? "1.0.0") : (config.serviceVersion ?? process.env.SERVICE_VERSION ?? "1.0.0");
+    typeof config === "string"
+      ? process.env.SERVICE_VERSION ?? "1.0.0"
+      : config.serviceVersion ?? process.env.SERVICE_VERSION ?? "1.0.0";
   const endpoint =
-    typeof config === "string" ? (process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318") : (config.endpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318");
+    typeof config === "string"
+      ? process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318"
+      : config.endpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318";
+  const metricsPort =
+    typeof config === "string" ? 9464 : config.metricsPort ?? 9464;
 
-  const exporter = new OTLPTraceExporter({
+  const traceExporter = new OTLPTraceExporter({
     url: `${endpoint}/v1/traces`,
     compression: CompressionAlgorithm.GZIP,
+  });
+
+  prometheusExporter = new PrometheusExporter({
+    port: metricsPort,
+    appendTimestamp: true,
   });
 
   const resource = resourceFromAttributes({
@@ -45,7 +59,8 @@ export function initTracing(config: TelemetryConfig | string): void {
 
   sdk = new NodeSDK({
     resource,
-    traceExporter: exporter,
+    traceExporter,
+    metricReader: prometheusExporter,
     instrumentations: [
       new HttpInstrumentation(),
       new GrpcInstrumentation(),
@@ -56,6 +71,7 @@ export function initTracing(config: TelemetryConfig | string): void {
   sdk.start();
 
   tracerInstance = trace.getTracer(serviceName, serviceVersion);
+  diag.info(`[telemetry] ${serviceName}: traces → OTLP ${endpoint}, metrics → Prometheus :${metricsPort}/metrics`);
 }
 
 export function getTracer(): Tracer {
@@ -63,6 +79,10 @@ export function getTracer(): Tracer {
     tracerInstance = trace.getTracer("e-gaop-default");
   }
   return tracerInstance;
+}
+
+export function getPrometheusExporter(): PrometheusExporter | null {
+  return prometheusExporter;
 }
 
 export async function withSpan<T>(name: string, fn: (span: Span) => Promise<T>): Promise<T> {
@@ -87,6 +107,7 @@ export async function shutdownTracing(): Promise<void> {
     await sdk.shutdown();
     sdk = null;
     tracerInstance = null;
+    prometheusExporter = null;
     initialized = false;
   }
 }

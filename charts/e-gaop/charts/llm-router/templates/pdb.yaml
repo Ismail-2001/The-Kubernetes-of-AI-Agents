@@ -1,0 +1,17 @@
+{{- if .Values.llm-router.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-llm-router
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: llm-router
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llm-router
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

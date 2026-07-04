@@ -1,6 +1,7 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
 
 initTracing("secret-store");
+validateSecrets();
 
 import path from "path";
 import http from "http";
@@ -30,12 +31,18 @@ const logger = pino({
   } : undefined,
 });
 
-const MASTER_KEY = process.env.EGAOP_MASTER_ENCRYPTION_KEY || (() => {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("EGAOP_MASTER_ENCRYPTION_KEY must be set in production");
+const MASTER_KEY = (() => {
+  const key = process.env.EGAOP_MASTER_ENCRYPTION_KEY;
+  if (!key) {
+    logger.fatal("EGAOP_MASTER_ENCRYPTION_KEY is not set — refusing to start");
+    process.exit(1);
   }
-  logger.warn("Using fallback development encryption key");
-  return "dev-key-do-not-use-in-production";
+  if (key === "default" || key === "dev-key-do-not-use-in-production" || key.length < 32) {
+    logger.fatal("EGAOP_MASTER_ENCRYPTION_KEY is a known-bad or weak value — refusing to start");
+    process.exit(1);
+  }
+  logger.info(`✓ EGAOP_MASTER_ENCRYPTION_KEY validated (${key.length} chars)`);
+  return key;
 })();
 
 const PROTO_PATH = path.resolve(__dirname, "../../../api/proto/egaop/v1/secret.proto");

@@ -4,7 +4,7 @@
 **/.pnp.js
 
 # Testing
-/coverage
+**/coverage/
 
 # Next.js
 **/.next/
@@ -14,47 +14,52 @@
 **/dist/
 **/build/
 
-# Misc
-.DS_Store
-*.pem
+# Local env files
+.env
+.env.*
+!.env.example
 
-# Debug
+# Secrets directory (never commit real secrets)
+secrets/
+!secrets/.gitkeep
+
+# Private keys and certificates (NEVER commit private keys)
+*.pem
+*.key
+certs/*.pem
+certs/*.srl
+
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Local env files
-.env
-.env*.local
-
-# Vercel
-.vercel
-
 # TypeScript
 *.tsbuildinfo
 **/next-env.d.ts
 
-# Platform Specific
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Go
-bin/
-pkg/
-vendor/
+# OS
+.DS_Store
+Thumbs.db
 
 # Protobuf Generated
 api/generated/
 
-# TLS certificates (generated — NEVER commit private keys)
-certs/*.pem
-certs/*.srl
+# Go build
+bin/
+pkg/
+vendor/
 
 # Jest
 **/jest.config.js
 
-# OS
-Thumbs.db
+# Vercel
+.vercel

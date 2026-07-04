@@ -1,0 +1,10 @@
+{{- if .Values.sandbox-runtime.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-sandbox-runtime
+  namespace: {{ .Release.Namespace }}
+data:
+  SANDBOX_RUNTIME_PORT: "{{ .Values.sandbox-runtime.grpcPort }}"
+  SANDBOX_RUNTIME_HEALTH_PORT: "{{ .Values.sandbox-runtime.healthPort }}"
+{{- end }}

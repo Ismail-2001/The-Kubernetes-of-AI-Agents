@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sandbox-runtime
+description: E-GAOP sandbox-runtime
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

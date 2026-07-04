@@ -1,0 +1,10 @@
+{{- if .Values.observability-plane.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-observability-plane
+  namespace: {{ .Release.Namespace }}
+data:
+  OBSERVABILITY_PLANE_PORT: "{{ .Values.observability-plane.grpcPort | default 50056 }}"
+  OBSERVABILITY_PLANE_HEALTH_PORT: "{{ .Values.observability-plane.healthPort | default 15056 }}"
+{{- end }}

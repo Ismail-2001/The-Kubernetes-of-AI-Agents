@@ -1,0 +1,25 @@
+{{- if .Values.observability-plane.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-observability-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: observability-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.observability-plane.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    - port: {{ .Values.observability-plane.healthPort }}
+      targetPort: health
+      protocol: TCP
+      name: health
+  selector:
+    app.kubernetes.io/name: observability-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

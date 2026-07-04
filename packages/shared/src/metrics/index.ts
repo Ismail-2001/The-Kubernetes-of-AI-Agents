@@ -3,6 +3,7 @@ import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { diag } from "@opentelemetry/api";
 import type { Meter, Histogram, Counter, UpDownCounter } from "@opentelemetry/api";
+import { getPrometheusExporter } from "../telemetry/index";
 import os from "os";
 
 let meterProvider: MeterProvider | null = null;
@@ -28,7 +29,25 @@ export function initMetrics(config: MetricsConfig | string): PrometheusExporter 
   const port = typeof config === "string" ? 9464 : (config.port ?? 9464);
 
   if (meterProvider) {
-    return meterProvider as unknown as PrometheusExporter;
+    const existing = getPrometheusExporter();
+    if (existing) return existing;
+  }
+
+  const existingExporter = getPrometheusExporter();
+  if (existingExporter) {
+    diag.info(`[metrics] ${serviceName}: reusing PrometheusExporter from initTracing() on port ${port}`);
+    const resource = resourceFromAttributes({
+      "service.name": serviceName,
+      "service.version": process.env.SERVICE_VERSION ?? "1.0.0",
+      "deployment.environment": process.env.DEPLOYMENT_ENVIRONMENT ?? process.env.NODE_ENV ?? "development",
+      "host.name": process.env.HOST_NAME ?? os.hostname(),
+    });
+
+    meterProvider = new MeterProvider({
+      resource,
+      readers: [existingExporter],
+    });
+    return existingExporter;
   }
 
   const exporter = new PrometheusExporter({

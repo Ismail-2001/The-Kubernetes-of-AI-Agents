@@ -1,0 +1,10 @@
+{{- if .Values.secret-store.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-secret-store
+  namespace: {{ .Release.Namespace }}
+data:
+  SECRET_STORE_PORT: "{{ .Values.secret-store.grpcPort }}"
+  SECRET_STORE_HEALTH_PORT: "{{ .Values.secret-store.healthPort }}"
+{{- end }}

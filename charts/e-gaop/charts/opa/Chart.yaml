@@ -1,0 +1,6 @@
+apiVersion: v2
+name: opa
+description: Open Policy Agent for E-GAOP platform
+version: 0.1.0
+appVersion: "0.50"
+type: application

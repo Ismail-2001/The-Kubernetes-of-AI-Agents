@@ -1,0 +1,24 @@
+enabled: true
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+ports:
+  grpc: 4317
+  http: 4318
+  prometheus: 8889
+  health: 13133
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

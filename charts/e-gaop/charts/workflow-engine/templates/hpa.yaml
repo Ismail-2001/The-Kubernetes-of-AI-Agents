@@ -1,0 +1,27 @@
+{{- if .Values.workflow-engine.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-workflow-engine
+  namespace: {{ .Release.Namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-workflow-engine
+  minReplicas: {{ .Values.workflow-engine.replicas | default 2 }}
+  maxReplicas: {{ mul (.Values.workflow-engine.replicas | default 2) 3 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+{{- end }}

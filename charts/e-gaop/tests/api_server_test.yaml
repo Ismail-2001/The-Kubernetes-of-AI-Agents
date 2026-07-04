@@ -1,0 +1,72 @@
+suite: API Server Subchart Tests
+templates:
+  - charts/api-server/templates/deployment.yaml
+  - charts/api-server/templates/service.yaml
+  - charts/api-server/templates/hpa.yaml
+  - charts/api-server/templates/pdb.yaml
+tests:
+  - it: should create deployment when enabled
+    set:
+      api-server:
+        enabled: true
+        image: egaop/api-server
+        tag: latest
+        replicas: 2
+        grpcPort: 50051
+        healthPort: 15051
+        restPort: 3001
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: spec.replicas
+          value: 2
+
+  - it: should not create deployment when disabled
+    set:
+      api-server:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should create service with correct ports
+    set:
+      api-server:
+        enabled: true
+        grpcPort: 50051
+        healthPort: 15051
+        restPort: 3001
+    asserts:
+      - isKind:
+          of: Service
+
+  - it: should create HPA with min 2 replicas
+    set:
+      api-server:
+        enabled: true
+        replicas: 2
+    asserts:
+      - isKind:
+          of: HorizontalPodAutoscaler
+      - equal:
+          path: spec.minReplicas
+          value: 2
+
+  - it: should create PDB with minAvailable 1
+    set:
+      api-server:
+        enabled: true
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: spec.minAvailable
+          value: 1

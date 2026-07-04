@@ -1,0 +1,12 @@
+enabled: true
+image: egaop/workflow-engine
+tag: latest
+replicas: 2
+healthPort: 15058
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

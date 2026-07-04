@@ -99,7 +99,7 @@ export const namespaceHandlers = {
 
   ListNamespaces: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
     const ownerId = call.request.owner_id as string | undefined;
-    const pageSize = Math.min((call.request.page_size as number) ?? 50, 100);
+    const pageSize = Math.min((call.request.page_size as number) || 50, 100);
     const pageToken = (call.request.page_token as string) ?? "";
 
     let results = Array.from(namespaces.values()).filter((ns) => !ns.deletedAt);

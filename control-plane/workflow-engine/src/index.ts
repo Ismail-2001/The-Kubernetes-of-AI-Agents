@@ -1,8 +1,9 @@
-import { initTracing, shutdownTracing } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets } from "@e-gaop/shared";
 
 initTracing("workflow-engine");
+validateSecrets();
 
-import { Worker } from '@temporalio/worker';
+import { Worker, NativeConnection } from '@temporalio/worker';
 import http from 'http';
 import path from 'path';
 import pino from 'pino';
@@ -28,9 +29,21 @@ const healthServer = http.createServer((req, res) => {
 });
 
 async function run() {
+  const temporalAddress = `${process.env.TEMPORAL_HOST || 'temporal'}:${process.env.TEMPORAL_PORT || '7233'}`;
+  logger.info(`Connecting to Temporal at ${temporalAddress}`);
+
+  const connection = await NativeConnection.connect({
+    address: temporalAddress,
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const activitiesModule = require(path.join(__dirname, 'activities'));
+  logger.info({ activities: Object.keys(activitiesModule) }, 'Loaded activities');
+
   const worker = await Worker.create({
+    connection,
     workflowsPath: path.join(__dirname, 'workflows'),
-    activities: path.join(__dirname, 'activities') as any,
+    activities: activitiesModule,
     taskQueue: process.env.TEMPORAL_TASK_QUEUE || 'egaop-agent-queue',
     namespace: process.env.TEMPORAL_NAMESPACE || 'default',
     maxConcurrentActivityTaskExecutions: 16,
@@ -49,6 +62,7 @@ async function run() {
     logger.info('Shutting down Workflow Engine...');
     healthServer.close();
     await worker.shutdown();
+    connection.close();
     await shutdownTracing();
     setTimeout(() => { logger.error('Forced shutdown'); process.exit(1); }, 5000).unref();
   };

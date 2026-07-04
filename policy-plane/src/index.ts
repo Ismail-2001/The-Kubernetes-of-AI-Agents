@@ -1,6 +1,7 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
 
 initTracing("policy-plane");
+validateSecrets();
 
 import path from "path";
 import http from "http";

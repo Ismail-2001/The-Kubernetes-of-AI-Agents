@@ -1,0 +1,71 @@
+{{- if .Values.admin-console.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-admin-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: admin-console
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  replicas: {{ .Values.admin-console.replicas | default 2 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admin-console
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: admin-console
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: e-gaop
+    spec:
+      containers:
+        - name: admin-console
+          image: "{{ .Values.admin-console.image }}:{{ .Values.admin-console.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ .Values.admin-console.port | default 3000 }}
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-e-gaop-shared
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: NEXT_TELEMETRY_DISABLED
+              value: "1"
+            - name: PORT
+              value: "{{ .Values.admin-console.port | default 3000 }}"
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://{{ .Release.Name }}-api-server:50051"
+            - name: NEXT_PUBLIC_SSE_URL
+              value: "http://{{ .Release.Name }}-api-server:3001"
+            - name: OTEL_SERVICE_NAME
+              value: egaop-admin-console
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.admin-console.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+      securityContext:
+        fsGroup: 1001
+{{- end }}

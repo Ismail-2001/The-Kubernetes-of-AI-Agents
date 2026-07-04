@@ -1,0 +1,27 @@
+{{- if .Values.sandbox-runtime.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-sandbox-runtime
+  namespace: {{ .Release.Namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-sandbox-runtime
+  minReplicas: {{ .Values.sandbox-runtime.replicas | default 2 }}
+  maxReplicas: {{ mul (.Values.sandbox-runtime.replicas | default 2) 3 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+{{- end }}

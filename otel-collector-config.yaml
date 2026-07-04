@@ -5,26 +5,6 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
-  prometheus:
-    config:
-      global:
-        scrape_interval: 15s
-        evaluation_interval: 15s
-      scrape_configs:
-        - job_name: "otel-collector"
-          static_configs:
-            - targets: ["localhost:8888"]
-        - job_name: "e-gaop-services"
-          static_configs:
-            - targets:
-                - "api-server:9090"
-                - "memory-plane:9091"
-                - "observability-plane:9092"
-                - "policy-plane:9093"
-                - "sandbox-runtime:9094"
-                - "tool-proxy:9095"
-                - "llm-router:9096"
-                - "workflow-engine:9097"
 
 processors:
   batch:
@@ -53,7 +33,9 @@ exporters:
   prometheus:
     endpoint: "0.0.0.0:8889"
     namespace: "e_gaop"
-  logging:
+    resource_to_telemetry_conversion:
+      enabled: true
+  debug:
     verbosity: normal
 
 extensions:
@@ -64,12 +46,15 @@ extensions:
 
 service:
   extensions: [health_check, zpages]
+  telemetry:
+    metrics:
+      level: detailed
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch, attributes, resource]
-      exporters: [otlp]
+      exporters: [otlp, debug]
     metrics:
-      receivers: [otlp, prometheus]
+      receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [prometheus, logging]
+      exporters: [prometheus, debug]

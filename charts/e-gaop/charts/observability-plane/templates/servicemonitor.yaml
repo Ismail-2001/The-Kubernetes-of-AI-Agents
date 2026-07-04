@@ -1,0 +1,20 @@
+{{- if .Values.observability-plane.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-observability-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: observability-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: observability-plane
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: health
+      path: /metrics
+      interval: 15s
+{{- end }}

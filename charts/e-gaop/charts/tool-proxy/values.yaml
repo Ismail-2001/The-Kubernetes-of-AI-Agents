@@ -1,0 +1,13 @@
+enabled: true
+image: egaop/tool-proxy
+tag: latest
+replicas: 2
+grpcPort: 50052
+healthPort: 15052
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

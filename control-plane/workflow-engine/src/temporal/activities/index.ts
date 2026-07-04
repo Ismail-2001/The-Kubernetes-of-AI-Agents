@@ -16,9 +16,9 @@ const TLS_CERT_DIR = process.env.TLS_CERT_DIR || "/etc/egaop/certs";
 function getClientCredentials(): grpc.ChannelCredentials {
   if (!TLS_ENABLED) return grpc.credentials.createInsecure();
   return grpc.credentials.createSsl(
-    fs.readFileSync(path.join(TLS_CERT_DIR, "ca-cert.pem")),
-    fs.readFileSync(path.join(TLS_CERT_DIR, "client-cert.pem")),
-    fs.readFileSync(path.join(TLS_CERT_DIR, "client-key.pem"))
+    Buffer.from(fs.readFileSync(path.join(TLS_CERT_DIR, "ca-cert.pem"), "utf8")),
+    Buffer.from(fs.readFileSync(path.join(TLS_CERT_DIR, "client-key.pem"), "utf8")),
+    Buffer.from(fs.readFileSync(path.join(TLS_CERT_DIR, "client-cert.pem"), "utf8"))
   );
 }
 
@@ -196,6 +196,7 @@ export async function callLLM(params: CallLLMParams): Promise<LLMResponse> {
     };
   } finally {
     clearInterval(heartbeatTimer);
+    await quotaEnforcer.release(params.namespace, "concurrent_executions", 1);
   }
 }
 
