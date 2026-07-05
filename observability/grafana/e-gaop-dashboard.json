@@ -1,7 +1,5 @@
 {
-  "annotations": {
-    "list": []
-  },
+  "annotations": { "list": [] },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -13,174 +11,379 @@
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "id": 100,
-      "title": "Overview",
+      "title": "Service Health",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 100 }, { "color": "red", "value": 500 }] }, "unit": "reqps" },
+        "defaults": {
+          "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+          "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }],
+          "unit": "short"
+        },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 1 },
       "id": 1,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "title": "Request Rate",
-      "type": "stat",
-      "targets": [
-        { "expr": "sum(rate(http_requests_total{namespace=\"$namespace\"}[$__rate_interval]))", "legendFormat": "req/s" }
-      ]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 20 }] }, "unit": "percent" },
-        "overrides": []
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
       },
-      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
-      "id": 2,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "title": "Error Rate",
+      "title": "Services",
       "type": "stat",
       "targets": [
-        { "expr": "sum(rate(http_requests_total{namespace=\"$namespace\", status=~\"5..\"}[$__rate_interval])) / sum(rate(http_requests_total{namespace=\"$namespace\"}[$__rate_interval])) * 100", "legendFormat": "%" }
-      ]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 100 }, { "color": "red", "value": 500 }] }, "unit": "ms" },
-        "overrides": []
-      },
-      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
-      "id": 3,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "title": "P95 Latency",
-      "type": "stat",
-      "targets": [
-        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_ms_bucket{namespace=\"$namespace\"}[$__rate_interval])) by (le))", "legendFormat": "ms" }
-      ]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 10 }] }, "unit": "short" },
-        "overrides": []
-      },
-      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
-      "id": 4,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "title": "Active Agents",
-      "type": "stat",
-      "targets": [
-        { "expr": "active_agents{namespace=\"$namespace\"}", "legendFormat": "" }
+        { "expr": "up{job=\"egaop-services\"}", "legendFormat": "{{ instance }}" }
       ]
     },
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
       "id": 200,
-      "title": "Request Latency Distribution",
+      "title": "Request Metrics",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } }, "unit": "ms" }, "overrides": [] },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 50 }] },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Request Rate",
+      "type": "stat",
+      "targets": [
+        { "expr": "sum(rate(http_server_duration_count{job=\"egaop-services\"}[$__rate_interval]))", "legendFormat": "req/s" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }] },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Error Rate (5xx)",
+      "type": "stat",
+      "targets": [
+        { "expr": "sum(rate(http_server_duration_count{job=\"egaop-services\", http_status_code=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_duration_count{job=\"egaop-services\"}[$__rate_interval]))", "legendFormat": "" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 100 }, { "color": "red", "value": 500 }] },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "P95 Latency",
+      "type": "stat",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_server_duration_bucket{job=\"egaop-services\"}[$__rate_interval])) by (le))", "legendFormat": "" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1000 }, { "color": "red", "value": 5000 }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 8 },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Total Requests (all time)",
+      "type": "stat",
+      "targets": [
+        { "expr": "sum(http_server_duration_count{job=\"egaop-services\"})", "legendFormat": "" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
       "id": 10,
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
-      "title": "Latency by Service",
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Request Rate by Service",
       "type": "timeseries",
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum(rate(grpc_request_duration_ms_bucket{namespace=\"$namespace\"}[$__rate_interval])) by (le, rpc_service))", "legendFormat": "{{ rpc_service }} P50" },
-        { "expr": "histogram_quantile(0.95, sum(rate(grpc_request_duration_ms_bucket{namespace=\"$namespace\"}[$__rate_interval])) by (le, rpc_service))", "legendFormat": "{{ rpc_service }} P95" },
-        { "expr": "histogram_quantile(0.99, sum(rate(grpc_request_duration_ms_bucket{namespace=\"$namespace\"}[$__rate_interval])) by (le, rpc_service))", "legendFormat": "{{ rpc_service }} P99" }
+        { "expr": "sum(rate(http_server_duration_count{job=\"egaop-services\"}[$__rate_interval])) by (net_host_name)", "legendFormat": "{{ net_host_name }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "id": 11,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "P95 Latency by Service",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(http_server_duration_bucket{job=\"egaop-services\"}[$__rate_interval])) by (le, net_host_name))", "legendFormat": "{{ net_host_name }} P50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(http_server_duration_bucket{job=\"egaop-services\"}[$__rate_interval])) by (le, net_host_name))", "legendFormat": "{{ net_host_name }} P95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_server_duration_bucket{job=\"egaop-services\"}[$__rate_interval])) by (le, net_host_name))", "legendFormat": "{{ net_host_name }} P99" }
       ]
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
       "id": 300,
-      "title": "Agent Execution",
+      "title": "HTTP Client Calls",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "normal" } }, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
       "id": 20,
-      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
-      "title": "Agent Executions by Status",
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Outbound Request Rate (by target)",
       "type": "timeseries",
       "targets": [
-        { "expr": "sum(rate(agent_execution_total{namespace=\"$namespace\", status=\"success\"}[$__rate_interval]))", "legendFormat": "success" },
-        { "expr": "sum(rate(agent_execution_total{namespace=\"$namespace\", status=\"failed\"}[$__rate_interval]))", "legendFormat": "failed" },
-        { "expr": "sum(rate(agent_execution_total{namespace=\"$namespace\", status=\"timeout\"}[$__rate_interval]))", "legendFormat": "timeout" }
+        { "expr": "sum(rate(http_client_duration_count{job=\"egaop-services\"}[$__rate_interval])) by (net_peer_name)", "legendFormat": "{{ net_peer_name }}" }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } }, "unit": "ms" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
       "id": 21,
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
-      "title": "Tool Execution Latency",
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Outbound Latency (P95 by target)",
       "type": "timeseries",
       "targets": [
-        { "expr": "histogram_quantile(0.95, sum(rate(tool_execution_duration_ms_bucket{namespace=\"$namespace\"}[$__rate_interval])) by (le, tool_name))", "legendFormat": "{{ tool_name }} P95" },
-        { "expr": "histogram_quantile(0.99, sum(rate(tool_execution_duration_ms_bucket{namespace=\"$namespace\"}[$__rate_interval])) by (le, tool_name))", "legendFormat": "{{ tool_name }} P99" }
+        { "expr": "histogram_quantile(0.95, sum(rate(http_client_duration_bucket{job=\"egaop-services\"}[$__rate_interval])) by (le, net_peer_name))", "legendFormat": "{{ net_peer_name }} P95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_client_duration_bucket{job=\"egaop-services\"}[$__rate_interval])) by (le, net_peer_name))", "legendFormat": "{{ net_peer_name }} P99" }
       ]
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
       "id": 400,
-      "title": "LLM & Tokens",
+      "title": "OTel Collector Pipeline",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } }, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "normal" } },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
       "id": 30,
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
-      "title": "LLM Tokens Used",
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Metrics Received vs Exported",
       "type": "timeseries",
       "targets": [
-        { "expr": "sum(rate(llm_tokens_used{namespace=\"$namespace\"}[$__rate_interval]))", "legendFormat": "tokens/s" }
+        { "expr": "rate(e_gaop_otelcol_receiver_accepted_metric_points_total[$__rate_interval])", "legendFormat": "received {{ receiver }}" },
+        { "expr": "rate(e_gaop_otelcol_exporter_sent_metric_points_total[$__rate_interval])", "legendFormat": "exported {{ exporter }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "normal" } },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "id": 31,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Metrics Dropped / Failed",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(e_gaop_otelcol_receiver_refused_metric_points_total[$__rate_interval])", "legendFormat": "refused {{ receiver }}" },
+        { "expr": "rate(e_gaop_otelcol_receiver_failed_metric_points_total[$__rate_interval])", "legendFormat": "failed {{ receiver }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "id": 32,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Batch Processor Queue Size",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "e_gaop_otelcol_exporter_queue_size", "legendFormat": "queue size {{ exporter }}" },
+        { "expr": "e_gaop_otelcol_exporter_queue_capacity", "legendFormat": "queue capacity {{ exporter }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "id": 33,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "OTel Collector Memory",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "e_gaop_otelcol_process_memory_rss", "legendFormat": "RSS" },
+        { "expr": "e_gaop_otelcol_process_runtime_heap_alloc_bytes", "legendFormat": "Heap Alloc" }
       ]
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
       "id": 500,
-      "title": "Policy Plane",
+      "title": "Infrastructure",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } }, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 49 },
       "id": 40,
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
-      "title": "OPA Evaluations",
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Prometheus Memory Usage",
       "type": "timeseries",
       "targets": [
-        { "expr": "sum(rate(opa_evaluate_total{namespace=\"$namespace\"}[$__rate_interval]))", "legendFormat": "evaluations/s" },
-        { "expr": "sum(rate(opa_evaluate_total{namespace=\"$namespace\", decision=\"allow\"}[$__rate_interval]))", "legendFormat": "allow/s" },
-        { "expr": "sum(rate(opa_evaluate_total{namespace=\"$namespace\", decision=\"deny\"}[$__rate_interval]))", "legendFormat": "deny/s" }
+        { "expr": "process_resident_memory_bytes{job=\"prometheus\"}", "legendFormat": "Prometheus RSS" }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } }, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "stacking": { "mode": "none" } },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 49 },
       "id": 41,
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
-      "title": "OPA Cache Hit Rate",
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Prometheus Scrape Samples",
       "type": "timeseries",
       "targets": [
-        { "expr": "sum(rate(opa_cache_hit_total{namespace=\"$namespace\"}[$__rate_interval])) / sum(rate(opa_evaluate_total{namespace=\"$namespace\"}[$__rate_interval])) * 100", "legendFormat": "cache hit %" }
+        { "expr": "e_gaop_scrape_samples_scraped", "legendFormat": "{{ job }}" },
+        { "expr": "e_gaop_scrape_series_added", "legendFormat": "series added {{ job }}" }
       ]
     }
   ],
@@ -190,19 +393,20 @@
   "templating": {
     "list": [
       {
-        "current": { "selected": false, "text": "default", "value": "default" },
-        "definition": "label_values(http_requests_total, namespace)",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(up{job=\"egaop-services\"}, instance)",
         "hide": 0,
-        "includeAll": false,
-        "multi": false,
-        "name": "namespace",
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
         "options": [],
-        "query": { "query": "label_values(http_requests_total, namespace)", "refId": "StandardVariableQuery" },
+        "query": { "query": "label_values(up{job=\"egaop-services\"}, instance)", "refId": "StandardVariableQuery" },
         "refresh": 2,
         "regex": "",
         "sort": 1,
         "type": "query",
-        "label": "Namespace"
+        "label": "Service"
       }
     ]
   },
@@ -211,5 +415,5 @@
   "timezone": "browser",
   "title": "E-GAOP Platform",
   "uid": "e-gaop-main",
-  "version": 1
+  "version": 2
 }

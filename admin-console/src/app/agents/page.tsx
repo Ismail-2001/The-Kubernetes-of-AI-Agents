@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   Plus,
   Search,
@@ -14,6 +15,7 @@ import {
   XCircle,
   Clock,
   AlertTriangle,
+  ArrowRight,
 } from "lucide-react";
 import {
   useAgents,
@@ -311,15 +313,15 @@ function AgentList() {
                     className="border-b border-white/5 hover:bg-white/[0.02] transition-colors"
                   >
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-brand-primary/10 flex items-center justify-center">
+                      <Link href={`/agents/${agent.id}`} className="flex items-center gap-3 group">
+                        <div className="w-8 h-8 rounded-lg bg-brand-primary/10 flex items-center justify-center group-hover:bg-brand-primary/20 transition-colors">
                           <Cpu className="w-4 h-4 text-brand-primary" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-text-primary">{agent.name}</p>
+                          <p className="text-sm font-semibold text-text-primary group-hover:text-brand-primary transition-colors">{agent.name}</p>
                           <p className="text-xs text-text-muted">v{agent.version}</p>
                         </div>
-                      </div>
+                      </Link>
                     </td>
                     <td className="px-6 py-4 text-sm text-text-secondary">{agent.namespace}</td>
                     <td className="px-6 py-4">
@@ -331,12 +333,21 @@ function AgentList() {
                         : "—"}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button
-                        onClick={() => setDeleteAgent(agent)}
-                        className="p-2 rounded-lg hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/agents/${agent.id}`}
+                          className="p-2 rounded-lg hover:bg-white/5 text-text-muted hover:text-brand-primary transition-colors"
+                          title="View details"
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                        </Link>
+                        <button
+                          onClick={() => setDeleteAgent(agent)}
+                          className="p-2 rounded-lg hover:bg-error/10 text-text-muted hover:text-error transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

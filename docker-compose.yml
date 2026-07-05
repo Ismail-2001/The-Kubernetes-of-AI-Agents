@@ -156,7 +156,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-api-server
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:15051/healthz || exit 1"]
@@ -189,7 +189,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-secret-store
     volumes:
       - ./api/proto:/api/proto:ro
@@ -226,7 +226,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-workflow-engine
     volumes:
       - ./api/proto:/api/proto:ro
@@ -260,7 +260,7 @@ services:
       LLM_FALLBACK_CHAIN: ${LLM_FALLBACK_CHAIN:-gpt-4o,gpt-4o-mini,gpt-3.5-turbo}
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
       LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-llm-router
     volumes:
       - ./api/proto:/api/proto:ro
@@ -288,7 +288,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-tool-proxy
     volumes:
       - ./api/proto:/api/proto:ro
@@ -316,7 +316,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-sandbox-runtime
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:15054/healthz', r => process.exit(r.statusCode === 200 ? 0 : 0)).on('error', () => process.exit(1))"]
@@ -358,7 +358,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-memory-plane
     volumes:
       - ./api/proto:/api/proto:ro
@@ -384,7 +384,7 @@ services:
       TLS_ENABLED: ${TLS_ENABLED:-true}
       OBSERVABILITY_PLANE_PORT: "50056"
       OBSERVABILITY_PLANE_HEALTH_PORT: "15056"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-observability-plane
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
@@ -419,13 +419,14 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       NEXT_PUBLIC_API_URL: http://api-server:50051
       NEXT_PUBLIC_SSE_URL: http://api-server:3001
+      API_SERVER_REST_URL: http://api-server:3001
       API_SERVER_HEALTH_URL: http://api-server:15051
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-admin-console
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]

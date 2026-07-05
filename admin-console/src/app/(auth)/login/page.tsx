@@ -2,16 +2,18 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError("");
     setLoading(true);
     try {
       const res = await fetch("/api/auth/login", {
@@ -19,9 +21,14 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
+      const data = await res.json();
       if (res.ok) {
         window.location.href = "/dashboard";
+      } else {
+        setError(data?.error?.message ?? "Login failed. Please try again.");
       }
+    } catch {
+      setError("Network error. Please check your connection.");
     } finally {
       setLoading(false);
     }
@@ -33,6 +40,13 @@ export default function LoginPage() {
         <h2 className="text-xl font-bold text-text-primary">Welcome back</h2>
         <p className="text-sm text-text-secondary mt-1">Sign in to your account</p>
       </div>
+
+      {error && (
+        <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-sm text-red-400">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          {error}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>

@@ -4,7 +4,12 @@ export {
   decrypt,
   generateNonce,
   hashForCache,
+  hashPassword,
+  comparePassword,
+  signJWT,
+  verifyJWT,
   type EncryptedPayload,
+  type JWTClaims,
 } from "./crypto/index.js";
 export {
   AgentError,

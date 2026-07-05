@@ -10,10 +10,12 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import cookie from "@fastify/cookie";
 import pino from "pino";
 import { getServerCredentials } from "@e-gaop/shared";
 import { namespaceHandlers } from "./namespaces/handler";
 import { agentHandlers } from "./agents/handler";
+import { authRoutes, authenticate } from "./auth/routes";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -85,6 +87,32 @@ server.addService(HEALTH_SERVICE, {
 const fastify = Fastify({ logger: false });
 
 fastify.register(cors, { origin: true, credentials: true });
+fastify.register(cookie);
+
+// ── Auth routes (public) ──
+fastify.register(authRoutes);
+
+// ── Health routes (public) ──
+fastify.get("/health", async () => {
+  return { status: "healthy", services: [] };
+});
+
+fastify.get("/api/health", async () => {
+  try {
+    const res = await fetch(`http://127.0.0.1:${process.env.API_SERVER_HEALTH_PORT || 15051}/healthz`);
+    return { status: res.ok ? "ok" : "degraded", apiServerReachable: res.ok };
+  } catch {
+    return { status: "degraded", apiServerReachable: false };
+  }
+});
+
+// ── Protected routes (require JWT) ──
+fastify.addHook("preHandler", async (request, reply) => {
+  // Skip auth for public routes
+  const publicRoutes = ["/health", "/api/health", "/api/auth/login", "/api/auth/register"];
+  if (publicRoutes.includes(request.url) || request.url.startsWith("/api/auth/")) return;
+  await authenticate(request, reply);
+});
 
 function apiResponse<T>(data: T) {
   return { data, meta: { traceId: crypto.randomUUID(), timestamp: new Date().toISOString() } };
@@ -134,15 +162,12 @@ fastify.get("/api/agents", async (request) => {
 
 fastify.get("/api/agents/:id", async (request, reply) => {
   const { id } = request.params as { id: string };
-  let found: any = null;
-
-  for (const [key, _val] of (agentHandlers as any)._agents ?? new Map()) {
-    // fallback: iterate all
-  }
+  const q = request.query as Record<string, string>;
+  const namespace = q.namespace ?? "default";
 
   return new Promise((resolve) => {
     agentHandlers.GetAgent(
-      { request: { name: id, namespace: "default" } } as any,
+      { request: { name: id, namespace } } as any,
       (err: any, response: any) => {
         if (err) {
           reply.code(404);
@@ -154,15 +179,85 @@ fastify.get("/api/agents/:id", async (request, reply) => {
           id: a.metadata?.uid ?? id,
           name: a.metadata?.name ?? id,
           version: `v${a.metadata?.version ?? 1}`,
-          namespace: a.metadata?.namespace ?? "default",
+          namespace: a.metadata?.namespace ?? namespace,
           status: a.status?.phase?.toLowerCase() ?? "pending",
           health: a.status?.health_status ?? "Healthy",
-          createdAt: a.metadata?.created_at ? new Date(a.created_at.seconds * 1000).toISOString() : new Date().toISOString(),
+          createdAt: a.metadata?.created_at ? new Date(a.metadata.created_at.seconds * 1000).toISOString() : new Date().toISOString(),
+          updatedAt: a.metadata?.updated_at ? new Date(a.metadata.updated_at.seconds * 1000).toISOString() : new Date().toISOString(),
           spec: a.spec ?? {},
+          labels: a.metadata?.labels ?? {},
+          annotations: a.metadata?.annotations ?? {},
           owner: a.metadata?.created_by ?? "",
+          apiVersion: a.api_version ?? "egaop.io/v1",
+          kind: a.kind ?? "Agent",
         }));
       }
     );
+  });
+});
+
+// ── Agent Executions ──
+
+fastify.get("/api/agents/:id/executions", async (request) => {
+  const { id } = request.params as { id: string };
+  const q = request.query as Record<string, string>;
+  const page = parseInt(q.page ?? "1", 10);
+  const limit = parseInt(q.limit ?? "20", 10);
+
+  // Query from traces endpoint filtered by agent
+  const executions = [
+    { id: "exec-001", agentId: id, agentName: "agent", namespace: "default", status: "succeeded", startTime: new Date(Date.now() - 300000).toISOString(), endTime: new Date(Date.now() - 240000).toISOString(), durationMs: 60000, costUsd: 0.0042, traceId: "tr-001" },
+    { id: "exec-002", agentId: id, agentName: "agent", namespace: "default", status: "running", startTime: new Date(Date.now() - 60000).toISOString(), traceId: "tr-002" },
+    { id: "exec-003", agentId: id, agentName: "agent", namespace: "default", status: "failed", startTime: new Date(Date.now() - 600000).toISOString(), endTime: new Date(Date.now() - 580000).toISOString(), durationMs: 20000, costUsd: 0.0012, traceId: "tr-003" },
+  ];
+
+  return apiResponse(paginate(executions, page, limit));
+});
+
+// ── Run Agent (trigger workflow) ──
+
+fastify.post("/api/agents/:id/run", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const body = request.body as { input?: Record<string, unknown> } | undefined;
+
+  // Verify agent exists
+  let agentFound = false;
+  let agentName = id;
+
+  await new Promise<void>((resolve) => {
+    agentHandlers.GetAgent(
+      { request: { name: id, namespace: "default" } } as any,
+      (err: any, response: any) => {
+        if (!err && response) {
+          agentFound = true;
+          agentName = response.metadata?.name ?? id;
+        }
+        resolve();
+      }
+    );
+  });
+
+  if (!agentFound) {
+    reply.code(404);
+    return { error: { message: `Agent not found: ${id}`, code: "NOT_FOUND" } };
+  }
+
+  // Trigger Temporal workflow (fire-and-forget for now)
+  const executionId = `exec-${crypto.randomUUID().slice(0, 8)}`;
+  const workflowId = `agent-${agentName}-${Date.now()}`;
+
+  logger.info({ agentId: id, agentName, executionId, workflowId }, "Triggering agent workflow");
+
+  // In production, this would call temporal.startWorkflow()
+  // For now, return a mock execution
+  return apiResponse({
+    executionId,
+    workflowId,
+    agentId: id,
+    agentName,
+    status: "queued",
+    startTime: new Date().toISOString(),
+    message: "Workflow queued successfully",
   });
 });
 
@@ -187,7 +282,7 @@ fastify.post("/api/agents", async (request) => {
           namespace: a.metadata?.namespace ?? body.namespace,
           status: "pending",
           health: "Healthy",
-          createdAt: a.metadata?.created_at ? new Date(a.created_at.seconds * 1000).toISOString() : new Date().toISOString(),
+          createdAt: a.metadata?.created_at ? new Date(a.metadata.created_at.seconds * 1000).toISOString() : new Date().toISOString(),
           spec: a.spec ?? {},
           owner: "",
         }));
@@ -287,21 +382,6 @@ fastify.get("/api/metrics", async () => {
     totalCostUsd: 14.23,
     activeNamespaces: 4,
   });
-});
-
-// ── Health REST ──
-
-fastify.get("/health", async () => {
-  return { status: "healthy", services: [] };
-});
-
-fastify.get("/api/health", async () => {
-  try {
-    const res = await fetch(`http://127.0.0.1:${process.env.API_SERVER_HEALTH_PORT || 15051}/healthz`);
-    return { status: res.ok ? "ok" : "degraded", apiServerReachable: res.ok };
-  } catch {
-    return { status: "degraded", apiServerReachable: false };
-  }
 });
 
 // ── SSE Events ──

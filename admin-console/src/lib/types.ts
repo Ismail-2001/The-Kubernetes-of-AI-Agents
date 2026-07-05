@@ -25,9 +25,14 @@ export interface Agent {
   status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
   health: "Healthy" | "Degraded" | "Unhealthy";
   createdAt: string;
+  updatedAt?: string;
   lastExecution?: string;
   spec: Record<string, unknown>;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
   owner: string;
+  apiVersion?: string;
+  kind?: string;
 }
 
 export interface AgentListFilters {
@@ -94,12 +99,22 @@ export interface Execution {
   agentId: string;
   agentName: string;
   namespace: string;
-  status: "running" | "succeeded" | "failed" | "cancelled";
+  status: "running" | "succeeded" | "failed" | "cancelled" | "queued";
   startTime: string;
   endTime?: string;
   durationMs?: number;
   costUsd?: number;
   traceId: string;
+}
+
+export interface RunAgentResponse {
+  executionId: string;
+  workflowId: string;
+  agentId: string;
+  agentName: string;
+  status: string;
+  startTime: string;
+  message: string;
 }
 
 export interface HealthStatus {

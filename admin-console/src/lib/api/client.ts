@@ -2,6 +2,12 @@ import type { ApiResponse, ApiErrorData } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://api-server:3001";
 
+function getAuthToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/egaop_token=([^;]+)/);
+  return match ? match[1] : null;
+}
+
 export class ApiError extends Error {
   public readonly code: string;
   public readonly traceId: string;
@@ -80,6 +86,12 @@ async function executeRequest<T>(
 ): Promise<ApiResponse<T>> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
+
+  // Inject JWT token from cookie
+  const token = getAuthToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
 
   const res = await fetch(url, { ...init, headers, credentials: "include" });
 

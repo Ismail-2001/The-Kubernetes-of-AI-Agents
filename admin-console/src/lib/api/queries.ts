@@ -14,6 +14,7 @@ import type {
   TraceListFilters,
   DashboardMetrics,
   Execution,
+  RunAgentResponse,
   PaginatedData,
   ApiResponse,
 } from "@/lib/types";
@@ -181,6 +182,36 @@ export function useCancelExecution() {
     mutationFn: (executionId: string) =>
       apiRequest<void>(`/api/executions/${executionId}/cancel`, { method: "POST" }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["traces"] });
+    },
+  });
+}
+
+// ── Agent Detail Queries ──
+
+export function useAgentExecutions(agentId: string | null, page: number = 1, limit: number = 10) {
+  return useQuery<ApiResponse<PaginatedData<Execution>>>({
+    queryKey: qk("agentExecutions", agentId, page, limit),
+    queryFn: () =>
+      apiRequest<PaginatedData<Execution>>(`/api/agents/${agentId}/executions?page=${page}&limit=${limit}`),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+    enabled: !!agentId,
+  });
+}
+
+export function useRunAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, input }: { agentId: string; input?: Record<string, unknown> }) =>
+      apiRequest<RunAgentResponse>(`/api/agents/${agentId}/run`, {
+        method: "POST",
+        body: JSON.stringify({ input }),
+      }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["agentExecutions", variables.agentId] });
+      qc.invalidateQueries({ queryKey: ["agent", variables.agentId] });
       qc.invalidateQueries({ queryKey: ["traces"] });
     },
   });

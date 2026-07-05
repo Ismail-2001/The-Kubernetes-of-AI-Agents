@@ -2,16 +2,19 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, AlertCircle, CheckCircle } from "lucide-react";
 
 export default function RegisterPage() {
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (form.password !== form.confirmPassword) return;
+    setError("");
     setLoading(true);
     try {
       const res = await fetch("/api/auth/register", {
@@ -19,9 +22,14 @@ export default function RegisterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),
       });
+      const data = await res.json();
       if (res.ok) {
-        window.location.href = "/login";
+        setSuccess(true);
+      } else {
+        setError(data?.error?.message ?? "Registration failed. Please try again.");
       }
+    } catch {
+      setError("Network error. Please check your connection.");
     } finally {
       setLoading(false);
     }
@@ -31,12 +39,38 @@ export default function RegisterPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  if (success) {
+    return (
+      <div className="glass-card p-8 space-y-6 text-center">
+        <CheckCircle className="w-12 h-12 text-green-400 mx-auto" />
+        <div>
+          <h2 className="text-xl font-bold text-text-primary">Account created</h2>
+          <p className="text-sm text-text-secondary mt-1">You can now sign in with your credentials</p>
+        </div>
+        <Link
+          href="/login"
+          className="inline-flex items-center gap-2 btn-primary text-sm"
+        >
+          Sign In
+          <ArrowRight className="w-4 h-4" />
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-card p-8 space-y-6">
       <div>
         <h2 className="text-xl font-bold text-text-primary">Create account</h2>
         <p className="text-sm text-text-secondary mt-1">Set up your platform admin account</p>
       </div>
+
+      {error && (
+        <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-sm text-red-400">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          {error}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
