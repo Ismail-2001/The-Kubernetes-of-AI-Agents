@@ -1,7 +1,9 @@
 import { initTracing, shutdownTracing, validateSecrets } from "@e-gaop/shared";
 
 initTracing("workflow-engine");
-validateSecrets();
+if (process.env.NODE_ENV !== "test") {
+  validateSecrets();
+}
 
 import { Worker, NativeConnection } from '@temporalio/worker';
 import http from 'http';

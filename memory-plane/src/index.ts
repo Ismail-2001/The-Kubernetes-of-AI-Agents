@@ -1,7 +1,9 @@
 import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
 
 initTracing("memory-plane");
-validateSecrets();
+if (process.env.NODE_ENV !== "test") {
+  validateSecrets();
+}
 
 import path from "path";
 import http from "http";

@@ -1,7 +1,9 @@
 import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
 
 initTracing("api-server");
-validateSecrets();
+if (process.env.NODE_ENV !== "test") {
+  validateSecrets();
+}
 
 import crypto from "crypto";
 import path from "path";
