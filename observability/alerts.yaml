@@ -3,9 +3,9 @@ groups:
     rules:
       - alert: HighErrorRate
         expr: |
-          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          sum(rate(http_server_duration_count{http_status_code=~"5.."}[5m]))
           /
-          sum(rate(http_requests_total[5m])) > 0.05
+          sum(rate(http_server_duration_count[5m])) > 0.05
         for: 5m
         labels:
           severity: critical
@@ -15,19 +15,19 @@ groups:
 
       - alert: HighGrpcLatency
         expr: |
-          histogram_quantile(0.95, sum(rate(grpc_request_duration_ms_bucket[5m])) by (le, rpc_service)) > 5000
+          histogram_quantile(0.95, sum(rate(http_client_duration_bucket[5m])) by (le, service_name)) > 5000
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "gRPC P95 latency >5s"
-          description: "P95 latency for {{ $labels.rpc_service }} is {{ $value }}ms."
+          description: "P95 latency for {{ $labels.service_name }} is {{ $value }}ms."
 
       - alert: AgentExecutionFailureSpike
         expr: |
-          sum(rate(agent_execution_total{status="failed"}[5m]))
+          sum(rate(e_gaop_otelcol_exporter_send_failed_spans[5m]))
           /
-          sum(rate(agent_execution_total[5m])) > 0.10
+          sum(rate(e_gaop_otelcol_exporter_sent_spans[5m])) > 0.10
         for: 3m
         labels:
           severity: critical
@@ -47,10 +47,10 @@ groups:
 
       - alert: ToolExecutionP99High
         expr: |
-          histogram_quantile(0.99, sum(rate(tool_execution_duration_ms_bucket[5m])) by (le, tool_name)) > 30000
+          histogram_quantile(0.99, sum(rate(http_client_duration_bucket[5m])) by (le, service_name)) > 30000
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Tool execution P99 latency >30s"
-          description: "P99 latency for tool {{ $labels.tool_name }} is {{ $value }}ms."
+          description: "P99 latency for {{ $labels.service_name }} is {{ $value }}ms."
