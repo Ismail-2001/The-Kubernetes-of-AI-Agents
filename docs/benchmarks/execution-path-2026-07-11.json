@@ -1,0 +1,39 @@
+{
+  "benchmark": "E-GAOP Real Execution Path — SUPERSEDED",
+  "superseded_by": "execution-path-single-trace-2026-07-11.json",
+  "reason": "This benchmark measured independent component pings, not a real execution path. Replaced with single-trace Temporal workflow execution.",
+  "measured": "2026-07-11",
+  "environment": "Windows 11, Docker Desktop, AMD64",
+  "method": "In-Docker network (docker exec node from api-server container)",
+  "results": {
+    "opa_policy_evaluation_sequential": {
+      "step": "OPA policy evaluation (sequential)",
+      "iterations": 20,
+      "avgMs": 70.4,
+      "p50Ms": 63.0,
+      "p95Ms": 140.5,
+      "p99Ms": 140.5,
+      "minMs": 45.9,
+      "maxMs": 140.5,
+      "errorCount": 0,
+      "notes": "Real Rego evaluation via HTTP POST to OPA sidecar. All 20 calls denied (expected — agent not in allowlist)."
+    },
+    "sandbox_health_check_sequential": {
+      "step": "Sandbox health check (sequential)",
+      "iterations": 10,
+      "avgMs": 79.6,
+      "p50Ms": 74.1,
+      "p95Ms": 170.2,
+      "p99Ms": 170.2,
+      "minMs": 50.4,
+      "maxMs": 170.2,
+      "errorCount": 0,
+      "notes": "HTTP health probe to sandbox-runtime. Returns 503 NOT_SERVING (Docker socket not mounted). Measures HTTP transport only."
+    }
+  },
+  "not_measured": [
+    "LLM call latency (requires OPENAI_API_KEY)",
+    "Temporal workflow orchestration (requires native bridge)",
+    "Sandbox creation (Docker socket not mounted in container)"
+  ]
+}

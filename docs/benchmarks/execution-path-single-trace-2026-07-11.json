@@ -1,0 +1,58 @@
+{
+  "benchmark": "E-GAOP Real Execution Path — Single-Trace",
+  "measured": "2026-07-11",
+  "environment": "Windows 11, Docker Desktop, AMD64",
+  "method": "Real Temporal workflow execution via `temporal workflow execute`, trace extracted from Temporal event history",
+  "workflow_type": "reactWorkflow",
+  "task_queue": "egaop-agent-queue",
+  "namespace": "egaop",
+  "note": "Worker running stale build from 2026-07-04. admitAgent/evaluatePolicy activities not yet deployed. LLM call fails (no OPENAI_API_KEY). Sandbox broken (EACCES on Docker socket).",
+  "iterations": [
+    {
+      "workflowId": "bench-e2e-003",
+      "runId": "019f5074-8fb2-790c-8c01-375fe4d78b41",
+      "totalMs": 10408,
+      "status": "ERROR",
+      "result": "LLM call failed: Activity task failed",
+      "stages": {
+        "workflow_init_plus_recordObservability": 320,
+        "recordObservability_react_workflow_started": 839,
+        "workflow_task_admission_and_policy": 232,
+        "recordObservability_react_llm_1": 35,
+        "callLLM_3_retries_no_api_key": 8764,
+        "recordObservability_error": 29,
+        "workflow_completion": 64
+      },
+      "infra_owned_ms": 1485,
+      "llm_failure_ms": 8764
+    },
+    {
+      "workflowId": "bench-e2e-004",
+      "runId": "019f5078-1e60-77c4-a75f-390629c82c17",
+      "totalMs": 270,
+      "status": "MAX_ITERATIONS_REACHED",
+      "result": "Execution stopped after 1 iterations",
+      "note": "LLM failed immediately (no retries)"
+    },
+    {
+      "workflowId": "bench-e2e-005",
+      "runId": "019f5078-9748-738a-ac9d-2d662f77ae72",
+      "totalMs": 280,
+      "status": "MAX_ITERATIONS_REACHED",
+      "result": "Execution stopped after 1 iterations",
+      "note": "LLM failed immediately (no retries)"
+    }
+  ],
+  "summary": {
+    "p50_total_ms": 280,
+    "p95_total_ms": 10408,
+    "infra_owned_p50_ms": 1485,
+    "note": "LLM call dominates when it retries (8.8s). Without retries, total is ~270-280ms. Infrastructure-owned portion (workflow init + observability) is ~1.5s."
+  },
+  "known_blockers": [
+    "Worker Docker image built 2026-07-04 — stale, missing admitAgent/evaluatePolicy activities",
+    "Sandbox-runtime EACCES on Docker socket — cannot create sandboxes",
+    "LLM call fails — no OPENAI_API_KEY configured",
+    "admitAgent and evaluatePolicy activities not in deployed worker"
+  ]
+}
