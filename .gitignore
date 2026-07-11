@@ -63,3 +63,6 @@ vendor/
 
 # Vercel
 .vercel
+
+# Temporary files
+tmp/
