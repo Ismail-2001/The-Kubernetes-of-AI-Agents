@@ -18,7 +18,7 @@ cat > .env << 'EOF'
 EGAOP_MASTER_ENCRYPTION_KEY=$(openssl rand -hex 32)
 JWT_SECRET=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -base64 24)
-OPENAI_API_KEY=sk-your-key-here
+OPENAI_API_KEY=  # your OpenAI API key
 GRAFANA_PASSWORD=$(openssl rand -base64 16)
 EOF
 
