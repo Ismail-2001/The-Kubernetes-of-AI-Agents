@@ -1,0 +1,16 @@
+# Gitleaks configuration — excludes test data and documentation examples
+# See: https://github.com/gitleaks/gitleaks/blob/master/config/config.go
+
+[allowlist]
+  description = "Global allowlist"
+  paths = [
+    '''__tests__''',
+    '''\.test\.ts$''',
+    '''\.test\.js$''',
+    '''package-lock\.json$''',
+    '''node_modules''',
+    '''\.env\.example$''',
+    '''docs/SECRETS\.md$''',  # documents the git history incident intentionally
+    '''validate-secrets\.ts$''',  # rejection list contains known-bad values
+    '''secret-store/src/index\.ts$''',  # rejection check contains known-bad values
+  ]
