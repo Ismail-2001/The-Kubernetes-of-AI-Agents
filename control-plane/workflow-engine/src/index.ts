@@ -38,16 +38,17 @@ async function run() {
     address: temporalAddress,
   });
 
+  // Load real temporal activities (with gRPC calls to policy-plane, sandbox-runtime, etc.)
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const activitiesModule = require(path.join(__dirname, 'activities'));
-  logger.info({ activities: Object.keys(activitiesModule) }, 'Loaded activities');
+  const activitiesModule = require(path.join(__dirname, 'temporal', 'activities'));
+  logger.info({ activities: Object.keys(activitiesModule) }, 'Loaded temporal activities');
 
   const worker = await Worker.create({
     connection,
-    workflowsPath: path.join(__dirname, 'workflows'),
+    workflowsPath: path.join(__dirname, 'temporal', 'workflows'),
     activities: activitiesModule,
     taskQueue: process.env.TEMPORAL_TASK_QUEUE || 'egaop-agent-queue',
-    namespace: process.env.TEMPORAL_NAMESPACE || 'default',
+    namespace: process.env.TEMPORAL_NAMESPACE || 'egaop',
     maxConcurrentActivityTaskExecutions: 16,
     maxConcurrentWorkflowTaskExecutions: 8,
   });
