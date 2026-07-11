@@ -69,3 +69,4 @@ export {
 export { validateSecrets } from "./config/validate-secrets.js";
 export { RateLimiter } from "./rate-limiter.js";
 export { getServerCredentials, getClientCredentials } from "./tls.js";
+export { getPool, closePool } from "./db.js";
