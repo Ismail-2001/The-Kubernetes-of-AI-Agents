@@ -14,7 +14,7 @@ $Services = @{
     "observability-plane" = "observability-plane"
     "memory-plane"      = "memory-plane"
     "tool-proxy"        = "execution-plane/tool-proxy"
-    "secret-store"      = "execution-plane/secret-store"
+    "secret-store"      = "control-plane/secret-store"
     "llm-router"        = "execution-plane/llm-router"
 }
 
