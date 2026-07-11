@@ -11,6 +11,7 @@ import {
 } from "@grpc/grpc-js";
 import type { ServerInterceptor, ServerInterceptingCallInterface, ServerMethodDefinition } from "@grpc/grpc-js";
 import { ServerInterceptingCall } from "@grpc/grpc-js";
+import { verifyJWT } from "../crypto";
 
 interface InterceptingServerListener {
   onReceiveMetadata(metadata: Metadata): void;
@@ -59,15 +60,28 @@ export function clearNamespaceCache(): void {
 }
 
 function parseClaims(raw: string): Claims | null {
+  if (!raw) return null;
+
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    // No secret configured — deny all claims (fail closed)
+    return null;
+  }
+
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Verify JWT signature — reject tokens with invalid/expired signatures
+    const verified = verifyJWT(raw, jwtSecret);
+    if (!verified) return null;
+
+    // Parse the payload (verified is the decoded claims)
+    const payload = verified as unknown as Record<string, unknown>;
     return {
-      sub: typeof parsed.sub === "string" ? parsed.sub : "",
-      role: typeof parsed.role === "string" ? parsed.role : "user",
-      allowedNamespaces: Array.isArray(parsed.allowed_namespaces)
-        ? (parsed.allowed_namespaces as string[])
+      sub: typeof payload.sub === "string" ? payload.sub : "",
+      role: typeof payload.role === "string" ? payload.role : "user",
+      allowedNamespaces: Array.isArray(payload.namespace_access)
+        ? (payload.namespace_access as string[])
         : [],
-      namespace: typeof parsed.namespace === "string" ? parsed.namespace : undefined,
+      namespace: typeof payload.namespace === "string" ? payload.namespace : undefined,
     };
   } catch {
     return null;
