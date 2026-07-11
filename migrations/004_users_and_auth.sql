@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
     role user_role NOT NULL DEFAULT 'developer',
     namespace_access JSONB NOT NULL DEFAULT '[]',
     is_active BOOLEAN NOT NULL DEFAULT true,
+    must_change_password BOOLEAN NOT NULL DEFAULT false,
     last_login_at TIMESTAMPTZ,
     failed_login_attempts INT NOT NULL DEFAULT 0,
     locked_until TIMESTAMPTZ,
@@ -59,13 +60,6 @@ CREATE TABLE IF NOT EXISTS password_resets (
 CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets (token_hash);
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets (user_id);
 
--- Seed default admin user (password: changeme123456! - MUST be changed on first login)
--- Password hash generated with scrypt: params: cost=16384, blockSize=8, parallelization=1, salt=32 bytes, hash=64 bytes
-INSERT INTO users (email, password_hash, name, role, namespace_access)
-VALUES (
-    'admin@egaop.io',
-    'scrypt:16384:8:1:$a$16$placeholder',
-    'Platform Admin',
-    'platform_admin',
-    '["*"]'::jsonb
-) ON CONFLICT (lower(email)) DO NOTHING;
+-- NOTE: Default admin user is created by ensureAdminUser() on first boot.
+-- Do NOT seed a hardcoded admin here — the function generates a random
+-- password, logs it once, and requires rotation on first login.
