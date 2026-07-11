@@ -328,6 +328,12 @@ services:
       - egaop-net
     restart: unless-stopped
 
+  base-runtime:
+    image: egaop-base-runtime:latest
+    build:
+      context: execution-plane/sandbox-runtime/base-runtime
+    restart: "no"
+
   sandbox-runtime:
     build:
       context: .
