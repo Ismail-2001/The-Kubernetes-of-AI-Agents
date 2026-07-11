@@ -50,10 +50,25 @@ jobs:
         continue-on-error: true
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # Stage 1b: Secret Scanning (parallel with lint)
+  # ═══════════════════════════════════════════════════════════════════════════
+  secret-scanning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for gitleaks
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Stage 2: Unit Tests (parallel matrix, no containers)
   # ═══════════════════════════════════════════════════════════════════════════
   unit-tests:
-    needs: lint-and-typecheck
+    needs: [lint-and-typecheck, secret-scanning]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -265,3 +280,56 @@ jobs:
           echo "Storing successful deploy tag: ${{ github.sha }}"
           # In production, this would update a GitHub secret or SSM parameter
           # gh secret set LAST_SUCCESSFUL_DEPLOY_TAG --body "${{ github.sha }}"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Informational: Performance benchmark (non-blocking)
+  # ═══════════════════════════════════════════════════════════════════════════
+  perf-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start Docker Compose stack
+        run: docker compose up -d --wait
+
+      - name: Wait for services
+        run: sleep 30
+
+      - name: Run performance benchmark
+        run: npx jest tests/perf/performance.test.ts --verbose 2>&1 | tee perf-output.txt
+        continue-on-error: true  # Informational only — never blocks merge
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-benchmark-${{ github.sha }}
+          path: |
+            perf-output.txt
+            docs/benchmarks/*.json
+          retention-days: 30
+
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.existsSync('perf-output.txt') ? fs.readFileSync('perf-output.txt', 'utf8') : 'No output';
+            const lines = output.split('\n').filter(l => l.includes('RPS') || l.includes('Latency') || l.includes('Total requests'));
+            const summary = lines.slice(0, 15).join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## Performance Benchmark — HTTP Transport Baseline (informational)\n\`\`\`\n${summary}\n\`\`\`\n*Measures \`/health\` endpoint (unauthenticated, no DB/OPA/Temporal). Agent execution latency not yet measured. Raw results in artifacts. This is non-blocking.*`
+            });
