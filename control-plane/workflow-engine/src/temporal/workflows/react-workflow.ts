@@ -18,15 +18,22 @@ import type {
 
 // ─── Activity Proxies ──────────────────────────────────────────────────────
 
-const { callLLM, executeTool, persistMemory, recordObservability } =
-  proxyActivities<typeof activities>({
-    startToCloseTimeout: "5 minutes",
-    retry: {
-      maximumAttempts: 3,
-      initialInterval: "1s",
-      backoffCoefficient: 2,
-    },
-  });
+const {
+  callLLM,
+  executeTool,
+  persistMemory,
+  recordObservability,
+  evaluatePolicy,
+  admitAgent,
+  createSandbox,
+} = proxyActivities<typeof activities>({
+  startToCloseTimeout: "5 minutes",
+  retry: {
+    maximumAttempts: 3,
+    initialInterval: "1s",
+    backoffCoefficient: 2,
+  },
+});
 
 // ─── Signal & Query Handlers ───────────────────────────────────────────────
 
@@ -82,6 +89,131 @@ export async function reactWorkflow(
     executionId: input.executionId,
     step: "react_workflow_started",
     status: "running",
+  });
+
+  // ── Step 1: Admission check ───────────────────────────────────────────
+  lastAction = "admission_check";
+  await recordObservability({
+    executionId: input.executionId,
+    step: "admission_check",
+    status: "running",
+  });
+
+  let isAdmitted = false;
+  try {
+    isAdmitted = await admitAgent({
+      agentId: input.agentId,
+      namespace: input.namespace,
+      spec: {},
+    });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await recordObservability({
+      executionId: input.executionId,
+      step: "admission_check",
+      status: "failed",
+      attributes: { error: errMsg },
+    });
+    return {
+      status: "ERROR",
+      output: `Agent admission failed: ${errMsg}`,
+      totalCost: "$0.000000",
+      iterations: 0,
+      toolCalls: [],
+      error: errMsg,
+    };
+  }
+
+  if (!isAdmitted) {
+    await recordObservability({
+      executionId: input.executionId,
+      step: "admission_check",
+      status: "denied",
+    });
+    return {
+      status: "ERROR",
+      output: "Agent failed admission policy",
+      totalCost: "$0.000000",
+      iterations: 0,
+      toolCalls: [],
+      error: "Agent failed admission policy",
+    };
+  }
+
+  // ── Step 2: Policy evaluation ─────────────────────────────────────────
+  lastAction = "policy_evaluation";
+  await recordObservability({
+    executionId: input.executionId,
+    step: "policy_evaluation",
+    status: "running",
+  });
+
+  const policyDecision = await evaluatePolicy({
+    agentId: input.agentId,
+    executionId: input.executionId,
+    namespace: input.namespace,
+    action: "execute",
+    resourceNamespace: input.resourceNamespace,
+    callerRole: input.callerRole,
+  });
+
+  if (!policyDecision.allow) {
+    await recordObservability({
+      executionId: input.executionId,
+      step: "policy_evaluation",
+      status: "denied",
+      attributes: { reason: policyDecision.reason },
+    });
+    return {
+      status: "ERROR",
+      output: `Policy denied: ${policyDecision.reason}`,
+      totalCost: "$0.000000",
+      iterations: 0,
+      toolCalls: [],
+      error: `Policy denied: ${policyDecision.reason}`,
+    };
+  }
+
+  // ── Step 3: Create sandbox ────────────────────────────────────────────
+  lastAction = "create_sandbox";
+  await recordObservability({
+    executionId: input.executionId,
+    step: "create_sandbox",
+    status: "running",
+  });
+
+  let sandboxId = "";
+  try {
+    const sandbox = await createSandbox({
+      agentId: input.agentId,
+      executionId: input.executionId,
+      namespace: input.namespace,
+      isolationLevel: "Enhanced",
+    });
+    sandboxId = sandbox.id;
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await recordObservability({
+      executionId: input.executionId,
+      step: "create_sandbox",
+      status: "failed",
+      attributes: { error: errMsg },
+    });
+    return {
+      status: "ERROR",
+      output: `Sandbox creation failed: ${errMsg}`,
+      totalCost: "$0.000000",
+      iterations: 0,
+      toolCalls: [],
+      error: errMsg,
+    };
+  }
+
+  await recordObservability({
+    executionId: input.executionId,
+    step: "create_sandbox",
+    status: "completed",
+    attributes: { sandboxId },
   });
 
   // Main ReAct loop
