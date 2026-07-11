@@ -35,10 +35,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-egaop}"]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD-SHELL", "psql -U ${POSTGRES_USER:-egaop} -d ${POSTGRES_DB:-egaop} -c 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 30s
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
@@ -186,6 +187,10 @@ services:
       SECRET_STORE_HEALTH_PORT: "15057"
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-egaop}
+      POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
@@ -195,6 +200,8 @@ services:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
+      postgres:
+        condition: service_healthy
       otel-collector:
         condition: service_started
     networks:
@@ -219,6 +226,7 @@ services:
       LLM_ROUTER_ADDR: llm-router:50053
       MEMORY_PLANE_ADDR: memory-plane:50055
       TOOL_PROXY_ADDR: tool-proxy:50052
+      POLICY_PLANE_ADDR: http://opa:8181
       WORKFLOW_ENGINE_HEALTH_PORT: "15058"
       REDIS_URL: redis://redis:6379
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
@@ -300,6 +308,26 @@ services:
       - egaop-net
     restart: unless-stopped
 
+  # Docker socket proxy — exposes a filtered Docker API to sandbox-runtime
+  # without requiring root or direct socket access.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      POST: "1"
+      CONTAINERS: "1"
+      EXEC: "1"
+      IMAGES: "1"
+      ALLOW_START: "1"
+      ALLOW_STOP: "1"
+      NETWORKS: "0"
+      VOLUMES: "0"
+      LOG_LEVEL: info
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
   sandbox-runtime:
     build:
       context: .
@@ -310,7 +338,7 @@ services:
       TLS_ENABLED: ${TLS_ENABLED:-true}
       SANDBOX_RUNTIME_PORT: "50054"
       SANDBOX_RUNTIME_HEALTH_PORT: "15054"
-      DOCKER_HOST: ${DOCKER_HOST:-unix:///var/run/docker.sock}
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -319,7 +347,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-sandbox-runtime
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:15054/healthz', r => process.exit(r.statusCode === 200 ? 0 : 0)).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:15054/healthz', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -327,8 +355,9 @@ services:
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
+      docker-socket-proxy:
+        condition: service_started
       otel-collector:
         condition: service_started
     networks:
