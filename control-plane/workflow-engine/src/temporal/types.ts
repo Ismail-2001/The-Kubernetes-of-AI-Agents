@@ -4,6 +4,10 @@ export interface AgentExecutionInput {
   agentId: string;
   executionId: string;
   namespace: string;
+  /** Namespace of the resource being acted upon. Differs from namespace for cross-namespace deny tests. */
+  resourceNamespace?: string;
+  /** Role of the caller (platform_admin, namespace_admin, developer, viewer). Maps to OPA clearance. */
+  callerRole?: string;
   systemPrompt?: string;
   initialMessages?: Message[];
   tools?: ToolDefinition[];
