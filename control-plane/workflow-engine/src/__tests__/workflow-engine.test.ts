@@ -1,139 +1,204 @@
-const mocks: { current: { services: Record<string, Record<string, (cb: Function) => void>> } } = {
-  current: { services: {} }
-};
+import http from "http";
+import fs from "fs";
+import path from "path";
 
-function applyMock() {
-  const srv = mocks.current.services;
-  jest.doMock("@grpc/grpc-js", () => {
-    const actual = jest.requireActual("@grpc/grpc-js");
-    function makeCtor(methods: Record<string, (cb: Function) => void>) {
-      const ctor: any = function () {};
-      for (const [name, handler] of Object.entries(methods)) {
-        ctor.prototype[name] = jest.fn((...args: any[]) => {
-          const cb = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-          if (cb) handler(cb);
-        });
-      }
-      return ctor;
-    }
-    return {
-      ...actual,
-      loadPackageDefinition: () => ({
-        egaop: {
-          v1: {
-            AgentService: makeCtor(srv.AgentService || {}),
-            RuntimeService: makeCtor(srv.RuntimeService || {}),
-            ObservabilityService: makeCtor(srv.ObservabilityService || {}),
-            LLMService: makeCtor(srv.LLMService || {}),
-          }
-        }
-      }),
-      credentials: { createInsecure: () => ({}) },
-    };
+// ─── Mock HTTP server for policy-plane ─────────────────────────────────────
+
+function createMockPolicyServer(
+  handler: (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    body: string
+  ) => void
+): Promise<{ server: http.Server; port: number }> {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        handler(req, res, Buffer.concat(chunks).toString());
+      });
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port =
+        typeof addr === "object" && addr !== null ? addr.port : 0;
+      resolve({ server, port });
+    });
   });
-  jest.doMock("@grpc/proto-loader", () => ({ loadSync: () => ({}) }));
 }
 
-describe("Workflow Engine - Activities", () => {
-  beforeEach(() => {
-    jest.resetModules();
+// ─── Tests ─────────────────────────────────────────────────────────────────
+
+// Import the evaluatePolicy function directly (it only uses http, no gRPC)
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { evaluatePolicy } = require("../temporal/activities") as typeof import("../temporal/activities");
+
+describe("Workflow Engine — evaluatePolicy (real OPA path)", () => {
+  const savedEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...savedEnv };
   });
 
-  describe("evaluatePolicy", () => {
-    it("should return allow for any input", async () => {
-      jest.resetModules();
-      const { evaluatePolicy } = jest.requireActual("../activities/agent");
-      const result = await evaluatePolicy({ agentId: "agent-1", action: "start" });
-      expect(result.status).toBe("allow");
+  it("should return allow when OPA permits", async () => {
+    const { server, port } = await createMockPolicyServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ result: { allow: true, reason: "" } }));
+    });
+
+    process.env.POLICY_PLANE_ADDR = `http://127.0.0.1:${port}`;
+    try {
+      const result = await evaluatePolicy({
+        agentId: "agent-1",
+        executionId: "exec-1",
+        namespace: "sandbox-a",
+        action: "execute",
+      });
+      expect(result.allow).toBe(true);
       expect(result.reason).toBe("");
+    } finally {
+      server.close();
+    }
+  }, 10000);
+
+  it("should return deny when OPA denies", async () => {
+    const { server, port } = await createMockPolicyServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          result: { allow: false, reason: "Cross-namespace access denied" },
+        })
+      );
     });
+
+    process.env.POLICY_PLANE_ADDR = `http://127.0.0.1:${port}`;
+    try {
+      const result = await evaluatePolicy({
+        agentId: "agent-1",
+        executionId: "exec-1",
+        namespace: "sandbox-b",
+        action: "execute",
+      });
+      expect(result.allow).toBe(false);
+      expect(result.reason).toContain("Cross-namespace");
+    } finally {
+      server.close();
+    }
   });
 
-  describe("admitAgent", () => {
-    it("should return true when admission phase is Pending", async () => {
-      mocks.current.services = {
-        AgentService: { CreateAgent: (cb: Function) => cb(null, { status: { phase: "Pending", health_status: "Healthy" } }) }
-      };
-      applyMock();
-      const { admitAgent } = jest.requireActual("../activities/agent");
-      const result = await admitAgent({ agentId: "agent-1", spec: {} });
-      expect(result).toBe(true);
+  it("should fail-closed (deny) when policy-plane is unreachable", async () => {
+    process.env.POLICY_PLANE_ADDR = "http://127.0.0.1:1";
+    const result = await evaluatePolicy({
+      agentId: "agent-1",
+      executionId: "exec-1",
+      namespace: "sandbox-a",
+      action: "execute",
     });
-
-    it("should throw when admission fails", async () => {
-      mocks.current.services = {
-        AgentService: { CreateAgent: (cb: Function) => cb({ code: 13, details: "Admission policy denied" }) }
-      };
-      applyMock();
-      const { admitAgent } = jest.requireActual("../activities/agent");
-      await expect(admitAgent({ agentId: "agent-1", spec: {} })).rejects.toThrow("Admission failed");
-    });
+    expect(result.allow).toBe(false);
+    expect(result.reason).toContain("failed");
   });
 
-  describe("createSandbox", () => {
-    it("should return sandbox id on success", async () => {
-      mocks.current.services = {
-        RuntimeService: { CreateSandbox: (cb: Function) => cb(null, { sandbox_id: "sbx-abc123", status: "running" }) }
-      };
-      applyMock();
-      const { createSandbox } = jest.requireActual("../activities/agent");
-      const result = await createSandbox({ agentId: "agent-1", executionId: "exec-1", isolation: "Enhanced" });
-      expect(result.id).toBe("sbx-abc123");
-      expect(result.status).toBe("running");
+  it("should deny when OPA returns non-200 status", async () => {
+    const { server, port } = await createMockPolicyServer((_req, res) => {
+      res.writeHead(503);
+      res.end("Service Unavailable");
     });
 
-    it("should throw on sandbox failure", async () => {
-      mocks.current.services = {
-        RuntimeService: { CreateSandbox: (cb: Function) => cb({ code: 13, details: "Out of memory" }) }
-      };
-      applyMock();
-      const { createSandbox } = jest.requireActual("../activities/agent");
-      await expect(createSandbox({ agentId: "agent-1", executionId: "exec-1", isolation: "Enhanced" })).rejects.toThrow("Sandbox creation failed");
-    });
+    process.env.POLICY_PLANE_ADDR = `http://127.0.0.1:${port}`;
+    try {
+      const result = await evaluatePolicy({
+        agentId: "agent-1",
+        executionId: "exec-1",
+        namespace: "sandbox-a",
+        action: "execute",
+      });
+      expect(result.allow).toBe(false);
+      expect(result.reason).toContain("503");
+    } finally {
+      server.close();
+    }
   });
 
-  describe("recordTrace", () => {
-    it("should return success when trace is recorded", async () => {
-      mocks.current.services = {
-        ObservabilityService: { ExportTrace: (cb: Function) => cb(null, { success: true }) }
-      };
-      applyMock();
-      const { recordTrace } = jest.requireActual("../activities/agent");
-      const result = await recordTrace({ executionId: "exec-1", step: "test", status: "running" });
-      expect(result.success).toBe(true);
+  it("should deny when OPA returns invalid JSON", async () => {
+    const { server, port } = await createMockPolicyServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("not json");
     });
 
-    it("should gracefully handle trace failure", async () => {
-      mocks.current.services = {
-        ObservabilityService: { ExportTrace: (cb: Function) => cb({ code: 14, details: "Unavailable" }) }
-      };
-      applyMock();
-      const { recordTrace } = jest.requireActual("../activities/agent");
-      const result = await recordTrace({ executionId: "exec-1", step: "test", status: "running" });
-      expect(result.success).toBe(false);
-    });
+    process.env.POLICY_PLANE_ADDR = `http://127.0.0.1:${port}`;
+    try {
+      const result = await evaluatePolicy({
+        agentId: "agent-1",
+        executionId: "exec-1",
+        namespace: "sandbox-a",
+        action: "execute",
+      });
+      // Non-JSON 200 response: postJSON resolves with { error: "not json" }
+      // evaluatePolicy sees no result.allow field, defaults to deny
+      expect(result.allow).toBe(false);
+      expect(result.reason).toBeTruthy();
+    } finally {
+      server.close();
+    }
   });
 
-  describe("llmGenerate", () => {
-    it("should return content and model info on success", async () => {
-      mocks.current.services = {
-        LLMService: { Generate: (cb: Function) => cb(null, { content: "Hello!", model_used: "gpt-4o", usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }, cost: "$0.0001" }) }
-      };
-      applyMock();
-      const { llmGenerate } = jest.requireActual("../activities/agent");
-      const result = await llmGenerate({ agentId: "agent-1", executionId: "exec-1", messages: [{ role: "user", content: "Hi" }] });
-      expect(result.content).toBe("Hello!");
-      expect(result.model_used).toBe("gpt-4o");
-      expect(result.cost).toBe("$0.0001");
+  it("should deny when connection times out", async () => {
+    process.env.POLICY_PLANE_ADDR = "http://192.0.2.1:1";
+    const result = await evaluatePolicy({
+      agentId: "agent-1",
+      executionId: "exec-1",
+      namespace: "sandbox-a",
+      action: "execute",
     });
+    expect(result.allow).toBe(false);
+    expect(result.reason).toContain("failed");
+  }, 15000);
+});
 
-    it("should throw on LLM failure", async () => {
-      mocks.current.services = {
-        LLMService: { Generate: (cb: Function) => cb({ code: 4, details: "Rate limited" }) }
-      };
-      applyMock();
-      const { llmGenerate } = jest.requireActual("../activities/agent");
-      await expect(llmGenerate({ agentId: "agent-1", executionId: "exec-1", messages: [{ role: "user", content: "Hi" }] })).rejects.toThrow("LLM generation failed");
-    });
+describe("Workflow Engine — No fake evaluatePolicy stub", () => {
+  it("should not contain a hardcoded allow pattern in temporal activities", () => {
+    const activitiesPath = path.resolve(
+      __dirname,
+      "..",
+      "temporal",
+      "activities",
+      "index.ts"
+    );
+    const content = fs.readFileSync(activitiesPath, "utf8");
+
+    expect(content).not.toContain("return { status: 'allow' as const");
+    expect(content).not.toContain('return { status: "allow"');
+    expect(content).toContain("/v1/data/");
+    expect(content).toContain("policy-plane");
+  });
+
+  it("should not have legacy activities/agent.ts file", () => {
+    const legacyPath = path.resolve(__dirname, "..", "activities", "agent.ts");
+    expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("should not have legacy workflows/agent.ts file", () => {
+    const legacyPath = path.resolve(__dirname, "..", "workflows", "agent.ts");
+    expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("should not have legacy client.ts file", () => {
+    const legacyPath = path.resolve(__dirname, "..", "client.ts");
+    expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("Worker.create should point to temporal/ path, not root workflows/", () => {
+    const indexPath = path.resolve(__dirname, "..", "index.ts");
+    const content = fs.readFileSync(indexPath, "utf8");
+
+    expect(content).toContain(
+      "path.join(__dirname, 'temporal', 'workflows')"
+    );
+    expect(content).toContain(
+      "path.join(__dirname, 'temporal', 'activities')"
+    );
+    expect(content).not.toContain("path.join(__dirname, 'workflows')");
+    expect(content).not.toContain("path.join(__dirname, 'activities')");
   });
 });
