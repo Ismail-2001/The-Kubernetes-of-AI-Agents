@@ -58,7 +58,7 @@ async function getClient(): Promise<Client> {
   if (clientInstance) return clientInstance;
 
   const connection = await getConnection();
-  const namespace = process.env.TEMPORAL_NAMESPACE || "e-gaop";
+  const namespace = process.env.TEMPORAL_NAMESPACE || "egaop";
 
   clientInstance = new Client({ connection, namespace });
   return clientInstance;
