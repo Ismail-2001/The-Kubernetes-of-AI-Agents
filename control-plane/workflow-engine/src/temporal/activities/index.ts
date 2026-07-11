@@ -2,25 +2,14 @@ import { Context } from "@temporalio/activity";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import fs from "fs";
+import http from "http";
 import path from "path";
-import { QuotaEnforcer } from "@e-gaop/shared";
+import { QuotaEnforcer, getClientCredentials } from "@e-gaop/shared";
 import type { LLMResponse, ToolResult } from "../types";
 
 const quotaEnforcer = new QuotaEnforcer();
 
 // ─── gRPC Client Setup ─────────────────────────────────────────────────────
-
-const TLS_ENABLED = process.env.TLS_ENABLED === "true";
-const TLS_CERT_DIR = process.env.TLS_CERT_DIR || "/etc/egaop/certs";
-
-function getClientCredentials(): grpc.ChannelCredentials {
-  if (!TLS_ENABLED) return grpc.credentials.createInsecure();
-  return grpc.credentials.createSsl(
-    Buffer.from(fs.readFileSync(path.join(TLS_CERT_DIR, "ca-cert.pem"), "utf8")),
-    Buffer.from(fs.readFileSync(path.join(TLS_CERT_DIR, "client-key.pem"), "utf8")),
-    Buffer.from(fs.readFileSync(path.join(TLS_CERT_DIR, "client-cert.pem"), "utf8"))
-  );
-}
 
 const PROTO_ROOT = path.resolve(__dirname, "../../../../../api/proto");
 
@@ -285,6 +274,229 @@ export async function persistMemory(
     const grpcErr = err as { details?: string; message?: string };
     throw new Error(
       `Memory persist failed: ${grpcErr.details ?? grpcErr.message}`
+    );
+  }
+}
+
+// ─── Activity: evaluatePolicy ──────────────────────────────────────────────
+
+interface EvaluatePolicyParams {
+  agentId: string;
+  executionId: string;
+  namespace: string;
+  action: string;
+  resourceNamespace?: string;
+  callerRole?: string;
+}
+
+interface PolicyDecision {
+  allow: boolean;
+  reason: string;
+}
+
+function postJSON(
+  url: string,
+  body: unknown,
+  timeoutMs: number
+): Promise<{ status: number; data: unknown }> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const httpModule = require("http");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const httpsModule = require("https");
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const payload = JSON.stringify(body);
+    const client = urlObj.protocol === "https:" ? httpsModule : httpModule;
+    const req = client.request(
+      {
+        hostname: urlObj.hostname,
+        port: urlObj.port,
+        path: urlObj.pathname + urlObj.search,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+        },
+        timeout: timeoutMs,
+      },
+      (res: http.IncomingMessage) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString();
+          const status = res.statusCode ?? 0;
+          try {
+            const data = JSON.parse(raw);
+            resolve({ status, data });
+          } catch {
+            // Non-JSON response (e.g. 503 Service Unavailable)
+            resolve({ status, data: { error: raw } });
+          }
+        });
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Policy evaluation timeout"));
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
+export async function evaluatePolicy(
+  params: EvaluatePolicyParams
+): Promise<PolicyDecision> {
+  const policyPlaneAddr =
+    process.env.POLICY_PLANE_ADDR || "http://policy-plane:50059";
+  const policyPath = "egaop/execution";
+  const timeoutMs = parseInt(process.env.OPA_TIMEOUT_MS || "5000", 10);
+
+  const roleToClearance: Record<string, number> = {
+    platform_admin: 3,
+    namespace_admin: 3,
+    developer: 2,
+    viewer: 1,
+  };
+
+  const subjectNamespace = params.namespace;
+  const resourceNamespace = params.resourceNamespace || params.namespace;
+  const clearance = roleToClearance[params.callerRole || ""] ?? 2;
+
+  const input = {
+    subject: {
+      namespace: subjectNamespace,
+      clearance,
+    },
+    action: params.action,
+    resource: {
+      namespace: resourceNamespace,
+    },
+  };
+
+  try {
+    const response = await postJSON(
+      `${policyPlaneAddr}/v1/data/${policyPath}`,
+      { input },
+      timeoutMs
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Policy-plane returned HTTP ${response.status}`);
+    }
+
+    const result = response.data as Record<string, unknown>;
+    const resultObj = result["result"] as Record<string, unknown> | undefined;
+    const allow = resultObj?.["allow"] === true;
+    const reason = allow
+      ? ""
+      : (resultObj?.["reason"] as string) ?? "Policy denied";
+
+    return { allow, reason };
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    // Fail closed: if policy-plane is unreachable, DENY
+    return { allow: false, reason: `Policy evaluation failed: ${errMsg}` };
+  }
+}
+
+// ─── Activity: admitAgent ─────────────────────────────────────────────────
+
+interface AdmitAgentParams {
+  agentId: string;
+  namespace: string;
+  spec: Record<string, unknown>;
+}
+
+export async function admitAgent(params: AdmitAgentParams): Promise<boolean> {
+  const apiServerAddr =
+    process.env.API_SERVER_ADDR || "localhost:50051";
+
+  const svc = loadService("egaop/v1/agent.proto", "egaop.v1.AgentService");
+  const client = new (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    svc as any
+  )(apiServerAddr, getClientCredentials());
+
+  try {
+    const response = await promisifyGRPC<unknown, unknown>(
+      client,
+      "CreateAgent"
+    )({
+      api_version: "egaop/v1",
+      kind: "Agent",
+      metadata: { name: params.agentId, namespace: params.namespace },
+      spec: params.spec,
+    });
+
+    const agent = response as Record<string, unknown>;
+    const status = agent["status"] as Record<string, unknown> | undefined;
+    const phase = status?.["phase"] as string | undefined;
+    return phase === "Pending" || phase === "Running";
+  } catch (err: unknown) {
+    const grpcErr = err as { details?: string; message?: string };
+    const msg = grpcErr.details ?? grpcErr.message ?? "";
+    if (msg.includes("already exists")) {
+      return true;
+    }
+    throw new Error(`Admission failed: ${msg}`);
+  }
+}
+
+// ─── Activity: createSandbox ──────────────────────────────────────────────
+
+interface CreateSandboxParams {
+  agentId: string;
+  executionId: string;
+  namespace: string;
+  isolationLevel: string;
+}
+
+interface SandboxResult {
+  id: string;
+  status: string;
+}
+
+export async function createSandbox(
+  params: CreateSandboxParams
+): Promise<SandboxResult> {
+  const sandboxAddr =
+    process.env.SANDBOX_RUNTIME_ADDR || "localhost:50054";
+
+  const svc = loadService("egaop/v1/runtime.proto", "egaop.v1.RuntimeService");
+  const client = new (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    svc as any
+  )(sandboxAddr, getClientCredentials());
+
+  try {
+    const response = await promisifyGRPC<unknown, unknown>(
+      client,
+      "CreateSandbox"
+    )({
+      agent_id: params.agentId,
+      execution_id: params.executionId,
+      isolation_level: params.isolationLevel,
+      resources: {},
+      env_vars: {
+        fields: {
+          EGAOP_AGENT_ID: { stringValue: params.agentId },
+          EGAOP_EXECUTION_ID: { stringValue: params.executionId },
+          EGAOP_NAMESPACE: { stringValue: params.namespace },
+        },
+      },
+    });
+
+    const res = response as Record<string, unknown>;
+    return {
+      id: (res["sandbox_id"] as string) ?? "",
+      status: (res["status"] as string) ?? "unknown",
+    };
+  } catch (err: unknown) {
+    const grpcErr = err as { details?: string; message?: string };
+    throw new Error(
+      `Sandbox creation failed: ${grpcErr.details ?? grpcErr.message}`
     );
   }
 }
