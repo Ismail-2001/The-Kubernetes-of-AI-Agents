@@ -1,71 +1,14 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import crypto from "crypto";
 import { hashPassword, comparePassword, signJWT, verifyJWT, type JWTClaims } from "@e-gaop/shared";
+import {
+  getUserRepository,
+  ensureAdminUser,
+  type UserRow,
+} from "./repository";
 
 const JWT_SECRET = process.env.JWT_SECRET || "";
 const JWT_EXPIRES_SEC = 86400; // 24 hours
-
-interface UserRow {
-  id: string;
-  email: string;
-  password_hash: string;
-  name: string;
-  role: string;
-  namespace_access: string[];
-  is_active: boolean;
-  failed_login_attempts: number;
-  locked_until: string | null;
-  last_login_at: string | null;
-}
-
-// ── In-memory user store (replace with DB when pg is available) ──────────────
-// This is a temporary solution. In production, use PostgreSQL directly.
-const users = new Map<string, UserRow>();
-
-// Seed default admin
-const adminId = crypto.randomUUID();
-const adminHash = hashPasswordSync("changeme123456!");
-users.set("admin@egaop.io", {
-  id: adminId,
-  email: "admin@egaop.io",
-  password_hash: adminHash,
-  name: "Platform Admin",
-  role: "platform_admin",
-  namespace_access: ["*"],
-  is_active: true,
-  failed_login_attempts: 0,
-  locked_until: null,
-  last_login_at: null,
-});
-
-function hashPasswordSync(password: string): string {
-  const salt = crypto.randomBytes(32);
-  const hash = crypto.scryptSync(password, salt, 64, {
-    cost: 16384,
-    blockSize: 8,
-    parallelization: 1,
-  });
-  return `scrypt:16384:8:1:${salt.toString("base64")}:${hash.toString("base64")}`;
-}
-
-function comparePasswordSync(password: string, storedHash: string): boolean {
-  const parts = storedHash.split(":");
-  if (parts.length !== 6 || parts[0] !== "scrypt") return false;
-
-  const cost = parseInt(parts[1] ?? "0", 10);
-  const blockSize = parseInt(parts[2] ?? "0", 10);
-  const parallelization = parseInt(parts[3] ?? "0", 10);
-  const salt = Buffer.from(parts[4] ?? "", "base64");
-  const expectedHash = Buffer.from(parts[5] ?? "", "base64");
-
-  const hash = crypto.scryptSync(password, salt, 64, {
-    cost,
-    blockSize,
-    parallelization,
-  });
-
-  return crypto.timingSafeEqual(hash, expectedHash);
-}
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
 
@@ -99,12 +42,28 @@ export async function authenticate(
   }
 
   // Attach claims to request for downstream use
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (request as any).user = claims;
 }
 
 // ── Auth routes ─────────────────────────────────────────────────────────────
 
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
+  const repo = getUserRepository();
+
+  // Ensure admin user exists on first boot
+  if (process.env.NODE_ENV !== "test") {
+    const adminPassword = await ensureAdminUser(repo);
+    if (adminPassword) {
+      console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
+      console.log(`║  First boot: Admin account created                          ║`);
+      console.log(`║  Email:    admin@egaop.io                                    ║`);
+      console.log(`║  Password: ${adminPassword.padEnd(46)}║`);
+      console.log(`║  ⚠  Change this password immediately after first login!     ║`);
+      console.log(`╚══════════════════════════════════════════════════════════════╝\n`);
+    }
+  }
+
   // POST /api/auth/register
   fastify.post("/api/auth/register", async (request, reply) => {
     const body = request.body as { name?: string; email?: string; password?: string };
@@ -129,33 +88,24 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     // Check if user already exists
-    if (users.has(email)) {
+    const existing = await repo.findByEmail(email);
+    if (existing) {
       reply.code(409).send({ error: { message: "An account with this email already exists", code: "CONFLICT" } });
       return;
     }
 
-    const id = crypto.randomUUID();
-    const passwordHash = await hashPassword(password);
-
-    const user: UserRow = {
-      id,
+    const user = await repo.create({
       email,
-      password_hash: passwordHash,
+      password,
       name: body.name.trim(),
       role: "developer",
-      namespace_access: ["default"],
-      is_active: true,
-      failed_login_attempts: 0,
-      locked_until: null,
-      last_login_at: null,
-    };
-
-    users.set(email, user);
+      namespaceAccess: ["default"],
+    });
 
     // Generate JWT
     const claims: Omit<JWTClaims, "iat" | "exp"> = {
-      sub: id,
-      email,
+      sub: user.id,
+      email: user.email,
       name: user.name,
       role: user.role,
       namespace_access: user.namespace_access,
@@ -164,7 +114,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
     return {
       data: {
-        user: { id, email, name: user.name, role: user.role },
+        user: { id: user.id, email, name: user.name, role: user.role },
         token,
       },
       meta: { traceId: crypto.randomUUID(), timestamp: new Date().toISOString() },
@@ -181,7 +131,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     const email = body.email.toLowerCase().trim();
-    const user = users.get(email);
+    const user = await repo.findByEmail(email);
 
     if (!user) {
       // Always return same error for invalid email/password to prevent enumeration
@@ -195,12 +145,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     // Check lockout
-    if (user.locked_until && new Date(user.locked_until) > new Date()) {
-      const remainingMs = new Date(user.locked_until).getTime() - Date.now();
-      const remainingMin = Math.ceil(remainingMs / 60000);
+    const lockStatus = await repo.isLocked(email);
+    if (lockStatus.locked) {
       reply.code(429).send({
         error: {
-          message: `Account is locked. Try again in ${remainingMin} minute${remainingMin > 1 ? "s" : ""}`,
+          message: `Account is locked. Try again in ${lockStatus.remainingMinutes} minute${lockStatus.remainingMinutes > 1 ? "s" : ""}`,
           code: "ACCOUNT_LOCKED",
         },
       });
@@ -210,22 +159,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     const valid = await comparePassword(body.password, user.password_hash);
 
     if (!valid) {
-      user.failed_login_attempts++;
-
-      // Lock after 5 failed attempts
-      if (user.failed_login_attempts >= 5) {
-        user.locked_until = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
-        user.failed_login_attempts = 0;
-      }
+      const { locked } = await repo.incrementFailedLogin(email);
 
       reply.code(401).send({ error: { message: "Invalid email or password", code: "INVALID_CREDENTIALS" } });
       return;
     }
 
     // Reset failed attempts on success
-    user.failed_login_attempts = 0;
-    user.locked_until = null;
-    user.last_login_at = new Date().toISOString();
+    await repo.resetFailedLogin(email);
 
     // Generate JWT
     const claims: Omit<JWTClaims, "iat" | "exp"> = {
@@ -241,14 +182,68 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       data: {
         user: { id: user.id, email: user.email, name: user.name, role: user.role },
         token,
+        must_change_password: user.must_change_password,
       },
+      meta: { traceId: crypto.randomUUID(), timestamp: new Date().toISOString() },
+    };
+  });
+
+  // POST /api/auth/change-password (protected)
+  fastify.post("/api/auth/change-password", { preHandler: [authenticate] }, async (request, reply) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const claims = (request as any).user as JWTClaims;
+    const body = request.body as { current_password?: string; new_password?: string };
+
+    if (!body?.current_password || !body?.new_password) {
+      reply.code(400).send({ error: { message: "Current and new passwords are required", code: "VALIDATION_ERROR" } });
+      return;
+    }
+
+    const user = await repo.findByEmail(claims.email);
+    if (!user) {
+      reply.code(404).send({ error: { message: "User not found", code: "NOT_FOUND" } });
+      return;
+    }
+
+    const valid = await comparePassword(body.current_password, user.password_hash);
+    if (!valid) {
+      reply.code(401).send({ error: { message: "Current password is incorrect", code: "INVALID_CREDENTIALS" } });
+      return;
+    }
+
+    const newPassword = body.new_password;
+    if (newPassword.length < 12) {
+      reply.code(400).send({ error: { message: "Password must be at least 12 characters", code: "VALIDATION_ERROR" } });
+      return;
+    }
+    if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      reply.code(400).send({ error: { message: "Password must contain uppercase, lowercase, and numbers", code: "VALIDATION_ERROR" } });
+      return;
+    }
+
+    // Update password and clear must_change_password
+    const newHash = await hashPassword(newPassword);
+    const pool = (repo as unknown as { pool: import("pg").Pool }).pool;
+    await pool.query(
+      `UPDATE users SET password_hash = $1, must_change_password = false, updated_at = NOW()
+       WHERE lower(email) = lower($2) AND deleted_at IS NULL`,
+      [newHash, claims.email]
+    );
+
+    return {
+      data: { message: "Password changed successfully" },
       meta: { traceId: crypto.randomUUID(), timestamp: new Date().toISOString() },
     };
   });
 
   // GET /api/auth/me (protected)
   fastify.get("/api/auth/me", { preHandler: [authenticate] }, async (request) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const claims = (request as any).user as JWTClaims;
+
+    // Fetch fresh must_change_password from DB
+    const user = await repo.findByEmail(claims.email);
+
     return {
       data: {
         id: claims.sub,
@@ -256,6 +251,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         name: claims.name,
         role: claims.role,
         namespace_access: claims.namespace_access,
+        must_change_password: user?.must_change_password ?? false,
       },
       meta: { traceId: crypto.randomUUID(), timestamp: new Date().toISOString() },
     };
