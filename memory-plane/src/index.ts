@@ -64,18 +64,18 @@ const server = new grpc.Server({
 
 server.addService(memoryService.service, {
   Read: async (call: any, callback: any) => {
-    const { agent_id, memory_type, key } = call.request;
+    const { agent_id, namespace, memory_type, key } = call.request;
 
-    logger.info({ agent_id, memory_type, key }, "Memory read request");
+    logger.info({ agent_id, namespace, memory_type, key }, "Memory read request");
 
     try {
       let data: any = null;
 
       if (memory_type === "working") {
-        const raw = await redis.get(`egaop:${agent_id}:working:${key}`);
+        const raw = await redis.get(`egaop:${namespace}:${agent_id}:working:${key}`);
         if (raw) data = JSON.parse(raw);
       } else {
-        const raw = await redis.get(`egaop:${agent_id}:${memory_type}:${key}`);
+        const raw = await redis.get(`egaop:${namespace}:${agent_id}:${memory_type}:${key}`);
         if (raw) data = JSON.parse(raw);
       }
 
@@ -87,12 +87,12 @@ server.addService(memoryService.service, {
   },
 
   Write: async (call: any, callback: any) => {
-    const { agent_id, memory_type, key, data, ttl_seconds } = call.request;
+    const { agent_id, namespace, memory_type, key, data, ttl_seconds } = call.request;
 
-    logger.info({ agent_id, memory_type, key }, "Memory write request");
+    logger.info({ agent_id, namespace, memory_type, key }, "Memory write request");
 
     try {
-      const redisKey = `egaop:${agent_id}:${memory_type}:${key}`;
+      const redisKey = `egaop:${namespace}:${agent_id}:${memory_type}:${key}`;
       const serialized = JSON.stringify(data);
       const ttl = ttl_seconds || (memory_type === "working" ? 300 : 86400);
 
@@ -106,9 +106,9 @@ server.addService(memoryService.service, {
   },
 
   Delete: async (call: any, callback: any) => {
-    const { agent_id, memory_type, key } = call.request;
+    const { agent_id, namespace, memory_type, key } = call.request;
     try {
-      const redisKey = `egaop:${agent_id}:${memory_type}:${key}`;
+      const redisKey = `egaop:${namespace}:${agent_id}:${memory_type}:${key}`;
       await redis.del(redisKey);
       callback(null, { status: "success" });
     } catch (err: any) {
@@ -117,15 +117,15 @@ server.addService(memoryService.service, {
   },
 
   List: async (call: any, callback: any) => {
-    const { agent_id, memory_type } = call.request;
+    const { agent_id, namespace, memory_type } = call.request;
     try {
-      const pattern = `egaop:${agent_id}:${memory_type}:*`;
+      const pattern = `egaop:${namespace}:${agent_id}:${memory_type}:*`;
       const entries: any[] = [];
       const stream = redis.scanStream({ match: pattern, count: 100 });
       for await (const keys of stream) {
         for (const k of keys) {
           const raw = await redis.get(k);
-          const name = k.split(":").slice(3).join(":");
+          const name = k.split(":").slice(4).join(":");
           entries.push({ key: name, data: raw ? JSON.parse(raw) : {} });
         }
       }
