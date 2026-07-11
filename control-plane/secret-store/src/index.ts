@@ -7,11 +7,11 @@ if (process.env.NODE_ENV !== "test") {
 
 import path from "path";
 import http from "http";
-import fs from "fs";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import { getServerCredentials, encrypt, decrypt, type EncryptedPayload } from "@e-gaop/shared";
+import { SecretRepository } from "./repository";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -47,6 +47,8 @@ const MASTER_KEY = (() => {
   return key;
 })();
 
+const repo = new SecretRepository();
+
 const PROTO_PATH = path.resolve(__dirname, "../../../api/proto/egaop/v1/secret.proto");
 
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
@@ -61,8 +63,6 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 const egaopProto = grpc.loadPackageDefinition(packageDefinition) as any;
 const secretService = egaopProto.egaop.v1.SecretService;
 
-const encryptedVault: Map<string, string> = new Map();
-
 const server = new grpc.Server({
   interceptors: [createNamespaceServerInterceptor()],
 });
@@ -71,10 +71,16 @@ server.addService(secretService.service, {
   CreateSecret: async (call: any, callback: any) => {
     const { name, namespace, data, type } = call.request;
     const key = `${namespace}/${name}`;
-    logger.info({ key, type }, "Encrypting and persisting new secret to vault");
+    logger.info({ key, type }, "Encrypting and storing secret to PostgreSQL");
     try {
       const encryptedPayload = await encrypt(JSON.stringify(data), MASTER_KEY);
-      encryptedVault.set(key, JSON.stringify(encryptedPayload));
+      await repo.upsert({
+        namespace,
+        name,
+        encryptedData: JSON.stringify(encryptedPayload),
+        type: type ?? "api_key",
+      });
+      logger.info({ key }, "Secret persisted to PostgreSQL");
       callback(null, {
         api_version: "egaop.io/v1",
         kind: "Secret",
@@ -86,27 +92,29 @@ server.addService(secretService.service, {
         }
       });
     } catch (err: any) {
-      callback({ code: grpc.status.INTERNAL, message: `Encryption failed: ${err.message}` });
+      logger.error({ key, err: err.message }, "Failed to persist secret");
+      callback({ code: grpc.status.INTERNAL, message: `Encryption or persistence failed: ${err.message}` });
     }
   },
 
   GetSecret: async (call: any, callback: any) => {
     const { name, namespace } = call.request;
     const key = `${namespace}/${name}`;
-    logger.info({ key }, "Decrypting and retrieving secret");
-    const encryptedData = encryptedVault.get(key);
-    if (!encryptedData) {
-      return callback({ code: grpc.status.NOT_FOUND, message: `Secret ${key} not found` });
-    }
+    logger.info({ key }, "Retrieving and decrypting secret from PostgreSQL");
     try {
-      const payload: EncryptedPayload = JSON.parse(encryptedData);
+      const row = await repo.get(namespace, name);
+      if (!row) {
+        return callback({ code: grpc.status.NOT_FOUND, message: `Secret ${key} not found` });
+      }
+      const payload: EncryptedPayload = JSON.parse(row.encryptedData);
       const decryptedData = JSON.parse(await decrypt(payload, MASTER_KEY));
       callback(null, {
         metadata: { name, namespace },
-        spec: { type: "api_key", data: decryptedData }
+        spec: { type: row.type, data: decryptedData }
       });
-    } catch {
-      callback({ code: grpc.status.INTERNAL, message: "Decryption failure: key mismatch or payload corruption" });
+    } catch (err: any) {
+      logger.error({ key, err: err.message }, "Failed to retrieve or decrypt secret");
+      callback({ code: grpc.status.INTERNAL, message: `Retrieval or decryption failed: ${err.message}` });
     }
   }
 });
@@ -147,6 +155,7 @@ if (process.env.NODE_ENV !== "test") {
     logger.info("Shutting down Secret Store...");
     server.tryShutdown(async () => {
       healthServer.close();
+      await repo.close();
       await shutdownTracing();
       logger.info("Secret Store shut down");
       process.exit(0);
@@ -157,4 +166,4 @@ if (process.env.NODE_ENV !== "test") {
   process.on("SIGINT", shutdown);
 }
 
-export { server, encryptedVault };
+export { server, repo };
