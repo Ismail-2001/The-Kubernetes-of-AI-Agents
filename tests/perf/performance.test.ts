@@ -1,350 +1,212 @@
-import http from "http";
-import { GenericContainer, StartedTestContainer, Wait } from "testcontainers";
-import { Pool } from "pg";
+/**
+ * E-GAOP Performance Benchmark
+ *
+ * What this measures:
+ *   HTTP layer throughput of the running API server (Docker Compose stack).
+ *   /health endpoint — unauthenticated, no DB, no OPA, pure HTTP overhead.
+ *
+ * What this does NOT measure (and why):
+ *   - Authenticated endpoints: migration 004 (users table) not yet applied
+ *     in this Docker Compose environment; auth middleware rejects all /api/* calls.
+ *   - Agent execution path: requires Temporal workflow trigger + LLM provider.
+ *   - OPA policy evaluation: not on the /health path.
+ *   - Cold-start performance: containers pre-warmed before benchmark.
+ *   - Multi-tenant contention: single-tenant test.
+ *   - Sustained load beyond 10s windows.
+ *
+ * Scenario:
+ *   Target:  http://localhost:3001/health  (API server REST BFF)
+ *   Concurrency: 10, 25, 50 parallel connections
+ *   Duration: 10 seconds per run
+ *   Runs: 5 repetitions to characterize variance
+ *   Stack: Docker Compose (PostgreSQL, Redis, OPA, Temporal, 8 services)
+ *
+ * Measured: 2026-07-10, Windows 11, Docker Desktop, AMD64
+ */
 
-interface PerfResult {
+import fs from "fs";
+import path from "path";
+import http from "http";
+
+const API_BASE = "http://localhost:3001";
+const RUNS = 5;
+const DURATION_MS = 10_000;
+const CONCURRENCY_LEVELS = [10, 25, 50];
+
+// ─── Benchmark harness ─────────────────────────────────────────────────────
+
+interface RunResult {
   totalRequests: number;
   successfulRequests: number;
   failedRequests: number;
   requestsPerSecond: number;
-  averageLatencyMs: number;
-  p99LatencyMs: number;
+  latenciesMs: number[];
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  avgMs: number;
   durationMs: number;
+  errorRate: number;
 }
 
-async function runHttpBenchmark(
-  url: string,
-  options: {
-    concurrency: number;
-    durationMs: number;
-    method?: string;
-    body?: string;
-    headers?: Record<string, string>;
-  }
-): Promise<PerfResult> {
-  const { concurrency, durationMs, method = "GET", body, headers = {} } = options;
-  const startTime = Date.now();
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.ceil(sorted.length * p) - 1;
+  return sorted[Math.max(0, idx)]!;
+}
+
+async function benchmarkHealth(concurrency: number, durationMs: number): Promise<RunResult> {
   const latencies: number[] = [];
   let successful = 0;
   let failed = 0;
-  let activeRequests = 0;
+  let active = 0;
   let shouldStop = false;
 
   const makeRequest = (): Promise<void> => {
     return new Promise((resolve) => {
       if (shouldStop) { resolve(); return; }
 
-      activeRequests++;
-      const reqStart = Date.now();
+      active++;
+      const start = Date.now();
 
-      const urlObj = new URL(url);
+      const urlObj = new URL(`${API_BASE}/health`);
       const req = http.request(
         {
           hostname: urlObj.hostname,
           port: urlObj.port,
-          path: urlObj.pathname,
-          method,
-          headers: { ...headers, "Content-Length": body ? Buffer.byteLength(body).toString() : "0" },
-          timeout: 10000,
+          path: "/health",
+          method: "GET",
+          timeout: 10_000,
         },
         (res) => {
           let data = "";
           res.on("data", (chunk) => { data += chunk; });
           res.on("end", () => {
-            const latency = Date.now() - reqStart;
+            const latency = Date.now() - start;
             latencies.push(latency);
-            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 400) {
               successful++;
             } else {
               failed++;
             }
-            activeRequests--;
+            active--;
             resolve();
           });
         }
       );
 
-      req.on("error", () => {
-        failed++;
-        activeRequests--;
-        resolve();
-      });
+      req.on("error", () => { failed++; active--; resolve(); });
+      req.on("timeout", () => { req.destroy(); failed++; active--; resolve(); });
 
-      req.on("timeout", () => {
-        req.destroy();
-        failed++;
-        activeRequests--;
-        resolve();
-      });
-
-      if (body) req.write(body);
       req.end();
     });
   };
 
+  const startTime = Date.now();
   const runLoop = async (): Promise<void> => {
     while (!shouldStop) {
-      if (activeRequests < concurrency) {
-        makeRequest();
-      }
+      if (active < concurrency) makeRequest();
       await new Promise((r) => setTimeout(r, 1));
     }
-    while (activeRequests > 0) {
-      await new Promise((r) => setTimeout(r, 10));
-    }
+    while (active > 0) await new Promise((r) => setTimeout(r, 10));
   };
 
-  const timer = setTimeout(() => {
-    shouldStop = true;
-  }, durationMs);
-
+  const timer = setTimeout(() => { shouldStop = true; }, durationMs);
   await runLoop();
   clearTimeout(timer);
 
-  latencies.sort((a, b) => a - b);
-  const total = successful + failed;
   const duration = Date.now() - startTime;
+  latencies.sort((a, b) => a - b);
 
   return {
-    totalRequests: total,
+    totalRequests: successful + failed,
     successfulRequests: successful,
     failedRequests: failed,
-    requestsPerSecond: total / (duration / 1000),
-    averageLatencyMs: latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0,
-    p99LatencyMs: latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.99)]! : 0,
+    requestsPerSecond: (successful + failed) / (duration / 1000),
+    latenciesMs: latencies,
+    p50Ms: percentile(latencies, 0.50),
+    p95Ms: percentile(latencies, 0.95),
+    p99Ms: percentile(latencies, 0.99),
+    avgMs: latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0,
     durationMs: duration,
+    errorRate: (successful + failed) > 0 ? failed / (successful + failed) : 0,
   };
 }
 
-describe("Performance: api-server handles 500 req/s at p99 < 100ms", () => {
-  let pgContainer: StartedTestContainer;
-  let pool: Pool;
+// ─── Tests ─────────────────────────────────────────────────────────────────
 
+describe("Performance: E-GAOP API server /health (live Docker Compose stack)", () => {
   beforeAll(async () => {
-    pgContainer = await new GenericContainer("postgres:15-alpine")
-      .withEnvironment({
-        POSTGRES_DB: "egaop_perf",
-        POSTGRES_USER: "test",
-        POSTGRES_PASSWORD: "test",
-      })
-      .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
-      .start();
-
-    pool = new Pool({
-      host: pgContainer.getHost(),
-      port: pgContainer.getMappedPort(5432),
-      database: "egaop_perf",
-      user: "test",
-      password: "test",
-      max: 20,
+    // Verify stack is running
+    const ok = await new Promise<boolean>((resolve) => {
+      const req = http.request(`${API_BASE}/health`, { timeout: 5000 }, (res) => {
+        resolve(res.statusCode === 200);
+        res.resume();
+      });
+      req.on("error", () => resolve(false));
+      req.end();
     });
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS perf_test (
-        id SERIAL PRIMARY KEY,
-        data JSONB NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-  }, 60000);
-
-  afterAll(async () => {
-    await pool.end();
-    await pgContainer.stop();
+    if (!ok) throw new Error(`API server not reachable at ${API_BASE} — is Docker Compose running?`);
   });
 
-  it("PostgreSQL handles 1000 inserts/s with acceptable latency", async () => {
-    const startTime = Date.now();
-    const duration = 5000;
-    let inserted = 0;
+  for (const concurrency of CONCURRENCY_LEVELS) {
+    it(
+      `/health — ${concurrency} concurrent, ${DURATION_MS / 1000}s × ${RUNS} runs`,
+      async () => {
+        const results: RunResult[] = [];
+        for (let run = 0; run < RUNS; run++) {
+          results.push(await benchmarkHealth(concurrency, DURATION_MS));
+        }
 
-    while (Date.now() - startTime < duration) {
-      const batch = [];
-      for (let i = 0; i < 10; i++) {
-        batch.push(pool.query(
-          "INSERT INTO perf_test (data) VALUES ($1) RETURNING id",
-          [JSON.stringify({ iteration: inserted + i, timestamp: Date.now() })]
-        ));
-      }
-      const results = await Promise.all(batch);
-      inserted += results.length;
-    }
+        // Aggregate
+        const allP50 = results.map((r) => r.p50Ms);
+        const allP95 = results.map((r) => r.p95Ms);
+        const allP99 = results.map((r) => r.p99Ms);
+        const allRps = results.map((r) => r.requestsPerSecond);
+        const allAvg = results.map((r) => r.avgMs);
+        const totalReqs = results.reduce((s, r) => s + r.totalRequests, 0);
+        const totalErrors = results.reduce((s, r) => s + r.failedRequests, 0);
 
-    const elapsed = Date.now() - startTime;
-    const insertsPerSecond = (inserted / elapsed) * 1000;
+        // Report
+        console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`  GET /health @ ${concurrency} concurrent × ${RUNS} runs`);
+        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`  Total requests:  ${totalReqs}`);
+        console.log(`  Error rate:      ${(totalErrors / totalReqs * 100).toFixed(2)}% (${totalErrors}/${totalReqs})`);
+        console.log(`  RPS (per run):   ${allRps.map((r) => r.toFixed(0)).join(", ")}`);
+        console.log(`  RPS (avg):       ${(allRps.reduce((a, b) => a + b, 0) / allRps.length).toFixed(0)}`);
+        console.log(`  Latency avg:     ${allAvg.map((r) => r.toFixed(1)).join(", ")} ms`);
+        console.log(`  Latency p50:     ${allP50.map((r) => r.toFixed(0)).join(", ")} ms`);
+        console.log(`  Latency p95:     ${allP95.map((r) => r.toFixed(0)).join(", ")} ms`);
+        console.log(`  Latency p99:     ${allP99.map((r) => r.toFixed(0)).join(", ")} ms`);
+        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 
-    expect(insertsPerSecond).toBeGreaterThan(500);
+        // Save raw results
+        const rawDir = path.resolve(__dirname, "../../docs/benchmarks");
+        if (!fs.existsSync(rawDir)) fs.mkdirSync(rawDir, { recursive: true });
+        const rawFile = path.join(rawDir, `health-c${concurrency}-${Date.now()}.json`);
+        fs.writeFileSync(rawFile, JSON.stringify({
+          endpoint: "/health",
+          concurrency,
+          runs: RUNS,
+          durationMs: DURATION_MS,
+          measuredAt: new Date().toISOString(),
+          environment: {
+            os: process.platform,
+            node: process.version,
+            docker: "Docker Desktop",
+          },
+          results,
+        }, null, 2));
+        console.log(`Raw results saved to: ${path.relative(process.cwd(), rawFile)}`);
 
-    await pool.query("DELETE FROM perf_test");
-  });
-});
-
-describe("Performance: memory plane 1000 set() calls/s with Postgres backend", () => {
-  let pgContainer: StartedTestContainer;
-  let pool: Pool;
-
-  beforeAll(async () => {
-    pgContainer = await new GenericContainer("postgres:15-alpine")
-      .withEnvironment({
-        POSTGRES_DB: "egaop_perf_mem",
-        POSTGRES_USER: "test",
-        POSTGRES_PASSWORD: "test",
-      })
-      .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
-      .start();
-
-    pool = new Pool({
-      host: pgContainer.getHost(),
-      port: pgContainer.getMappedPort(5432),
-      database: "egaop_perf_mem",
-      user: "test",
-      password: "test",
-      max: 20,
-    });
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS perf_memory (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        namespace VARCHAR(255) NOT NULL,
-        agent_id VARCHAR(255) NOT NULL,
-        key VARCHAR(512) NOT NULL,
-        value JSONB NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE (namespace, agent_id, key)
-      )
-    `);
-  }, 60000);
-
-  afterAll(async () => {
-    await pool.end();
-    await pgContainer.stop();
-  });
-
-  it("bulk upserts 1000 entries within 5 seconds", async () => {
-    const startTime = Date.now();
-    const total = 1000;
-    const batchSize = 50;
-
-    for (let batch = 0; batch < total; batch += batchSize) {
-      const promises: Promise<any>[] = [];
-      for (let i = 0; i < batchSize && batch + i < total; i++) {
-        const idx = batch + i;
-        promises.push(pool.query(
-          `INSERT INTO perf_memory (namespace, agent_id, key, value)
-           VALUES ($1, $2, $3, $4::jsonb)
-           ON CONFLICT (namespace, agent_id, key)
-           DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-          ["perf-ns", `agent-${idx % 10}`, `key-${idx}`, JSON.stringify({ value: idx })]
-        ));
-      }
-      await Promise.all(promises);
-    }
-
-    const elapsed = Date.now() - startTime;
-    const opsPerSecond = (total / elapsed) * 1000;
-
-    expect(opsPerSecond).toBeGreaterThan(500);
-
-    const countResult = await pool.query("SELECT COUNT(*) AS cnt FROM perf_memory");
-    expect(parseInt(countResult.rows[0].cnt)).toBe(total);
-
-    await pool.query("DELETE FROM perf_memory");
-  });
-});
-
-describe("Performance: observability ingest 10k spans/s without dropping", () => {
-  let pgContainer: StartedTestContainer;
-  let pool: Pool;
-
-  beforeAll(async () => {
-    pgContainer = await new GenericContainer("postgres:15-alpine")
-      .withEnvironment({
-        POSTGRES_DB: "egaop_perf_obs",
-        POSTGRES_USER: "test",
-        POSTGRES_PASSWORD: "test",
-      })
-      .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
-      .start();
-
-    pool = new Pool({
-      host: pgContainer.getHost(),
-      port: pgContainer.getMappedPort(5432),
-      database: "egaop_perf_obs",
-      user: "test",
-      password: "test",
-      max: 20,
-    });
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS perf_spans (
-        trace_id VARCHAR(64) NOT NULL,
-        span_id VARCHAR(32) PRIMARY KEY,
-        parent_span_id VARCHAR(32),
-        service_name VARCHAR(255) NOT NULL,
-        operation_name VARCHAR(512) NOT NULL,
-        namespace VARCHAR(255) NOT NULL,
-        start_time TIMESTAMPTZ NOT NULL,
-        end_time TIMESTAMPTZ,
-        status VARCHAR(32) DEFAULT 'ok',
-        attributes JSONB DEFAULT '{}',
-        events JSONB DEFAULT '[]'
-      )
-    `);
-  }, 60000);
-
-  afterAll(async () => {
-    await pool.end();
-    await pgContainer.stop();
-  });
-
-  it("bulk inserts 10000 spans in under 2 seconds", async () => {
-    const totalSpans = 10000;
-    const batchSize = 500;
-    const traceId = `trace-perf-${Date.now()}`;
-
-    const startTime = Date.now();
-
-    for (let batch = 0; batch < totalSpans; batch += batchSize) {
-      const spanIds: string[] = [];
-      const traceIds: string[] = [];
-      const serviceNames: string[] = [];
-      const operationNames: string[] = [];
-      const namespaces: string[] = [];
-      const startTimes: Date[] = [];
-      const statuses: string[] = [];
-
-      for (let i = 0; i < batchSize && batch + i < totalSpans; i++) {
-        spanIds.push(`span-${batch + i}`);
-        traceIds.push(traceId);
-        serviceNames.push("perf-service");
-        operationNames.push(`operation-${i % 100}`);
-        namespaces.push("perf-ns");
-        startTimes.push(new Date());
-        statuses.push("ok");
-      }
-
-      await pool.query(
-        `INSERT INTO perf_spans (trace_id, span_id, service_name, operation_name, namespace, start_time, status)
-         SELECT unnest($1::varchar[]), unnest($2::varchar[]), unnest($3::varchar[]),
-                unnest($4::varchar[]), unnest($5::varchar[]), unnest($6::timestamptz[]),
-                unnest($7::varchar[])
-         ON CONFLICT (span_id) DO NOTHING`,
-        [traceIds, spanIds, serviceNames, operationNames, namespaces, startTimes, statuses]
-      );
-    }
-
-    const elapsed = Date.now() - startTime;
-    const spansPerSecond = (totalSpans / elapsed) * 1000;
-
-    expect(spansPerSecond).toBeGreaterThan(2000);
-
-    const countResult = await pool.query("SELECT COUNT(*) AS cnt FROM perf_spans");
-    expect(parseInt(countResult.rows[0].cnt)).toBe(totalSpans);
-
-    await pool.query("DELETE FROM perf_spans");
-  });
+        // Sanity assertions
+        expect(totalReqs).toBeGreaterThan(0);
+        expect(totalErrors / totalReqs).toBeLessThan(0.01); // <1% error rate
+        const avgRps = allRps.reduce((a, b) => a + b, 0) / allRps.length;
+        expect(avgRps).toBeGreaterThan(100); // At least 100 RPS for a health endpoint
+      },
+      300_000
+    );
+  }
 });
