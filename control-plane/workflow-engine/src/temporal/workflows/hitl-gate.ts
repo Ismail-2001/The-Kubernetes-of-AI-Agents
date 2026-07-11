@@ -1,9 +1,9 @@
 import {
   proxyActivities,
-  sleep,
   setHandler,
   defineSignal,
   ApplicationFailure,
+  condition,
 } from "@temporalio/workflow";
 import type * as activities from "../activities";
 import type {
@@ -73,21 +73,16 @@ export async function hitlApprovalGate(
   }
 
   // Wait for approval decision or timeout
-  const startTimeMs = Date.now(); // OK in workflow for timeout calculation
+  // Use condition() with timeout — fully deterministic, no Date.now()
+  const timeoutSec = Math.floor(timeoutMs / 1000);
+  const received = await condition(
+    () => decisionReceived,
+    `${timeoutSec}s`
+  );
 
-  while (!decisionReceived) {
-    const elapsed = Date.now() - startTimeMs;
-    const remaining = timeoutMs - elapsed;
-
-    if (remaining <= 0) {
-      // Auto-reject on timeout
-      decision = { approver: "system", decision: "reject", reason: "Timeout" };
-      decisionReceived = true;
-      break;
-    }
-
-    // Wait for signal or timeout (whichever comes first)
-    await sleep(Math.min(remaining, 1000)); // Check every second
+  if (!received) {
+    // Timeout — auto-reject
+    decision = { approver: "system", decision: "reject", reason: "Timeout" };
   }
 
   if (!decision) {
