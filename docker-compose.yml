@@ -264,6 +264,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       LLM_FALLBACK_CHAIN: ${LLM_FALLBACK_CHAIN:-gpt-4o,gpt-4o-mini,gpt-3.5-turbo}
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
@@ -273,11 +274,18 @@ services:
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:15053/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     depends_on:
       otel-collector:
         condition: service_started
     networks:
       - egaop-net
+      - egaop-sandbox
     restart: unless-stopped
 
   tool-proxy:
@@ -487,3 +495,6 @@ volumes:
 networks:
   egaop-net:
     driver: bridge
+  egaop-sandbox:
+    driver: bridge
+    internal: true

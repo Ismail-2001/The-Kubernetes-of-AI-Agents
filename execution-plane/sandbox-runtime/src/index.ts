@@ -62,12 +62,12 @@ server.addService(runtimeService.service, {
 
     try {
       const NanoCpus = resources?.cpu ? Math.round(parseFloat(resources.cpu) * 1_000_000_000) : 500_000_000;
-      const HostConfig: any = {
-         Memory: resources?.memory ? parseInt(resources.memory) * 1024 * 1024 : 512 * 1024 * 1024,
-         NanoCpus,
-         NetworkMode: "bridge",
-         SecurityOpt: ["no-new-privileges"],
-      };
+       const HostConfig: any = {
+          Memory: resources?.memory ? parseInt(resources.memory) * 1024 * 1024 : 512 * 1024 * 1024,
+          NanoCpus,
+          NetworkMode: "egaop-sandbox",
+          SecurityOpt: ["no-new-privileges"],
+       };
 
       if (isolation_level === "Enhanced") {
          logger.info("Level 2 Isolation Requested. Enforcing gVisor (runsc) runtime.");
@@ -93,10 +93,25 @@ server.addService(runtimeService.service, {
 
       logger.info({ container_id: container.id }, "Container successfully initialized.");
 
+      await container.start();
+      logger.info({ container_id: container.id }, "Container started.");
+
+      let ipAddress = "unknown";
+      try {
+        const info = await container.inspect();
+        const networks = info.NetworkSettings?.Networks || {};
+        const sandboxNet = networks["egaop-sandbox"];
+        if (sandboxNet?.IPAddress) {
+          ipAddress = sandboxNet.IPAddress;
+        }
+      } catch {
+        // Container inspect failed — non-fatal
+      }
+
       callback(null, {
          sandbox_id: container.id,
-         status: "Starting",
-         ip_address: "172.17.0.5"
+         status: "Running",
+         ip_address: ipAddress
       });
 
     } catch (err: any) {

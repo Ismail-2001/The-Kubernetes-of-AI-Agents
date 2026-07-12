@@ -14,6 +14,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import pino from "pino";
+import { Connection, Client } from "@temporalio/client";
 import { getServerCredentials } from "@e-gaop/shared";
 import { namespaceHandlers } from "./namespaces/handler";
 import { agentHandlers } from "./agents/handler";
@@ -38,6 +39,18 @@ const logger = pino({
     options: { colorize: true }
   } : undefined,
 });
+
+// ─── Temporal Client ───────────────────────────────────────────────────────
+let temporalClient: Client | null = null;
+
+async function getTemporalClient(): Promise<Client> {
+  if (temporalClient) return temporalClient;
+  const address = process.env.TEMPORAL_ADDRESS || "temporal:7233";
+  const connection = await Connection.connect({ address });
+  const namespace = process.env.TEMPORAL_NAMESPACE || "egaop";
+  temporalClient = new Client({ connection, namespace });
+  return temporalClient;
+}
 
 const PROTO_DIR = path.resolve(__dirname, "../../../api/proto");
 
@@ -220,7 +233,7 @@ fastify.get("/api/agents/:id/executions", async (request) => {
 
 fastify.post("/api/agents/:id/run", async (request, reply) => {
   const { id } = request.params as { id: string };
-  const body = request.body as { input?: Record<string, unknown> } | undefined;
+  const body = request.body as { input?: Record<string, unknown>; namespace?: string; callerRole?: string } | undefined;
 
   // Verify agent exists
   let agentFound = false;
@@ -228,7 +241,7 @@ fastify.post("/api/agents/:id/run", async (request, reply) => {
 
   await new Promise<void>((resolve) => {
     agentHandlers.GetAgent(
-      { request: { name: id, namespace: "default" } } as any,
+      { request: { name: id, namespace: body?.namespace ?? "default" } } as any,
       (err: any, response: any) => {
         if (!err && response) {
           agentFound = true;
@@ -244,23 +257,122 @@ fastify.post("/api/agents/:id/run", async (request, reply) => {
     return { error: { message: `Agent not found: ${id}`, code: "NOT_FOUND" } };
   }
 
-  // Trigger Temporal workflow (fire-and-forget for now)
+  // Start Temporal workflow
   const executionId = `exec-${crypto.randomUUID().slice(0, 8)}`;
-  const workflowId = `agent-${agentName}-${Date.now()}`;
+  const workflowId = `agent-exec-${executionId}`;
+  const namespace = body?.namespace ?? "default";
 
-  logger.info({ agentId: id, agentName, executionId, workflowId }, "Triggering agent workflow");
+  try {
+    const client = await getTemporalClient();
+    const handle = await client.workflow.start("reactWorkflow", {
+      args: [{
+        agentId: agentName,
+        executionId,
+        namespace,
+        resourceNamespace: namespace,
+        callerRole: body?.callerRole ?? "namespace_admin",
+      }],
+      taskQueue: process.env.TEMPORAL_TASK_QUEUE || "egaop-agent-queue",
+      workflowId,
+      workflowExecutionTimeout: "30 minutes",
+    });
 
-  // In production, this would call temporal.startWorkflow()
-  // For now, return a mock execution
-  return apiResponse({
-    executionId,
-    workflowId,
-    agentId: id,
-    agentName,
-    status: "queued",
-    startTime: new Date().toISOString(),
-    message: "Workflow queued successfully",
-  });
+    logger.info({ agentId: id, agentName, executionId, workflowId: handle.workflowId }, "Workflow started");
+
+    return apiResponse({
+      executionId,
+      workflowId: handle.workflowId,
+      runId: handle.firstExecutionRunId,
+      agentId: id,
+      agentName,
+      status: "running",
+      startTime: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: errMsg, agentId: id }, "Failed to start workflow");
+    reply.code(500);
+    return { error: { message: `Failed to start workflow: ${errMsg}`, code: "INTERNAL" } };
+  }
+});
+
+fastify.get("/api/executions/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+
+  try {
+    const client = await getTemporalClient();
+    const handle = client.workflow.getHandle(id);
+    const describe = await handle.describe();
+    const raw = describe.raw as Record<string, unknown> | undefined;
+
+    return apiResponse({
+      workflowId: describe.workflowId,
+      runId: raw?.runId ?? "",
+      status: describe.status.name,
+      startTime: describe.startTime?.toISOString() ?? "",
+      executionTime: raw?.executionTime ?? "",
+      taskQueue: describe.taskQueue,
+    });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes("not found") || errMsg.includes("NotFound")) {
+      reply.code(404);
+      return { error: { message: `Execution not found: ${id}`, code: "NOT_FOUND" } };
+    }
+    reply.code(500);
+    return { error: { message: `Failed to get execution: ${errMsg}`, code: "INTERNAL" } };
+  }
+});
+
+fastify.get("/api/executions/:id/history", async (request, reply) => {
+  const { id } = request.params as { id: string };
+
+  try {
+    const client = await getTemporalClient();
+    const handle = client.workflow.getHandle(id);
+    const history = await handle.fetchHistory();
+    const events = history.events ?? [];
+
+    const formattedEvents = events.map((event: any) => {
+      const eventId = event.eventId != null ? String(event.eventId) : "0";
+      const eventTime = event.eventTime?.seconds
+        ? new Date(Number(event.eventTime.seconds) * 1000).toISOString()
+        : "";
+      const eventType = event.eventType ?? "UNKNOWN";
+
+      let attributes: Record<string, unknown> = {};
+      if (event.workflowExecutionStartedEventAttributes) {
+        attributes = { input: event.workflowExecutionStartedEventAttributes.input };
+      } else if (event.workflowTaskCompletedEventAttributes) {
+        attributes = { scheduledEventId: event.workflowExecutionCompletedEventAttributes?.scheduledEventId };
+      } else if (event.activityTaskCompletedEventAttributes) {
+        attributes = { result: event.activityTaskCompletedEventAttributes.result };
+      } else if (event.activityTaskFailedEventAttributes) {
+        attributes = { error: event.activityTaskFailedEventAttributes.failure?.message };
+      }
+
+      return {
+        eventId,
+        eventTime,
+        eventType,
+        attributes,
+      };
+    });
+
+    return apiResponse({
+      workflowId: id,
+      eventCount: formattedEvents.length,
+      events: formattedEvents,
+    });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes("not found") || errMsg.includes("NotFound")) {
+      reply.code(404);
+      return { error: { message: `Execution not found: ${id}`, code: "NOT_FOUND" } };
+    }
+    reply.code(500);
+    return { error: { message: `Failed to get execution history: ${errMsg}`, code: "INTERNAL" } };
+  }
 });
 
 fastify.post("/api/agents", async (request) => {
@@ -339,51 +451,154 @@ fastify.get("/api/traces", async (request) => {
   const page = parseInt(q.page ?? "1", 10);
   const limit = parseInt(q.limit ?? "20", 10);
 
-  const executions = [
-    { id: "exec-001", agentId: "a-1", agentName: "research-agent-v2", namespace: "production", status: "succeeded", startTime: new Date(Date.now() - 300000).toISOString(), endTime: new Date(Date.now() - 240000).toISOString(), durationMs: 60000, costUsd: 0.0042, traceId: "tr-001" },
-    { id: "exec-002", agentId: "a-2", agentName: "data-processor", namespace: "production", status: "running", startTime: new Date(Date.now() - 60000).toISOString(), traceId: "tr-002" },
-    { id: "exec-003", agentId: "a-3", agentName: "content-gen", namespace: "staging", status: "failed", startTime: new Date(Date.now() - 600000).toISOString(), endTime: new Date(Date.now() - 580000).toISOString(), durationMs: 20000, costUsd: 0.0012, traceId: "tr-003" },
-  ];
+  try {
+    const client = await getTemporalClient();
+    const listOpts: { query?: string; pageSize?: number } = {
+      query: q.namespace
+        ? `WorkflowType = "reactWorkflow" AND WorkflowId LIKE "agent-exec-%"`
+        : `WorkflowType = "reactWorkflow"`,
+      pageSize: limit,
+    };
 
-  let filtered = executions;
-  if (q.namespace) filtered = filtered.filter((e) => e.namespace === q.namespace);
+    const iterable = client.workflow.list(listOpts);
+    const executions: any[] = [];
+    for await (const info of iterable) {
+      const statusMap: Record<string, string> = {
+        RUNNING: "running",
+        COMPLETED: "succeeded",
+        FAILED: "failed",
+        CANCELLED: "cancelled",
+        TERMINATED: "terminated",
+        TIMED_OUT: "timeout",
+      };
+      const durationMs = info.closeTime && info.startTime
+        ? info.closeTime.getTime() - info.startTime.getTime()
+        : undefined;
 
-  return apiResponse(paginate(filtered, page, limit));
+      executions.push({
+        id: info.workflowId,
+        agentId: info.workflowId.replace("agent-exec-", ""),
+        agentName: info.type,
+        namespace: q.namespace ?? "default",
+        status: statusMap[info.status.name] ?? "unknown",
+        startTime: info.startTime.toISOString(),
+        endTime: info.closeTime?.toISOString(),
+        durationMs,
+        costUsd: undefined,
+        traceId: "",
+      });
+      if (executions.length >= limit) break;
+    }
+
+    return apiResponse(paginate(executions, page, limit));
+  } catch {
+    return apiResponse(paginate([], page, limit));
+  }
 });
 
 fastify.get("/api/traces/:traceId", async (request, reply) => {
   const { traceId } = request.params as { traceId: string };
-  return apiResponse({
-    traceId,
-    agentId: "a-1",
-    executionId: "exec-001",
-    operationName: "agent.execute",
-    startTime: new Date(Date.now() - 300000).toISOString(),
-    endTime: new Date(Date.now() - 240000).toISOString(),
-    durationMs: 60000,
-    spanCount: 5,
-    errorCount: 0,
-    spans: [
-      { spanId: "s-1", traceId, operationName: "agent.execute", serviceName: "api-server", startTime: new Date(Date.now() - 300000).toISOString(), endTime: new Date(Date.now() - 240000).toISOString(), durationMs: 60000, status: "ok", attributes: {} },
-      { spanId: "s-2", traceId, parentSpanId: "s-1", operationName: "llm.complete", serviceName: "llm-router", startTime: new Date(Date.now() - 290000).toISOString(), endTime: new Date(Date.now() - 260000).toISOString(), durationMs: 30000, status: "ok", attributes: { model: "gpt-4o" } },
-      { spanId: "s-3", traceId, parentSpanId: "s-1", operationName: "tool.execute", serviceName: "tool-proxy", startTime: new Date(Date.now() - 260000).toISOString(), endTime: new Date(Date.now() - 250000).toISOString(), durationMs: 10000, status: "ok", attributes: { tool: "web_search" } },
-      { spanId: "s-4", traceId, parentSpanId: "s-1", operationName: "memory.store", serviceName: "memory-plane", startTime: new Date(Date.now() - 250000).toISOString(), endTime: new Date(Date.now() - 245000).toISOString(), durationMs: 5000, status: "ok", attributes: {} },
-      { spanId: "s-5", traceId, parentSpanId: "s-1", operationName: "policy.evaluate", serviceName: "opa", startTime: new Date(Date.now() - 245000).toISOString(), endTime: new Date(Date.now() - 244000).toISOString(), durationMs: 1000, status: "ok", attributes: { policy: "agent_execution" } },
-    ],
-  });
+
+  try {
+    const client = await getTemporalClient();
+    const iterable = client.workflow.list({ pageSize: 100 });
+
+    let found: any = null;
+    for await (const info of iterable) {
+      if (info.workflowId === traceId || info.workflowId.endsWith(`-${traceId}`)) {
+        found = info;
+        break;
+      }
+    }
+
+    if (!found) {
+      reply.code(404);
+      return { error: { message: `Trace not found: ${traceId}`, code: "NOT_FOUND" } };
+    }
+
+    const durationMs = found.closeTime && found.startTime
+      ? found.closeTime.getTime() - found.startTime.getTime()
+      : 0;
+
+    return apiResponse({
+      traceId: found.workflowId,
+      agentId: found.workflowId.replace("agent-exec-", ""),
+      executionId: found.workflowId,
+      operationName: "agent.execute",
+      startTime: found.startTime.toISOString(),
+      endTime: found.closeTime?.toISOString() ?? found.startTime.toISOString(),
+      durationMs,
+      spanCount: 1,
+      errorCount: found.status.name === "FAILED" ? 1 : 0,
+      spans: [
+        {
+          spanId: "s-1",
+          traceId: found.workflowId,
+          operationName: "agent.execute",
+          serviceName: "api-server",
+          startTime: found.startTime.toISOString(),
+          endTime: found.closeTime?.toISOString() ?? found.startTime.toISOString(),
+          durationMs,
+          status: found.status.name === "COMPLETED" ? "ok" : found.status.name === "FAILED" ? "error" : "running",
+          attributes: { workflowId: found.workflowId, taskQueue: found.taskQueue },
+        },
+      ],
+    });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    reply.code(500);
+    return { error: { message: `Failed to get trace: ${errMsg}`, code: "INTERNAL" } };
+  }
 });
 
 // ── Metrics REST ──
 
 fastify.get("/api/metrics", async () => {
-  return apiResponse({
-    activeAgents: 12,
-    executions24h: 347,
-    avgLatencyMs: 234,
-    errorRate: 0.82,
-    totalCostUsd: 14.23,
-    activeNamespaces: 4,
-  });
+  try {
+    const client = await getTemporalClient();
+    const iterable = client.workflow.list({ query: `WorkflowType = "reactWorkflow"` });
+
+    const now = Date.now();
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+    let running = 0;
+    let completed = 0;
+    let failed = 0;
+    let total = 0;
+    let recentCount = 0;
+    let totalLatencyMs = 0;
+
+    for await (const info of iterable) {
+      total++;
+      if (info.status.name === "RUNNING") running++;
+      else if (info.status.name === "COMPLETED") completed++;
+      else if (info.status.name === "FAILED") failed++;
+
+      if (info.startTime.getTime() > oneDayAgo) {
+        recentCount++;
+        if (info.closeTime) {
+          totalLatencyMs += info.closeTime.getTime() - info.startTime.getTime();
+        }
+      }
+    }
+
+    return apiResponse({
+      activeAgents: running,
+      executions24h: recentCount,
+      avgLatencyMs: recentCount > 0 ? Math.round(totalLatencyMs / recentCount) : 0,
+      errorRate: total > 0 ? Number(((failed / total) * 100).toFixed(2)) : 0,
+      totalCostUsd: recentCount * 0.003,
+      activeNamespaces: 1,
+    });
+  } catch {
+    return apiResponse({
+      activeAgents: 0,
+      executions24h: 0,
+      avgLatencyMs: 0,
+      errorRate: 0,
+      totalCostUsd: 0,
+      activeNamespaces: 1,
+    });
+  }
 });
 
 // ── SSE Events ──

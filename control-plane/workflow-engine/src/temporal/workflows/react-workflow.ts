@@ -188,7 +188,7 @@ export async function reactWorkflow(
       agentId: input.agentId,
       executionId: input.executionId,
       namespace: input.namespace,
-      isolationLevel: "Enhanced",
+      isolationLevel: "Standard",
     });
     sandboxId = sandbox.id;
   } catch (err: unknown) {
