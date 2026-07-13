@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import pino from "pino";
+import { getAgentRepository, type AgentRow } from "./repository";
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -26,10 +27,23 @@ interface StoredAgent {
   deletedAt?: Date;
 }
 
-const agents = new Map<string, StoredAgent>();
-
-function agentKey(namespace: string, name: string): string {
-  return `${namespace}/${name}`;
+function rowToAgent(row: AgentRow): StoredAgent {
+  return {
+    id: row.id,
+    namespace: row.namespace,
+    name: row.name,
+    apiVersion: row.api_version,
+    kind: row.kind,
+    spec: row.spec,
+    status: row.status,
+    labels: row.labels,
+    annotations: row.annotations,
+    version: row.version,
+    createdBy: row.created_by,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    deletedAt: row.deleted_at ? new Date(row.deleted_at) : undefined,
+  };
 }
 
 function toTimestamp(date: Date): { seconds: number; nanos: number } {
@@ -60,137 +74,131 @@ function toProtoAgent(agent: StoredAgent): Record<string, unknown> {
 }
 
 export const agentHandlers = {
-  CreateAgent: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const req = call.request;
-    const metadata = req.metadata as Record<string, unknown> | undefined;
-    const name = (metadata?.name as string) ?? `agent-${crypto.randomUUID().slice(0, 8)}`;
-    const namespace = (metadata?.namespace as string) ?? "default";
-    const key = agentKey(namespace, name);
+  CreateAgent: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    try {
+      const repo = getAgentRepository();
+      const req = call.request;
+      const metadata = req.metadata as Record<string, unknown> | undefined;
+      const name = (metadata?.name as string) ?? `agent-${crypto.randomUUID().slice(0, 8)}`;
+      const namespace = (metadata?.namespace as string) ?? "default";
 
-    if (agents.has(key)) {
-      callback(new Error(`Agent already exists: ${namespace}/${name}`));
-      return;
+      const existing = await repo.findByNamespaceAndName(namespace, name);
+      if (existing) {
+        callback(new Error(`Agent already exists: ${namespace}/${name}`));
+        return;
+      }
+
+      const agent = await repo.create({
+        namespace,
+        name,
+        apiVersion: (req.api_version as string) || "egaop.io/v1",
+        kind: (req.kind as string) || "Agent",
+        spec: (req.spec as Record<string, unknown>) || {},
+        status: { phase: "Pending", health_status: "Healthy" },
+        labels: (metadata?.labels as Record<string, string>) ?? {},
+        annotations: (metadata?.annotations as Record<string, string>) ?? {},
+        createdBy: (metadata?.created_by as string) ?? "",
+      });
+
+      logger.info({ namespace, name, uid: agent.id }, "Agent created");
+      callback(null, toProtoAgent(rowToAgent(agent)));
+    } catch (err) {
+      logger.error({ err }, "CreateAgent failed");
+      callback(new Error("Internal error creating agent"));
     }
-
-    const agent: StoredAgent = {
-      id: crypto.randomUUID(),
-      namespace,
-      name,
-      apiVersion: (req.api_version as string) ?? "egaop.io/v1",
-      kind: (req.kind as string) ?? "Agent",
-      spec: (req.spec as Record<string, unknown>) ?? {},
-      status: { phase: "Pending", health_status: "Healthy" },
-      labels: (metadata?.labels as Record<string, string>) ?? {},
-      annotations: (metadata?.annotations as Record<string, string>) ?? {},
-      version: 1,
-      createdBy: (metadata?.created_by as string) ?? "",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    agents.set(key, agent);
-    logger.info({ namespace, name, uid: agent.id }, "Agent created");
-    callback(null, toProtoAgent(agent));
   },
 
-  GetAgent: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const name = call.request.name as string;
-    const namespace = (call.request.namespace as string) ?? "default";
-    const key = agentKey(namespace, name);
-    const agent = agents.get(key);
+  GetAgent: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    try {
+      const repo = getAgentRepository();
+      const name = call.request.name as string;
+      const namespace = (call.request.namespace as string) ?? "default";
 
-    if (!agent || agent.deletedAt) {
-      callback(new Error(`Agent not found: ${namespace}/${name}`));
-      return;
+      const agent = await repo.findByNamespaceAndName(namespace, name);
+      if (!agent) {
+        callback(new Error(`Agent not found: ${namespace}/${name}`));
+        return;
+      }
+      callback(null, toProtoAgent(rowToAgent(agent)));
+    } catch (err) {
+      logger.error({ err }, "GetAgent failed");
+      callback(new Error("Internal error getting agent"));
     }
-    callback(null, toProtoAgent(agent));
   },
 
-  ListAgents: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const req = call.request;
-    const namespace = req.namespace as string;
-    const filters = (req.filters as Record<string, unknown>) ?? {};
-    const pagination = (req.pagination as Record<string, unknown>) ?? {};
+  ListAgents: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    try {
+      const repo = getAgentRepository();
+      const req = call.request;
+      const namespace = req.namespace as string;
+      const filters = (req.filters as Record<string, unknown>) ?? {};
+      const pagination = (req.pagination as Record<string, unknown>) ?? {};
 
-    const pageSize = Math.min((pagination.page_size as number) || 50, 100);
-    const cursor = (pagination.cursor as string) ?? "";
+      const pageSize = Math.min((pagination.page_size as number) || 50, 100);
+      const cursor = (pagination.cursor as string) ?? "";
 
-    let results = Array.from(agents.values()).filter(
-      (a) => !a.deletedAt && a.namespace === namespace
-    );
+      const result = await repo.listByNamespace(namespace, {
+        phase: filters.phase as string | undefined,
+        labels: filters.labels as Record<string, string> | undefined,
+        search: filters.search as string | undefined,
+        cursor: cursor || undefined,
+        pageSize,
+      });
 
-    if (filters.phase) {
-      results = results.filter((a) => a.status.phase === filters.phase);
+      callback(null, {
+        agents: result.agents.map((a) => toProtoAgent(rowToAgent(a))),
+        next_cursor: result.nextCursor,
+        total_count: result.totalCount,
+      });
+    } catch (err) {
+      logger.error({ err }, "ListAgents failed");
+      callback(new Error("Internal error listing agents"));
     }
-
-    if (filters.labels && typeof filters.labels === "object") {
-      const filterLabels = filters.labels as Record<string, string>;
-      results = results.filter((a) =>
-        Object.entries(filterLabels).every(([k, v]) => a.labels[k] === v)
-      );
-    }
-
-    if (filters.search) {
-      const search = (filters.search as string).toLowerCase();
-      results = results.filter((a) => a.name.toLowerCase().includes(search));
-    }
-
-    const startIndex = cursor
-      ? results.findIndex((a) => a.id === cursor) + 1
-      : 0;
-
-    const page = results.slice(startIndex, startIndex + pageSize);
-    const nextCursor = page.length === pageSize ? page[page.length - 1]!.id : "";
-
-    callback(null, {
-      agents: page.map(toProtoAgent),
-      next_cursor: nextCursor,
-      total_count: results.length,
-    });
   },
 
-  UpdateAgent: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const req = call.request;
-    const namespace = req.namespace as string;
-    const name = req.name as string;
-    const key = agentKey(namespace, name);
-    const agent = agents.get(key);
+  UpdateAgent: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    try {
+      const repo = getAgentRepository();
+      const req = call.request;
+      const namespace = req.namespace as string;
+      const name = req.name as string;
 
-    if (!agent || agent.deletedAt) {
-      callback(new Error(`Agent not found: ${namespace}/${name}`));
-      return;
+      const updated = await repo.update(namespace, name, {
+        spec: req.spec as Record<string, unknown> | undefined,
+        labels: req.labels as Record<string, string> | undefined,
+        annotations: req.annotations as Record<string, string> | undefined,
+      });
+
+      if (!updated) {
+        callback(new Error(`Agent not found: ${namespace}/${name}`));
+        return;
+      }
+
+      logger.info({ namespace, name, version: updated.version }, "Agent updated");
+      callback(null, toProtoAgent(rowToAgent(updated)));
+    } catch (err) {
+      logger.error({ err }, "UpdateAgent failed");
+      callback(new Error("Internal error updating agent"));
     }
-
-    if (req.spec && typeof req.spec === "object") {
-      agent.spec = { ...agent.spec, ...(req.spec as Record<string, unknown>) };
-    }
-
-    if (req.labels && typeof req.labels === "object") {
-      agent.labels = { ...agent.labels, ...(req.labels as Record<string, string>) };
-    }
-
-    agent.version++;
-    agent.updatedAt = new Date();
-    agents.set(key, agent);
-    logger.info({ namespace, name, version: agent.version }, "Agent updated");
-    callback(null, toProtoAgent(agent));
   },
 
-  DeleteAgent: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const namespace = call.request.namespace as string;
-    const name = call.request.name as string;
-    const key = agentKey(namespace, name);
-    const agent = agents.get(key);
+  DeleteAgent: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    try {
+      const repo = getAgentRepository();
+      const namespace = call.request.namespace as string;
+      const name = call.request.name as string;
 
-    if (!agent || agent.deletedAt) {
-      callback(new Error(`Agent not found: ${namespace}/${name}`));
-      return;
+      const deleted = await repo.softDelete(namespace, name);
+      if (!deleted) {
+        callback(new Error(`Agent not found: ${namespace}/${name}`));
+        return;
+      }
+
+      logger.warn({ namespace, name, uid: deleted.id }, "Agent soft-deleted");
+      callback(null, {});
+    } catch (err) {
+      logger.error({ err }, "DeleteAgent failed");
+      callback(new Error("Internal error deleting agent"));
     }
-
-    agent.deletedAt = new Date();
-    agent.updatedAt = new Date();
-    agents.set(key, agent);
-    logger.warn({ namespace, name, uid: agent.id }, "Agent soft-deleted");
-    callback(null, {});
   },
 };

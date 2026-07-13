@@ -23,11 +23,104 @@ import {
   agentHandlers,
 } from "../agents/handler";
 import {
+  resetAgentRepository,
+} from "../agents/repository";
+import {
   createNamespaceEnforcementInterceptor,
   clearNamespaceCache,
   updateNamespaceCache,
 } from "@e-gaop/shared";
 import * as grpc from "@grpc/grpc-js";
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { GenericContainer, Wait } = require("testcontainers");
+
+let pgContainer: any = null;
+let postgresPort = 0;
+
+async function callAgentHandler<T>(
+  handler: (call: any, callback: any) => void,
+  request: Record<string, unknown>
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    handler({ request }, (err: Error | null, response?: Record<string, unknown>) => {
+      if (err) reject(err);
+      else resolve(response as T);
+    });
+  });
+}
+
+beforeAll(async () => {
+  const container = await new GenericContainer("postgres:15")
+    .withEnvironment({
+      POSTGRES_USER: "testuser",
+      POSTGRES_PASSWORD: "testpass",
+      POSTGRES_DB: "testdb",
+    })
+    .withExposedPorts(5432)
+    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
+    .withStartupTimeout(120000)
+    .start();
+
+  pgContainer = container;
+  postgresPort = container.getMappedPort(5432);
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Client } = require("pg");
+  const client = new Client({
+    host: "127.0.0.1",
+    port: postgresPort,
+    user: "testuser",
+    password: "testpass",
+    database: "testdb",
+  });
+  await client.connect();
+
+  // Create agents table (migration 003 subset)
+  await client.query(`
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE TABLE IF NOT EXISTS agents (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      namespace VARCHAR(63) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      api_version VARCHAR(50) NOT NULL DEFAULT 'egaop.io/v1',
+      kind VARCHAR(50) NOT NULL DEFAULT 'Agent',
+      spec JSONB NOT NULL DEFAULT '{}',
+      status JSONB NOT NULL DEFAULT '{}',
+      labels JSONB NOT NULL DEFAULT '{}',
+      annotations JSONB NOT NULL DEFAULT '{}',
+      version INT NOT NULL DEFAULT 1,
+      created_by VARCHAR(255),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      deleted_at TIMESTAMPTZ
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_namespace_name
+      ON agents (namespace, name) WHERE deleted_at IS NULL;
+  `);
+  await client.end();
+
+  // Point agent repository at test DB via env vars, then reset singleton
+  process.env.POSTGRES_HOST = "127.0.0.1";
+  process.env.POSTGRES_PORT = String(postgresPort);
+  process.env.POSTGRES_DB = "testdb";
+  process.env.POSTGRES_USER = "testuser";
+  process.env.POSTGRES_PASSWORD = "testpass";
+  resetAgentRepository();
+}, 180000);
+
+afterAll(async () => {
+  resetAgentRepository();
+  delete process.env.POSTGRES_HOST;
+  delete process.env.POSTGRES_PORT;
+  delete process.env.POSTGRES_DB;
+  delete process.env.POSTGRES_USER;
+  delete process.env.POSTGRES_PASSWORD;
+  if (pgContainer) {
+    await pgContainer.stop();
+    pgContainer = null;
+  }
+});
 
 function createMockCall(request: Record<string, unknown>): { request: Record<string, unknown> } {
   return { request };
@@ -323,89 +416,66 @@ describe("NamespaceService CRUD", () => {
 });
 
 describe("Namespace isolation — data written in ns-A is never returned in ns-B query", () => {
-  it("ListAgents in different namespace returns empty", () => {
-    agentHandlers.CreateAgent(
-      createMockCall({
-        metadata: { name: "agent-alpha", namespace: "ns-alpha" },
-        spec: {},
-      }),
-      () => {}
-    );
+  it("ListAgents in different namespace returns empty", async () => {
+    // Create agent in ns-alpha
+    await callAgentHandler(agentHandlers.CreateAgent, {
+      metadata: { name: "agent-alpha", namespace: "ns-alpha" },
+      spec: {},
+    });
 
-    const listCb = createMockCallback();
-    agentHandlers.ListAgents(
-      createMockCall({
+    // List in ns-beta should return nothing
+    const response = await callAgentHandler<{ agents: Array<Record<string, unknown>> }>(
+      agentHandlers.ListAgents,
+      {
         namespace: "ns-beta",
         filters: {},
         pagination: { page_size: 100 },
-      }),
-      listCb.callback
+      }
     );
-
-    expect(listCb.result.err).toBeNull();
-    const agents = listCb.result.response!.agents as Array<Record<string, unknown>>;
-    expect(agents).toHaveLength(0);
+    expect(response.agents).toHaveLength(0);
   });
 
-  it("GetAgent from different namespace returns not found", () => {
-    agentHandlers.CreateAgent(
-      createMockCall({
-        metadata: { name: "isolated-agent", namespace: "ns-one" },
-        spec: {},
-      }),
-      () => {}
-    );
+  it("GetAgent from different namespace returns not found", async () => {
+    await callAgentHandler(agentHandlers.CreateAgent, {
+      metadata: { name: "isolated-agent", namespace: "ns-one" },
+      spec: {},
+    });
 
-    const getCb = createMockCallback();
-    agentHandlers.GetAgent(
-      createMockCall({ name: "isolated-agent", namespace: "ns-two" }),
-      getCb.callback
-    );
-
-    expect(getCb.result.err).toBeDefined();
-    expect(getCb.result.err!.message).toContain("not found");
+    await expect(
+      callAgentHandler(agentHandlers.GetAgent, {
+        name: "isolated-agent",
+        namespace: "ns-two",
+      })
+    ).rejects.toThrow("not found");
   });
 
-  it("UpdateAgent from different namespace returns not found", () => {
-    agentHandlers.CreateAgent(
-      createMockCall({
-        metadata: { name: "protect-agent", namespace: "ns-safe" },
-        spec: {},
-      }),
-      () => {}
-    );
+  it("UpdateAgent from different namespace returns not found", async () => {
+    await callAgentHandler(agentHandlers.CreateAgent, {
+      metadata: { name: "protect-agent", namespace: "ns-safe" },
+      spec: {},
+    });
 
-    const updateCb = createMockCallback();
-    agentHandlers.UpdateAgent(
-      createMockCall({
+    await expect(
+      callAgentHandler(agentHandlers.UpdateAgent, {
         namespace: "ns-unsafe",
         name: "protect-agent",
         spec: { hacked: true },
-      }),
-      updateCb.callback
-    );
-
-    expect(updateCb.result.err).toBeDefined();
-    expect(updateCb.result.err!.message).toContain("not found");
+      })
+    ).rejects.toThrow("not found");
   });
 
-  it("DeleteAgent from different namespace returns not found", () => {
-    agentHandlers.CreateAgent(
-      createMockCall({
-        metadata: { name: "keep-agent", namespace: "ns-keep" },
-        spec: {},
-      }),
-      () => {}
-    );
+  it("DeleteAgent from different namespace returns not found", async () => {
+    await callAgentHandler(agentHandlers.CreateAgent, {
+      metadata: { name: "keep-agent", namespace: "ns-keep" },
+      spec: {},
+    });
 
-    const deleteCb = createMockCallback();
-    agentHandlers.DeleteAgent(
-      createMockCall({ namespace: "ns-remove", name: "keep-agent" }),
-      deleteCb.callback
-    );
-
-    expect(deleteCb.result.err).toBeDefined();
-    expect(deleteCb.result.err!.message).toContain("not found");
+    await expect(
+      callAgentHandler(agentHandlers.DeleteAgent, {
+        namespace: "ns-remove",
+        name: "keep-agent",
+      })
+    ).rejects.toThrow("not found");
   });
 });
 
@@ -512,160 +582,121 @@ describe("CreateNamespace validation", () => {
 });
 
 describe("Agent CRUD completeness", () => {
-  it("CreateAgent and ListAgents in same namespace", () => {
-    agentHandlers.CreateAgent(
-      createMockCall({
-        metadata: { name: "crud-agent", namespace: "crud-ns" },
-        spec: { description: "test" },
-      }),
-      () => {}
-    );
+  it("CreateAgent and ListAgents in same namespace", async () => {
+    await callAgentHandler(agentHandlers.CreateAgent, {
+      metadata: { name: "crud-agent", namespace: "crud-ns" },
+      spec: { description: "test" },
+    });
 
-    const listCb = createMockCallback();
-    agentHandlers.ListAgents(
-      createMockCall({
+    const response = await callAgentHandler<{ agents: Array<Record<string, unknown>> }>(
+      agentHandlers.ListAgents,
+      {
         namespace: "crud-ns",
         filters: {},
         pagination: { page_size: 100 },
-      }),
-      listCb.callback
+      }
     );
-
-    expect(listCb.result.err).toBeNull();
-    const agents = listCb.result.response!.agents as Array<Record<string, unknown>>;
-    expect(agents.length).toBeGreaterThanOrEqual(1);
+    expect(response.agents.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("UpdateAgent modifies spec", () => {
-    agentHandlers.CreateAgent(
-      createMockCall({
-        metadata: { name: "update-agent", namespace: "update-ns" },
-        spec: { description: "original" },
-      }),
-      () => {}
-    );
+  it("UpdateAgent modifies spec", async () => {
+    await callAgentHandler(agentHandlers.CreateAgent, {
+      metadata: { name: "update-agent", namespace: "update-ns" },
+      spec: { description: "original" },
+    });
 
-    const updateCb = createMockCallback();
-    agentHandlers.UpdateAgent(
-      createMockCall({
+    const agent = await callAgentHandler<Record<string, unknown>>(
+      agentHandlers.UpdateAgent,
+      {
         namespace: "update-ns",
         name: "update-agent",
         spec: { description: "updated" },
-      }),
-      updateCb.callback
+      }
     );
-
-    expect(updateCb.result.err).toBeNull();
-    const agent = updateCb.result.response as Record<string, unknown>;
     const spec = agent.spec as Record<string, unknown>;
     expect(spec.description).toBe("updated");
   });
 
-  it("DeleteAgent soft deletes", () => {
-    agentHandlers.CreateAgent(
-      createMockCall({
+  it("DeleteAgent soft deletes", async () => {
+    const createResponse = await callAgentHandler<Record<string, unknown>>(
+      agentHandlers.CreateAgent,
+      {
         metadata: { name: "delete-agent", namespace: "delete-ns" },
         spec: {},
-      }),
-      () => {}
+      }
     );
 
-    const deleteCb = createMockCallback();
-    agentHandlers.DeleteAgent(
-      createMockCall({ namespace: "delete-ns", name: "delete-agent" }),
-      deleteCb.callback
-    );
+    await callAgentHandler(agentHandlers.DeleteAgent, {
+      namespace: "delete-ns",
+      name: "delete-agent",
+    });
 
-    expect(deleteCb.result.err).toBeNull();
-
-    const getCb = createMockCallback();
-    agentHandlers.GetAgent(
-      createMockCall({ name: "delete-agent", namespace: "delete-ns" }),
-      getCb.callback
-    );
-    expect(getCb.result.err).toBeDefined();
+    await expect(
+      callAgentHandler(agentHandlers.GetAgent, {
+        name: "delete-agent",
+        namespace: "delete-ns",
+      })
+    ).rejects.toThrow("not found");
   });
 
-  it("ListAgents with filters works", () => {
-    agentHandlers.CreateAgent(
-      createMockCall({
-        metadata: {
-          name: "filter-agent-1",
-          namespace: "filter-ns",
-          labels: { env: "prod" },
-        },
-        spec: {},
-      }),
-      () => {}
-    );
+  it("ListAgents with filters works", async () => {
+    await callAgentHandler(agentHandlers.CreateAgent, {
+      metadata: {
+        name: "filter-agent-1",
+        namespace: "filter-ns",
+        labels: { env: "prod" },
+      },
+      spec: {},
+    });
 
-    agentHandlers.CreateAgent(
-      createMockCall({
-        metadata: {
-          name: "filter-agent-2",
-          namespace: "filter-ns",
-          labels: { env: "dev" },
-        },
-        spec: {},
-      }),
-      () => {}
-    );
+    await callAgentHandler(agentHandlers.CreateAgent, {
+      metadata: {
+        name: "filter-agent-2",
+        namespace: "filter-ns",
+        labels: { env: "dev" },
+      },
+      spec: {},
+    });
 
-    const listCb = createMockCallback();
-    agentHandlers.ListAgents(
-      createMockCall({
+    const response = await callAgentHandler<{ agents: Array<Record<string, unknown>> }>(
+      agentHandlers.ListAgents,
+      {
         namespace: "filter-ns",
         filters: { labels: { env: "prod" } },
         pagination: { page_size: 100 },
-      }),
-      listCb.callback
+      }
     );
-
-    expect(listCb.result.err).toBeNull();
-    const agents = listCb.result.response!.agents as Array<Record<string, unknown>>;
-    expect(agents).toHaveLength(1);
+    expect(response.agents).toHaveLength(1);
   });
 
-  it("Cursor-based pagination works", () => {
+  it("Cursor-based pagination works", async () => {
     for (let i = 0; i < 5; i++) {
-      agentHandlers.CreateAgent(
-        createMockCall({
-          metadata: { name: `page-agent-${i}`, namespace: "page-ns" },
-          spec: {},
-        }),
-        () => {}
-      );
+      await callAgentHandler(agentHandlers.CreateAgent, {
+        metadata: { name: `page-agent-${i}`, namespace: "page-ns" },
+        spec: {},
+      });
     }
 
-    const page1 = createMockCallback();
-    agentHandlers.ListAgents(
-      createMockCall({
+    const page1 = await callAgentHandler<{ agents: Array<Record<string, unknown>>; next_cursor: string }>(
+      agentHandlers.ListAgents,
+      {
         namespace: "page-ns",
         filters: {},
         pagination: { page_size: 2 },
-      }),
-      page1.callback
+      }
     );
+    expect(page1.agents).toHaveLength(2);
+    expect(page1.next_cursor).toBeTruthy();
 
-    expect(page1.result.err).toBeNull();
-    const agents1 = page1.result.response!.agents as Array<Record<string, unknown>>;
-    expect(agents1).toHaveLength(2);
-    const nextCursor = page1.result.response!.next_cursor as string;
-    expect(nextCursor).toBeTruthy();
-
-    const page2 = createMockCallback();
-    agentHandlers.ListAgents(
-      createMockCall({
+    const page2 = await callAgentHandler<{ agents: Array<Record<string, unknown>>; next_cursor: string }>(
+      agentHandlers.ListAgents,
+      {
         namespace: "page-ns",
         filters: {},
-        pagination: { page_size: 2, cursor: nextCursor },
-      }),
-      page2.callback
+        pagination: { page_size: 2, cursor: page1.next_cursor },
+      }
     );
-
-    expect(page2.result.err).toBeNull();
-    const agents2 = page2.result.response!.agents as Array<Record<string, unknown>>;
-    expect(agents2).toHaveLength(2);
+    expect(page2.agents).toHaveLength(2);
   });
 });
 

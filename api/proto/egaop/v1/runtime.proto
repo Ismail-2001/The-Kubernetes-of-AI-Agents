@@ -22,6 +22,7 @@ message CreateSandboxRequest {
   Resources resources = 5;
   string timeout = 6;
   google.protobuf.Struct env_vars = 7;
+  repeated string init_commands = 8; // Commands to exec inside the sandbox after start; output returned in response
 }
 
 message Resources {
@@ -33,6 +34,7 @@ message CreateSandboxResponse {
   string sandbox_id = 1;
   string status = 2; // running, starting, failed
   string ip_address = 3;
+  repeated string init_outputs = 4; // stdout for each init_command
 }
 
 message TerminateSandboxRequest {

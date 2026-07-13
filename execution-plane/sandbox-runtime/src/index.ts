@@ -56,7 +56,7 @@ const server = new grpc.Server({
 
 server.addService(runtimeService.service, {
   CreateSandbox: async (call: any, callback: any) => {
-    const { agent_id, execution_id, image, isolation_level, resources, env_vars } = call.request;
+    const { agent_id, execution_id, image, isolation_level, resources, env_vars, init_commands } = call.request;
 
     logger.info({ agent_id, execution_id, isolation_level }, "Allocating sandbox environment...");
 
@@ -82,6 +82,7 @@ server.addService(runtimeService.service, {
       const container = await docker.createContainer({
          Image: image || "egaop-base-runtime:latest",
          name: `egaop-agent-${execution_id}`,
+         Cmd: ["node", "/workspace/server.js"],
          Env: Object.entries(env_vars || {}).map(([k, v]) => `${k}=${v}`),
          HostConfig,
          Labels: {
@@ -108,10 +109,36 @@ server.addService(runtimeService.service, {
         // Container inspect failed — non-fatal
       }
 
+      // Execute any init_commands inside the sandbox via Docker exec
+      const initOutputs: string[] = [];
+      if (init_commands && init_commands.length > 0) {
+        for (const cmd of init_commands) {
+          try {
+            const execInstance = await container.exec({
+              Cmd: ["sh", "-c", cmd],
+              AttachStdout: true,
+              AttachStderr: true,
+            });
+            const stream = await execInstance.start({ Detach: false, Tty: false });
+            const output = await new Promise<string>((resolve) => {
+              let data = "";
+              stream.on("data", (chunk: Buffer) => { data += chunk.toString(); });
+              stream.on("end", () => resolve(data));
+            });
+            initOutputs.push(output);
+            logger.info({ command: cmd, output: output.slice(0, 200) }, "Init command executed.");
+          } catch (execErr: any) {
+            initOutputs.push(`ERROR: ${execErr.message}`);
+            logger.error({ command: cmd, err: execErr.message }, "Init command failed.");
+          }
+        }
+      }
+
       callback(null, {
          sandbox_id: container.id,
          status: "Running",
-         ip_address: ipAddress
+         ip_address: ipAddress,
+         init_outputs: initOutputs,
       });
 
     } catch (err: any) {

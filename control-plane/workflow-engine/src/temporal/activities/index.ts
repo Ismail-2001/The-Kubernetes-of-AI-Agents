@@ -4,10 +4,35 @@ import * as protoLoader from "@grpc/proto-loader";
 import fs from "fs";
 import http from "http";
 import path from "path";
-import { QuotaEnforcer, getClientCredentials } from "@e-gaop/shared";
+import { QuotaEnforcer, getClientCredentials, QuotaExceededError } from "@e-gaop/shared";
 import type { LLMResponse, ToolResult } from "../types";
+import { classifyLLMResponse } from "../classification";
 
 const quotaEnforcer = new QuotaEnforcer();
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForQuota(namespace: string, resource: string, amount: number = 1): Promise<void> {
+  const maxWaitMs = 240_000; // 4 minutes (activity timeout is 5 min)
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      await quotaEnforcer.check(namespace, resource, amount);
+      return;
+    } catch (err) {
+      if (err instanceof QuotaExceededError) {
+        const retryAfter = Math.min(err.retryAfterMs ?? 1000, 10_000);
+        await sleep(retryAfter);
+        continue;
+      }
+      throw err;
+    }
+  }
+  // Exhausted max wait — let the original error propagate
+  await quotaEnforcer.check(namespace, resource, amount);
+}
 
 // ─── gRPC Client Setup ─────────────────────────────────────────────────────
 
@@ -110,12 +135,13 @@ interface CallLLMParams {
   executionId: string;
   namespace: string;
   messages: Array<{ role: string; content: string }>;
+  model?: string;
 }
 
 export async function callLLM(params: CallLLMParams): Promise<LLMResponse> {
   const ctx = Context.current();
 
-  await quotaEnforcer.check(params.namespace, "concurrent_executions", 1);
+  await waitForQuota(params.namespace, "concurrent_executions", 1);
 
   // Heartbeat for long LLM calls
   const heartbeatTimer = setInterval(() => {
@@ -129,6 +155,7 @@ export async function callLLM(params: CallLLMParams): Promise<LLMResponse> {
       namespace: params.namespace,
       messages: params.messages,
       temperature: 0.7,
+      model: params.model ?? "",
     })) as {
       content: string;
       model_used: string;
@@ -141,40 +168,13 @@ export async function callLLM(params: CallLLMParams): Promise<LLMResponse> {
     };
 
     const content = response.content ?? "";
-    const lower = content.toLowerCase();
-
-    // Determine response type based on content parsing
-    let type: "final_answer" | "tool_call" = "final_answer";
-    let toolName: string | undefined;
-    let toolArgs: Record<string, unknown> | undefined;
-
-    if (
-      lower.includes("[tool:") ||
-      lower.includes("use tool:") ||
-      lower.includes('"tool"')
-    ) {
-      type = "tool_call";
-      const toolMatch = content.match(
-        /\[tool:\s*(\w+)\]|"tool"\s*:\s*"(\w+)"/i
-      );
-      toolName = toolMatch?.[1] ?? toolMatch?.[2];
-
-      // Parse args if present
-      const argsMatch = content.match(/"args"\s*:\s*(\{[^}]+\})/);
-      if (argsMatch?.[1]) {
-        try {
-          toolArgs = JSON.parse(argsMatch[1]);
-        } catch {
-          toolArgs = {};
-        }
-      }
-    }
+    const classification = classifyLLMResponse(content);
 
     return {
-      type,
+      type: classification.type,
       content,
-      toolName,
-      toolArgs,
+      toolName: classification.toolName,
+      toolArgs: classification.toolArgs,
       modelUsed: response.model_used ?? "unknown",
       cost: response.cost ?? "$0.00",
       usage: {
@@ -197,12 +197,35 @@ interface ExecuteToolParams {
   namespace: string;
   toolName: string;
   args: Record<string, unknown>;
+  sandboxIp?: string;
 }
 
 export async function executeTool(params: ExecuteToolParams): Promise<ToolResult> {
   const startTime = Date.now();
 
-  await quotaEnforcer.check(params.namespace, "tool_calls_per_minute", 1);
+  // Validate tool-call arguments before any network dispatch — fail fast
+  const REQUIRED_ARGS: Record<string, string[]> = {
+    code_interpreter: ["code", "script"],
+    read_file: ["path"],
+    write_file: ["path", "content"],
+  };
+  const required = REQUIRED_ARGS[params.toolName];
+  if (required) {
+    const missing = required.filter((k) => {
+      const v = params.args?.[k];
+      return v === undefined || v === null || v === "";
+    });
+    if (missing.length === required.length) {
+      return {
+        toolName: params.toolName,
+        status: "failed",
+        errorMessage: `Missing required arguments for ${params.toolName}: expected one of [${required.join(", ")}] but got none`,
+        latencyMs: Date.now() - startTime,
+      };
+    }
+  }
+
+  await waitForQuota(params.namespace, "tool_calls_per_minute", 1);
 
   try {
     const response = (await toolCallExec({
@@ -210,6 +233,7 @@ export async function executeTool(params: ExecuteToolParams): Promise<ToolResult
       execution_id: params.executionId,
       tool_name: params.toolName,
       args: params.args,
+      sandbox_ip: params.sandboxIp ?? "",
     })) as {
       result?: unknown;
       status: string;
@@ -451,11 +475,14 @@ interface CreateSandboxParams {
   executionId: string;
   namespace: string;
   isolationLevel: string;
+  initCommands?: string[];
 }
 
 interface SandboxResult {
   id: string;
   status: string;
+  initOutputs?: string[];
+  ipAddress?: string;
 }
 
 export async function createSandbox(
@@ -486,17 +513,58 @@ export async function createSandbox(
           EGAOP_NAMESPACE: { stringValue: params.namespace },
         },
       },
+      init_commands: params.initCommands ?? [],
     });
 
     const res = response as Record<string, unknown>;
     return {
       id: (res["sandbox_id"] as string) ?? "",
       status: (res["status"] as string) ?? "unknown",
+      initOutputs: (res["init_outputs"] as string[]) ?? [],
+      ipAddress: (res["ip_address"] as string) ?? undefined,
     };
   } catch (err: unknown) {
     const grpcErr = err as { details?: string; message?: string };
     throw new Error(
       `Sandbox creation failed: ${grpcErr.details ?? grpcErr.message}`
+    );
+  }
+}
+
+// ─── Activity: terminateSandbox ────────────────────────────────────────────
+
+interface TerminateSandboxParams {
+  sandboxId: string;
+  reason: string;
+}
+
+export async function terminateSandbox(
+  params: TerminateSandboxParams
+): Promise<{ success: boolean }> {
+  const sandboxAddr =
+    process.env.SANDBOX_RUNTIME_ADDR || "localhost:50054";
+
+  const svc = loadService("egaop/v1/runtime.proto", "egaop.v1.RuntimeService");
+  const client = new (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    svc as any
+  )(sandboxAddr, getClientCredentials());
+
+  try {
+    const response = await promisifyGRPC<unknown, unknown>(
+      client,
+      "TerminateSandbox"
+    )({
+      sandbox_id: params.sandboxId,
+      reason: params.reason,
+    });
+
+    const res = response as Record<string, unknown>;
+    return { success: (res["success"] as boolean) ?? false };
+  } catch (err: unknown) {
+    const grpcErr = err as { details?: string; message?: string };
+    throw new Error(
+      `Sandbox termination failed: ${grpcErr.details ?? grpcErr.message}`
     );
   }
 }

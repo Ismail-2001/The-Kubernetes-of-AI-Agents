@@ -25,6 +25,10 @@ RUN mkdir -p /workspace && chown agent:agent /workspace
 # Create /tmp for scratch space
 RUN chmod 1777 /tmp
 
+# Persistent HTTP shell server — keeps the container alive and accepts /exec commands
+COPY server.js /workspace/server.js
+RUN chown agent:agent /workspace/server.js
+
 USER agent
 WORKDIR /workspace
 
@@ -35,3 +39,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 LABEL org.opencontainers.image.title="egaop-base-runtime"
 LABEL org.opencontainers.image.description="Minimal sandbox runtime for E-GAOP agent execution"
 LABEL org.opencontainers.image.vendor="E-GAOP"
+
+# Persistent HTTP shell server — keeps container alive, accepts /exec POST commands
+CMD ["node", "/workspace/server.js"]

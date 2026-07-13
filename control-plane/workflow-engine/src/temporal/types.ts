@@ -9,6 +9,7 @@ export interface AgentExecutionInput {
   /** Role of the caller (platform_admin, namespace_admin, developer, viewer). Maps to OPA clearance. */
   callerRole?: string;
   systemPrompt?: string;
+  model?: string;
   initialMessages?: Message[];
   tools?: ToolDefinition[];
   maxIterations?: number;

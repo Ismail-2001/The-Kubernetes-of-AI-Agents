@@ -59,6 +59,7 @@ message ToolCallRequest {
   string tool_name = 3;
   string version = 4;
   google.protobuf.Struct args = 5;
+  string sandbox_ip = 6; // Resolved sandbox container IP for sandbox-execution tools
 }
 
 message ToolCallResponse {

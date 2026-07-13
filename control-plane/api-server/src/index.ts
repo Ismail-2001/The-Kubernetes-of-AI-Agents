@@ -233,11 +233,12 @@ fastify.get("/api/agents/:id/executions", async (request) => {
 
 fastify.post("/api/agents/:id/run", async (request, reply) => {
   const { id } = request.params as { id: string };
-  const body = request.body as { input?: Record<string, unknown>; namespace?: string; callerRole?: string } | undefined;
+  const body = request.body as { input?: Record<string, unknown>; namespace?: string; resourceNamespace?: string; callerRole?: string } | undefined;
 
-  // Verify agent exists
+  // Verify agent exists and extract configured model
   let agentFound = false;
   let agentName = id;
+  let configuredModel: string | undefined;
 
   await new Promise<void>((resolve) => {
     agentHandlers.GetAgent(
@@ -246,6 +247,10 @@ fastify.post("/api/agents/:id/run", async (request, reply) => {
         if (!err && response) {
           agentFound = true;
           agentName = response.metadata?.name ?? id;
+          const spec = response.spec as Record<string, unknown> | undefined;
+          if (spec && typeof spec.model === "string") {
+            configuredModel = spec.model as string;
+          }
         }
         resolve();
       }
@@ -269,8 +274,13 @@ fastify.post("/api/agents/:id/run", async (request, reply) => {
         agentId: agentName,
         executionId,
         namespace,
-        resourceNamespace: namespace,
+        resourceNamespace: body?.resourceNamespace ?? namespace,
         callerRole: body?.callerRole ?? "namespace_admin",
+        model: configuredModel,
+        systemPrompt: body?.input?.systemPrompt as string | undefined,
+        initialMessages: body?.input?.prompt
+          ? [{ role: "user" as const, content: body.input.prompt as string }]
+          : (body?.input?.messages as Array<{ role: string; content: string }> | undefined),
       }],
       taskQueue: process.env.TEMPORAL_TASK_QUEUE || "egaop-agent-queue",
       workflowId,
@@ -375,9 +385,9 @@ fastify.get("/api/executions/:id/history", async (request, reply) => {
   }
 });
 
-fastify.post("/api/agents", async (request) => {
+fastify.post("/api/agents", async (request, reply) => {
   const body = request.body as any;
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     agentHandlers.CreateAgent(
       {
         request: {
@@ -387,7 +397,12 @@ fastify.post("/api/agents", async (request) => {
           kind: "Agent",
         },
       } as any,
-      (_err: any, response: any) => {
+      (err: any, response: any) => {
+        if (err) {
+          reply.code(409);
+          resolve({ error: { message: err.message, code: "CONFLICT" } });
+          return;
+        }
         const a = response;
         resolve(apiResponse({
           id: a.metadata?.uid ?? "",

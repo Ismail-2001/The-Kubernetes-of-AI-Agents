@@ -74,6 +74,32 @@ const TOOL_REGISTRY: Record<string, ToolConfig> = {
   database_query: { endpoint: "http://localhost:8080/query", method: "POST" },
 };
 
+const SANDBOX_TOOLS = new Set(["code_interpreter", "file_read", "file_write", "database_query"]);
+
+function buildSandboxCommand(toolName: string, args: any): string {
+  switch (toolName) {
+    case "code_interpreter": {
+      const code = args?.code || args?.script || "";
+      return code ? `python3 -c ${JSON.stringify(code)}` : "echo 'no code provided'";
+    }
+    case "file_read": {
+      const p = args?.path || "";
+      return p ? `cat ${JSON.stringify(p)}` : "echo 'no path provided'";
+    }
+    case "file_write": {
+      const p = args?.path || "";
+      const c = args?.content || "";
+      return p ? `printf ${JSON.stringify(c)} > ${JSON.stringify(p)}` : "echo 'no path provided'";
+    }
+    case "database_query": {
+      const q = args?.query || "";
+      return q ? `sqlite3 /tmp/data.db ${JSON.stringify(q)}` : "echo 'no query provided'";
+    }
+    default:
+      return `echo 'unsupported sandbox tool: ${toolName}'`;
+  }
+}
+
 function injectCredentials(toolName: string): Record<string, string> {
   const key = process.env[`TOOL_${toolName.toUpperCase()}_API_KEY`] || process.env.TOOL_DEFAULT_API_KEY || "";
   if (key) return { Authorization: `Bearer ${key}` };
@@ -86,7 +112,7 @@ const server = new grpc.Server({
 
 server.addService(toolService.service, {
   CallTool: async (call: any, callback: any) => {
-    const { agent_id, execution_id, tool_name, args } = call.request;
+    const { agent_id, execution_id, tool_name, args, sandbox_ip } = call.request;
     const startTime = Date.now();
 
     logger.info({ agent_id, execution_id, tool_name }, "Incoming tool invocation");
@@ -119,6 +145,18 @@ server.addService(toolService.service, {
         url = url.replace("__URL__", encodeURIComponent(args.url));
       }
 
+      if (SANDBOX_TOOLS.has(tool_name)) {
+        if (!sandbox_ip) {
+          return callback(null, {
+            status: "failed",
+            error_message: `Sandbox IP not provided for sandbox-execution tool: ${tool_name}`,
+            latency_ms: Date.now() - startTime,
+          });
+        }
+        url = `http://${sandbox_ip}:8080/exec`;
+        logger.info({ tool_name, sandbox_ip, url }, "Sandbox-routed tool: constructed URL");
+      }
+
       const creds = injectCredentials(tool_name);
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -130,6 +168,12 @@ server.addService(toolService.service, {
       const fetchOpts: any = { method: config.method, headers };
       if (config.method === "POST" && args) {
         fetchOpts.body = JSON.stringify(args);
+      }
+
+      // Sandbox tools: override method to POST and body to sandbox command format
+      if (SANDBOX_TOOLS.has(tool_name)) {
+        fetchOpts.method = "POST";
+        fetchOpts.body = JSON.stringify({ command: buildSandboxCommand(tool_name, args) });
       }
 
       const response = await fetch(url, fetchOpts);

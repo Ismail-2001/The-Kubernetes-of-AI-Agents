@@ -128,7 +128,7 @@ async function callOpenAIWithFallback(
           model: openaiModel,
           messages: openaiMessages,
           temperature,
-          max_tokens: maxTokens ?? 4096,
+          max_tokens: Math.min((maxTokens || 512), 512),
         },
         { signal }
       );
@@ -144,7 +144,12 @@ async function callOpenAIWithFallback(
         usage: response.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       };
     } catch (err: any) {
-      logger.warn({ model, err: err.message }, "Model call failed, trying fallback");
+      logger.warn({
+        model,
+        err: err.message,
+        status: err.status,
+        body: err.body ? JSON.stringify(err.body).slice(0, 2000) : undefined,
+      }, "Model call failed, trying fallback");
     }
   }
 
@@ -223,7 +228,13 @@ server.addService(llmService.service, {
         timestamp: { seconds: Math.floor(Date.now() / 1000) },
       });
     } catch (err: any) {
-      logger.error({ agent_id, execution_id, err: err.message }, "LLM generation failed");
+      logger.error({
+        agent_id,
+        execution_id,
+        err: err.message,
+        status: err.status,
+        body: err.body ? JSON.stringify(err.body).slice(0, 2000) : undefined,
+      }, "LLM generation failed");
 
       const code = err.name === "AbortError"
         ? grpc.status.DEADLINE_EXCEEDED

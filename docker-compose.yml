@@ -314,6 +314,7 @@ services:
         condition: service_started
     networks:
       - egaop-net
+      - egaop-sandbox
     restart: unless-stopped
 
   # Docker socket proxy — exposes a filtered Docker API to sandbox-runtime
@@ -496,5 +497,6 @@ networks:
   egaop-net:
     driver: bridge
   egaop-sandbox:
+    name: egaop-sandbox
     driver: bridge
     internal: true

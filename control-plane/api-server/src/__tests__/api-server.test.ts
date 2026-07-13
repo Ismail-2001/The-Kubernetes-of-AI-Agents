@@ -2,6 +2,10 @@ import path from "path";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { server } from "../index";
+import { resetAgentRepository } from "../agents/repository";
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { GenericContainer, Wait } = require("testcontainers");
 
 const PROTO_PATH = path.resolve(__dirname, "../../../../api/proto/egaop/v1/agent.proto");
 
@@ -37,6 +41,82 @@ function createHealthClient(port: number) {
   };
 }
 
+let pgContainer: any = null;
+let postgresPort = 0;
+
+beforeAll(async () => {
+  const container = await new GenericContainer("postgres:15")
+    .withEnvironment({
+      POSTGRES_USER: "testuser",
+      POSTGRES_PASSWORD: "testpass",
+      POSTGRES_DB: "testdb",
+    })
+    .withExposedPorts(5432)
+    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
+    .withStartupTimeout(120000)
+    .start();
+
+  pgContainer = container;
+  postgresPort = container.getMappedPort(5432);
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Client } = require("pg");
+  const client = new Client({
+    host: "127.0.0.1",
+    port: postgresPort,
+    user: "testuser",
+    password: "testpass",
+    database: "testdb",
+  });
+  await client.connect();
+
+  // Create agents table (migration 003 subset)
+  await client.query(`
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE TABLE IF NOT EXISTS agents (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      namespace VARCHAR(63) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      api_version VARCHAR(50) NOT NULL DEFAULT 'egaop.io/v1',
+      kind VARCHAR(50) NOT NULL DEFAULT 'Agent',
+      spec JSONB NOT NULL DEFAULT '{}',
+      status JSONB NOT NULL DEFAULT '{}',
+      labels JSONB NOT NULL DEFAULT '{}',
+      annotations JSONB NOT NULL DEFAULT '{}',
+      version INT NOT NULL DEFAULT 1,
+      created_by VARCHAR(255),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      deleted_at TIMESTAMPTZ
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_namespace_name
+      ON agents (namespace, name) WHERE deleted_at IS NULL;
+  `);
+  await client.end();
+
+  // Point agent repository at test DB
+  process.env.POSTGRES_HOST = "127.0.0.1";
+  process.env.POSTGRES_PORT = String(postgresPort);
+  process.env.POSTGRES_DB = "testdb";
+  process.env.POSTGRES_USER = "testuser";
+  process.env.POSTGRES_PASSWORD = "testpass";
+  resetAgentRepository();
+}, 180000);
+
+afterAll(async () => {
+  resetAgentRepository();
+  delete process.env.POSTGRES_HOST;
+  delete process.env.POSTGRES_PORT;
+  delete process.env.POSTGRES_DB;
+  delete process.env.POSTGRES_USER;
+  delete process.env.POSTGRES_PASSWORD;
+  if (pgContainer) {
+    await pgContainer.stop();
+    pgContainer = null;
+  }
+  server.forceShutdown();
+});
+
 describe("API Server", () => {
   let port: number;
   let client: any;
@@ -51,7 +131,6 @@ describe("API Server", () => {
 
   afterAll(() => {
     healthClient.close();
-    server.forceShutdown();
   });
 
   describe("CreateAgent", () => {
@@ -88,10 +167,10 @@ describe("API Server", () => {
   });
 
   describe("GetAgent", () => {
-    it("should return Running phase for existing agent", (done) => {
+    it("should return Pending phase for existing agent", (done) => {
       client.GetAgent({ name: "test-agent", namespace: "default" }, (err: any, response: any) => {
         expect(err).toBeNull();
-        expect(response.status.phase).toBe("Running");
+        expect(response.status.phase).toBe("Pending");
         expect(response.status.health_status).toBe("Healthy");
         done();
       });
