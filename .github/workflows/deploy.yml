@@ -92,7 +92,7 @@ jobs:
 
       - name: Update deploy tag variable
         if: steps.smoke.outputs.passed == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { owner, repo } = context.repo;
