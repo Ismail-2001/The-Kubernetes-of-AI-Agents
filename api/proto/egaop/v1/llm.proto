@@ -12,6 +12,18 @@ service LLMService {
   rpc Generate (GenerateRequest) returns (GenerateResponse);
 }
 
+message ToolDefinition {
+  string name = 1;
+  string description = 2;
+  string input_schema = 3; // JSON Schema for the tool's parameters (JSON-serialized)
+}
+
+message ToolCall {
+  string id = 1;   // Unique tool call ID (e.g. "call_abc123")
+  string name = 2; // Tool name matching ToolDefinition.name
+  string args = 3; // JSON-serialized arguments
+}
+
 message GenerateRequest {
   string agent_id = 1;
   string execution_id = 2;
@@ -20,13 +32,15 @@ message GenerateRequest {
   float temperature = 5;
   int32 max_tokens = 6;
   google.protobuf.Struct response_format = 7;
+  repeated ToolDefinition tool_definitions = 8; // Structured tool definitions for native tool-calling
 }
 
 message Message {
   string role = 1; // system, user, assistant, tool
   string content = 2;
   string name = 3; // optional, for speaker identification
-  string tool_call_id = 4; // optional
+  string tool_call_id = 4; // optional, for role:tool messages
+  repeated ToolCall tool_calls = 5; // optional, for role:assistant messages with structured tool calls
 }
 
 message GenerateResponse {
@@ -36,6 +50,7 @@ message GenerateResponse {
   string cost = 4;
   string finish_reason = 5;
   google.protobuf.Timestamp timestamp = 6;
+  repeated ToolCall tool_calls = 7; // Structured tool calls from the model (native function-calling)
 }
 
 message TokenUsage {

@@ -47,6 +47,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   enums: String,
   defaults: true,
   oneofs: true,
+  wrap: true,
   includeDirs: [path.resolve(__dirname, "../../../api/proto")]
 });
 
@@ -105,13 +106,26 @@ function calculateCost(promptTokens: number, completionTokens: number, model: st
   return `$${cost}`;
 }
 
+interface ToolDef {
+  name: string;
+  description: string;
+  input_schema?: Record<string, unknown>;
+}
+
+interface ToolCallResult {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
 async function callOpenAIWithFallback(
   openaiMessages: any[],
   preferredModel: string,
   temperature: number,
   maxTokens: number | undefined,
+  toolDefinitions: ToolDef[] | undefined,
   signal?: AbortSignal
-): Promise<{ content: string; model: string; usage: CompletionUsage }> {
+): Promise<{ content: string | null; toolCalls: ToolCallResult[]; model: string; usage: CompletionUsage }> {
   if (!openai) {
     throw new Error("OpenAI client not initialized (missing OPENAI_API_KEY)");
   }
@@ -123,10 +137,21 @@ async function callOpenAIWithFallback(
     if (!openaiModel) continue;
 
     try {
+      // Build OpenAI tools parameter from our tool definitions
+      const openaiTools = toolDefinitions?.map((td) => ({
+        type: "function" as const,
+        function: {
+          name: td.name,
+          description: td.description,
+          parameters: td.input_schema ? JSON.parse(td.input_schema) : { type: "object", properties: {} },
+        },
+      }));
+
       const response = await openai.chat.completions.create(
         {
           model: openaiModel,
           messages: openaiMessages,
+          tools: openaiTools?.length ? openaiTools : undefined,
           temperature,
           max_tokens: Math.min((maxTokens || 512), 512),
         },
@@ -134,12 +159,21 @@ async function callOpenAIWithFallback(
       );
 
       const choice = response.choices[0];
-      if (!choice || !choice.message?.content) {
+      if (!choice) {
         continue;
       }
 
+      // Extract structured tool_calls from the assistant message
+      const msg = choice.message;
+      const toolCalls: ToolCallResult[] = (msg.tool_calls || []).map((tc) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+      }));
+
       return {
-        content: choice.message.content,
+        content: msg.content,
+        toolCalls,
         model,
         usage: response.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       };
@@ -162,7 +196,7 @@ const server = new grpc.Server({
 
 server.addService(llmService.service, {
   Generate: async (call: any, callback: any) => {
-    const { agent_id, execution_id, model: preferredModel, messages, temperature, max_tokens } = call.request;
+    const { agent_id, execution_id, model: preferredModel, messages, temperature, max_tokens, tool_definitions } = call.request;
     const startTime = Date.now();
 
     logger.info({ agent_id, execution_id, preferredModel }, "Processing LLM generation request...");
@@ -184,10 +218,31 @@ server.addService(llmService.service, {
     }
 
     try {
-      const openaiMessages = (messages || []).map((m: any) => ({
-        role: m.role as "system" | "user" | "assistant" | "tool",
-        content: m.content,
-      }));
+      // Map messages to OpenAI format, preserving tool_calls on assistant messages
+      const openaiMessages = (messages || []).map((m: any) => {
+        const base: any = {
+          role: m.role as "system" | "user" | "assistant" | "tool",
+          content: m.content,
+        };
+        if (m.tool_call_id) {
+          base.tool_call_id = m.tool_call_id;
+        }
+        if (m.name) {
+          base.name = m.name;
+        }
+        // Restore structured tool_calls on assistant messages
+        if (m.tool_calls && m.tool_calls.length > 0) {
+          base.tool_calls = m.tool_calls.map((tc: any) => ({
+            id: tc.id,
+            type: "function",
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.args || {}),
+            },
+          }));
+        }
+        return base;
+      });
 
       const timeoutMs = parseInt(process.env.LLM_TIMEOUT_MS || "30000", 10);
       const abort = new AbortController();
@@ -198,6 +253,7 @@ server.addService(llmService.service, {
         preferredModel || "gpt-4o",
         temperature ?? 0.7,
         max_tokens ?? undefined,
+        tool_definitions,
         abort.signal
       );
       clearTimeout(timer);
@@ -215,16 +271,24 @@ server.addService(llmService.service, {
         latency_ms: latency,
       }, "Generation completed successfully.");
 
+      // Build structured tool_calls for the gRPC response
+      const responseToolCalls = result.toolCalls.map((tc) => ({
+        id: tc.id,
+        name: tc.name,
+        args: tc.arguments, // JSON string, parsed on client side
+      }));
+
       callback(null, {
-        content: result.content,
+        content: result.content ?? "",
         model_used: result.model,
+        tool_calls: responseToolCalls,
         usage: {
           prompt_tokens: usage.prompt_tokens,
           completion_tokens: usage.completion_tokens,
           total_tokens: usage.total_tokens,
         },
         cost,
-        finish_reason: "stop",
+        finish_reason: responseToolCalls.length > 0 ? "tool_calls" : "stop",
         timestamp: { seconds: Math.floor(Date.now() / 1000) },
       });
     } catch (err: any) {
