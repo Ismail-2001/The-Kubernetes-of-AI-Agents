@@ -121,9 +121,11 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
+      SLACK_ALERT_WEBHOOK: ${SLACK_ALERT_WEBHOOK:-}
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/e-gaop-dashboard.json:/var/lib/grafana/dashboards/e-gaop.json:ro
+      - ./scripts/grafana-init.sh:/etc/grafana-init.sh:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
