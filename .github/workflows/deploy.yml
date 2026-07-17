@@ -1,0 +1,157 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+  STAGING_HOST: ${{ secrets.STAGING_HOST }}
+  STAGING_USER: ${{ secrets.STAGING_USER }}
+  STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+  PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+  PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+  PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+  LAST_SUCCESSFUL_DEPLOY_TAG: ${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG || 'latest' }}
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+jobs:
+  deploy-staging:
+    name: Deploy Staging
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    outputs:
+      smoke_tests_passed: ${{ steps.smoke.outputs.passed }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        if: env.STAGING_HOST != ''
+        uses: webfactory/ssh-agent@v0.9
+        with:
+          ssh-private-key: ${{ env.STAGING_SSH_KEY }}
+
+      - name: Configure Docker context (remote)
+        if: env.STAGING_HOST != ''
+        run: |
+          docker context create staging --docker "host=ssh://${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}"
+          docker context use staging
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write .env
+        run: |
+          cat > .env <<-EOF
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          EGAOP_MASTER_ENCRYPTION_KEY=${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
+          SLACK_ALERT_WEBHOOK=${{ secrets.SLACK_ALERT_WEBHOOK }}
+          EOF
+
+      - name: Deploy via Docker Compose (remote)
+        if: env.STAGING_HOST != ''
+        run: docker compose up -d --wait --wait-timeout 120
+
+      - name: Deploy via Docker Compose (local runner)
+        if: env.STAGING_HOST == ''
+        run: docker compose up -d --build --wait --wait-timeout 120
+
+      - name: Initialize Grafana alerting
+        run: |
+          docker compose exec -T grafana node /etc/grafana-init.mjs || \
+          node scripts/grafana-init.mjs 2>/dev/null || true
+
+      - name: Run smoke tests
+        id: smoke
+        run: |
+          base="${{ env.STAGING_HOST || 'localhost' }}"
+          if bash scripts/smoke-test.sh "$base"; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag successful deploy
+        if: steps.smoke.outputs.passed == 'true'
+        run: |
+          echo "LAST_SUCCESSFUL_DEPLOY_TAG=${{ env.IMAGE_TAG }}" >> "$GITHUB_ENV"
+
+      - name: Update deploy tag variable
+        if: steps.smoke.outputs.passed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            await github.rest.actions.createOrUpdateRepoVariable({
+              owner, repo,
+              name: 'LAST_SUCCESSFUL_DEPLOY_TAG',
+              value: process.env.IMAGE_TAG,
+            });
+
+      - name: Rollback on failure
+        if: steps.smoke.outputs.passed == 'false'
+        run: |
+          echo "⚠ Smoke tests failed. Triggering rollback..."
+          export GITHUB_SHA=${{ env.IMAGE_TAG }}
+          export GITHUB_REPOSITORY=${{ github.repository }}
+          export GITHUB_SERVER_URL=${{ github.server_url }}
+          export GITHUB_RUN_ID=${{ github.run_id }}
+          bash scripts/rollback.sh "$SLACK_WEBHOOK" "$LAST_SUCCESSFUL_DEPLOY_TAG"
+          docker compose up -d --wait --wait-timeout 120
+
+  deploy-production:
+    name: Deploy Production
+    needs: [deploy-staging]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    if: ${{ needs.deploy-staging.outputs.smoke_tests_passed == 'true' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9
+        with:
+          ssh-private-key: ${{ env.PRODUCTION_SSH_KEY }}
+
+      - name: Configure Docker context
+        run: |
+          docker context create production --docker "host=ssh://${{ env.PRODUCTION_USER }}@${{ env.PRODUCTION_HOST }}"
+          docker context use production
+
+      - name: Write .env
+        run: |
+          cat > .env <<-EOF
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          EGAOP_MASTER_ENCRYPTION_KEY=${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
+          SLACK_ALERT_WEBHOOK=${{ secrets.SLACK_ALERT_WEBHOOK }}
+          EOF
+
+      - name: Deploy
+        run: docker compose up -d --wait --wait-timeout 120
+
+      - name: Initialize Grafana alerting
+        run: |
+          docker compose exec -T grafana node /etc/grafana-init.mjs || \
+          node scripts/grafana-init.mjs 2>/dev/null || true
+
+      - name: Smoke test
+        run: bash scripts/smoke-test.sh "${{ env.PRODUCTION_HOST }}"

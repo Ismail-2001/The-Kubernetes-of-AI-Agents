@@ -1,0 +1,105 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 06:00 UTC
+  workflow_dispatch:       # Manual trigger from Actions tab
+
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+
+jobs:
+  npm-audit:
+    name: npm audit (all workspaces)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci --prefer-offline --no-fund
+      - run: npm audit --audit-level=high
+        continue-on-error: true
+      - run: npm audit --audit-level=critical
+        continue-on-error: false
+
+  trivy-fs-scan:
+    name: Trivy filesystem scan
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy on source tree
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs-results.sarif
+          severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
+
+      - name: Upload results to Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-fs-results.sarif
+          category: filesystem
+
+  trivy-image-scan:
+    name: Trivy image scan (all services)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - control-plane/api-server
+          - control-plane/secret-store
+          - control-plane/workflow-engine
+          - execution-plane/llm-router
+          - execution-plane/tool-proxy
+          - execution-plane/sandbox-runtime
+          - memory-plane
+          - observability-plane
+          - admin-console
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./${{ matrix.service }}/Dockerfile
+          tags: ${{ matrix.service }}:nightly
+          cache-from: type=gha,scope=${{ matrix.service }}
+          outputs: type=docker,dest=/tmp/${{ matrix.service }}.tar
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          input: /tmp/${{ matrix.service }}.tar
+          format: sarif
+          output: trivy-image-${{ matrix.service }}.sarif
+          severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
+
+      - name: Upload results to Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-image-${{ matrix.service }}.sarif
+          category: image-${{ matrix.service }}
+
+      - name: Summary
+        run: |
+          echo "## ${{ matrix.service }} vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          trivy image --severity CRITICAL,HIGH --no-progress --format table \
+            ${{ matrix.service }}:nightly 2>/dev/null >> $GITHUB_STEP_SUMMARY || true

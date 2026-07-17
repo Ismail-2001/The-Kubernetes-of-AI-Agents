@@ -1,0 +1,64 @@
+name: Backup
+
+on:
+  schedule:
+    # Daily at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Include Prometheus data (larger archive)'
+        type: boolean
+        default: false
+
+env:
+  BACKUP_RETENTION_DAYS: 30
+
+jobs:
+  backup:
+    name: Create Backup
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_KEY || secrets.PRODUCTION_SSH_KEY }}
+
+      - name: Create backup directory
+        run: mkdir -p /tmp/egaop-backups
+
+      - name: Run backup script on remote host
+        env:
+          HOST: ${{ secrets.STAGING_HOST || secrets.PRODUCTION_HOST }}
+          USER: ${{ secrets.STAGING_USER || secrets.PRODUCTION_USER }}
+        run: |
+          FULL_FLAG=""
+          [ "${{ inputs.full }}" = "true" ] && FULL_FLAG="--full"
+          ssh "$USER@$HOST" \
+            "cd /opt/egaop && bash scripts/backup.sh /tmp/egaop-backups $FULL_FLAG"
+
+      - name: Download backup archive
+        env:
+          HOST: ${{ secrets.STAGING_HOST || secrets.PRODUCTION_HOST }}
+          USER: ${{ secrets.STAGING_USER || secrets.PRODUCTION_USER }}
+        run: |
+          scp "$USER@$HOST:/tmp/egaop-backups/*.tar.gz" /tmp/egaop-backups/
+
+      - name: Upload backup to GitHub Actions artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: egaop-backup-${{ github.run_id }}
+          path: /tmp/egaop-backups/*.tar.gz
+          retention-days: ${{ env.BACKUP_RETENTION_DAYS }}
+
+      - name: Clean old backups on remote
+        env:
+          HOST: ${{ secrets.STAGING_HOST || secrets.PRODUCTION_HOST }}
+          USER: ${{ secrets.STAGING_USER || secrets.PRODUCTION_USER }}
+        run: |
+          ssh "$USER@$HOST" \
+            "find /tmp/egaop-backups -name '*.tar.gz' -mtime +${{ env.BACKUP_RETENTION_DAYS }} -delete"

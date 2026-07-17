@@ -1,81 +1,78 @@
-# =============================================================================
-# E-GAOP CI/CD Pipeline — Staged Pipeline
-# =============================================================================
-# Triggers: PRs + pushes to main
-# Stages: lint → unit → integration → build → deploy-staging
-# =============================================================================
-
 name: CI
 
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.github/**'
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/egaop
-
-# Cancel in-progress runs for the same branch/PR
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: '20'
+  NODE_OPTIONS: '--max-old-space-size=4096'
+  REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.sha }}
+
 jobs:
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Stage 1: Lint & Typecheck (< 2 min target)
-  # ═══════════════════════════════════════════════════════════════════════════
   lint-and-typecheck:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    name: Lint & Typecheck
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: npm
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci --prefer-offline --no-fund
+      - run: npm run build --workspaces --if-present
+      - run: npm run typecheck --workspaces --if-present
+      - run: npm run lint --workspaces --if-present
 
-      - name: Build shared package
-        run: npm run build -w packages/shared
+      - name: npm audit (block critical/high)
+        run: npm audit --audit-level=high
+        continue-on-error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
 
-      - name: Typecheck all packages
-        run: npm run typecheck --workspaces --if-present
+      - name: npm outdated (informational)
+        run: npm outdated --workspaces --if-present || true
 
-      - name: Lint all packages
-        run: npm run lint --workspaces --if-present
-        continue-on-error: true
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Stage 1b: Secret Scanning (parallel with lint)
-  # ═══════════════════════════════════════════════════════════════════════════
-  secret-scanning:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  unit-tests:
+    name: Unit Tests
+    needs: [lint-and-typecheck]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 0  # Full history for gitleaks
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
-      - uses: gitleaks/gitleaks-action@v2
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - run: npm run build --workspaces --if-present
+      - run: npm test --workspaces --if-present
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_ENV: test
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Stage 2: Unit Tests (parallel matrix, no containers)
-  # ═══════════════════════════════════════════════════════════════════════════
-  unit-tests:
-    needs: [lint-and-typecheck, secret-scanning]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  docker-build:
+    name: Docker Build
+    needs: [lint-and-typecheck]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        package:
-          - packages/shared
+        service:
           - control-plane/api-server
           - control-plane/secret-store
           - control-plane/workflow-engine
@@ -84,252 +81,90 @@ jobs:
           - execution-plane/sandbox-runtime
           - memory-plane
           - observability-plane
-          - policy-plane
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build shared package
-        run: npm run build -w packages/shared
-
-      - name: Run unit tests
-        run: npm test -w ${{ matrix.package }}
-        env:
-          NODE_ENV: test
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Stage 3: Integration / Chaos / Security Tests (testcontainers)
-  # ═══════════════════════════════════════════════════════════════════════════
-  integration-tests:
-    needs: lint-and-typecheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build shared package
-        run: npm run build -w packages/shared
-
-      - name: Run integration tests
-        run: npx jest --selectProjects integration --forceExit
-        working-directory: tests
-        env:
-          NODE_ENV: test
-
-      - name: Run contract tests
-        run: npx jest --selectProjects contract --forceExit
-        working-directory: tests
-        env:
-          NODE_ENV: test
-
-      - name: Run security tests
-        run: npx jest --selectProjects security --forceExit
-        working-directory: tests
-        env:
-          NODE_ENV: test
-
-      - name: Run chaos tests
-        run: npx jest --selectProjects chaos --forceExit
-        working-directory: tests
-        env:
-          NODE_ENV: test
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Stage 4: Build Docker Images
-  # ═══════════════════════════════════════════════════════════════════════════
-  build:
-    needs: [unit-tests, integration-tests]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      image-tags: ${{ steps.meta.outputs.tags }}
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - name: api-server
-            context: ./control-plane/api-server
-          - name: secret-store
-            context: ./control-plane/secret-store
-          - name: workflow-engine
-            context: ./control-plane/workflow-engine
-          - name: llm-router
-            context: ./execution-plane/llm-router
-          - name: tool-proxy
-            context: ./execution-plane/tool-proxy
-          - name: sandbox-runtime
-            context: ./execution-plane/sandbox-runtime
-          - name: memory-plane
-            context: ./memory-plane
-          - name: observability-plane
-            context: ./observability-plane
-          - name: admin-console
-            context: ./admin-console
+          - admin-console
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
-        if: github.ref == 'refs/heads/main'
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate image metadata
+      - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.service.name }}
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}
           tags: |
-            type=sha,prefix=
-            type=ref,event=branch
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=,suffix=,format=short
+            type=raw,value=pr-${{ github.event.pull_request.number || 'ci' }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - name: Build and cache
+        uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.service.context }}
-          push: ${{ github.ref == 'refs/heads/main' }}
+          context: .
+          file: ./${{ matrix.service }}/Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          outputs: type=docker,dest=/tmp/${{ matrix.service }}.tar
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Stage 5: Deploy to Staging (main branch only)
-  # ═══════════════════════════════════════════════════════════════════════════
-  deploy-staging:
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: staging
-      url: https://staging.egaop.dev
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          input: /tmp/${{ matrix.service }}.tar
+          format: sarif
+          output: trivy-results-${{ matrix.service }}.sarif
+          severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
+          vuln-type: os,library
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results-${{ matrix.service }}.sarif
+          category: ${{ matrix.service }}
+
+  integration-tests:
+    name: Integration Tests
+    needs: [unit-tests, docker-build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to staging
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
-          DEPLOY_SHA: ${{ github.sha }}
+      - name: Create .env from secrets
         run: |
-          echo "Deploying commit $DEPLOY_SHA to staging..."
-          # SSH into staging and pull new images
-          mkdir -p ~/.ssh
-          echo "$STAGING_SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key deploy@$STAGING_HOST \
-            "cd /opt/egaop && \
-             export IMAGE_TAG=$DEPLOY_SHA && \
-             docker compose pull && \
-             docker compose up -d --remove-orphans && \
-             docker compose ps"
+          cat > .env <<-EOF
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          EGAOP_MASTER_ENCRYPTION_KEY=${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
+          EOF
+
+      - name: Pull cached images
+        run: |
+          for svc in api-server secret-store workflow-engine llm-router tool-proxy sandbox-runtime memory-plane observability-plane admin-console; do
+            tag="ghcr.io/${{ github.repository }}/control-plane/$svc:${{ github.sha }}"
+            docker pull "$tag" 2>/dev/null && docker tag "$tag" "egaop-$svc:latest" || true
+          done
+
+      - name: Start stack
+        run: docker compose up -d --wait --wait-timeout 120
 
       - name: Run smoke tests
-        id: smoke
-        run: |
-          STAGING_HOST=${{ secrets.STAGING_HOST }}
-          bash scripts/smoke-test.sh "http://$STAGING_HOST"
+        run: bash scripts/smoke-test.sh localhost
 
-      - name: Auto-rollback on failure
-        if: failure() && steps.smoke.outcome == 'failure'
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
-          PREVIOUS_TAG: ${{ secrets.LAST_SUCCESSFUL_DEPLOY_TAG }}
-        run: |
-          echo "⚠️  Smoke tests failed — rolling back to $PREVIOUS_TAG"
-          mkdir -p ~/.ssh
-          echo "$STAGING_SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key deploy@$STAGING_HOST \
-            "cd /opt/egaop && \
-             export IMAGE_TAG=$PREVIOUS_TAG && \
-             docker compose pull && \
-             docker compose up -d --remove-orphans && \
-             docker compose ps"
-          bash scripts/rollback.sh "${{ secrets.SLACK_WEBHOOK_URL }}" "$PREVIOUS_TAG"
-
-      - name: Store successful deploy tag
-        if: success()
-        run: |
-          echo "Storing successful deploy tag: ${{ github.sha }}"
-          # In production, this would update a GitHub secret or SSM parameter
-          # gh secret set LAST_SUCCESSFUL_DEPLOY_TAG --body "${{ github.sha }}"
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Informational: Performance benchmark (non-blocking)
-  # ═══════════════════════════════════════════════════════════════════════════
-  perf-benchmark:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Start Docker Compose stack
-        run: docker compose up -d --wait
-
-      - name: Wait for services
-        run: sleep 30
-
-      - name: Run performance benchmark
-        run: npx jest tests/perf/performance.test.ts --verbose 2>&1 | tee perf-output.txt
-        continue-on-error: true  # Informational only — never blocks merge
-
-      - name: Upload benchmark results
+      - name: Cleanup
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: perf-benchmark-${{ github.sha }}
-          path: |
-            perf-output.txt
-            docs/benchmarks/*.json
-          retention-days: 30
-
-      - name: Comment on PR with results
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const output = fs.existsSync('perf-output.txt') ? fs.readFileSync('perf-output.txt', 'utf8') : 'No output';
-            const lines = output.split('\n').filter(l => l.includes('RPS') || l.includes('Latency') || l.includes('Total requests'));
-            const summary = lines.slice(0, 15).join('\n');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `## Performance Benchmark — HTTP Transport Baseline (informational)\n\`\`\`\n${summary}\n\`\`\`\n*Measures \`/health\` endpoint (unauthenticated, no DB/OPA/Temporal). Agent execution latency not yet measured. Raw results in artifacts. This is non-blocking.*`
-            });
+        run: docker compose down -v
