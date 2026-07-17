@@ -47,7 +47,6 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   enums: String,
   defaults: true,
   oneofs: true,
-  wrap: true,
   includeDirs: [path.resolve(__dirname, "../../../api/proto")]
 });
 
@@ -143,7 +142,7 @@ async function callOpenAIWithFallback(
         function: {
           name: td.name,
           description: td.description,
-          parameters: td.input_schema ? JSON.parse(td.input_schema) : { type: "object", properties: {} },
+          parameters: td.input_schema || { type: "object", properties: {} },
         },
       }));
 

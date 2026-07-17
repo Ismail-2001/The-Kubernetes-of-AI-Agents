@@ -45,7 +45,6 @@ function loadService(protoFile: string, serviceName: string) {
     enums: String,
     defaults: true,
     oneofs: true,
-    wrap: true,
     includeDirs: [PROTO_ROOT],
   });
   const pkg = grpc.loadPackageDefinition(def) as Record<string, Record<string, grpc.ServiceDefinition<grpc.UntypedHandleCall>>>;
