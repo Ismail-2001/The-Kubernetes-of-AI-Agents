@@ -34,6 +34,12 @@ export interface LLMResponse {
   content: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
+  toolCallId?: string;         // For structured tool-calling (role:tool matching)
+  toolCalls?: Array<{          // Raw structured tool_calls from the LLM
+    id: string;
+    name: string;
+    args: string;              // JSON-serialized arguments
+  }>;
   modelUsed: string;
   cost: string;
   usage: {
@@ -64,6 +70,7 @@ export interface ToolCallRecord {
   iteration: number;
   toolName: string;
   args: Record<string, unknown>;
+  toolCallId?: string;         // Structured tool-calling ID for role:tool round-trip
   status: "succeeded" | "failed";
   latencyMs: number;
 }

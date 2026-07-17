@@ -45,6 +45,7 @@ function loadService(protoFile: string, serviceName: string) {
     enums: String,
     defaults: true,
     oneofs: true,
+    wrap: true,
     includeDirs: [PROTO_ROOT],
   });
   const pkg = grpc.loadPackageDefinition(def) as Record<string, Record<string, grpc.ServiceDefinition<grpc.UntypedHandleCall>>>;
@@ -134,8 +135,9 @@ interface CallLLMParams {
   agentId: string;
   executionId: string;
   namespace: string;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: string; toolCallId?: string; toolCalls?: Array<{ id: string; name: string; args: string }> }>;
   model?: string;
+  toolDefinitions?: Array<{ name: string; description: string; inputSchema?: Record<string, unknown> }>;
 }
 
 export async function callLLM(params: CallLLMParams): Promise<LLMResponse> {
@@ -149,17 +151,34 @@ export async function callLLM(params: CallLLMParams): Promise<LLMResponse> {
   }, 10000);
 
   try {
+    // Map tool definitions to proto format (snake_case). Serialize inputSchema as JSON string since proto field is string type.
+    const toolDefinitionsProto = params.toolDefinitions?.map((td) => ({
+      name: td.name,
+      description: td.description,
+      input_schema: JSON.stringify(td.inputSchema ?? {}),
+    }));
+
+    // Map messages to proto format, preserving tool_calls on assistant messages
+    const messagesProto = params.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      tool_call_id: m.toolCallId ?? "",
+      tool_calls: m.toolCalls ?? [],
+    }));
+
     const response = (await llmGenerateCall({
       agent_id: params.agentId,
       execution_id: params.executionId,
       namespace: params.namespace,
-      messages: params.messages,
+      messages: messagesProto,
+      tool_definitions: toolDefinitionsProto ?? [],
       temperature: 0.7,
       model: params.model ?? "",
     })) as {
       content: string;
       model_used: string;
       cost: string;
+      tool_calls?: Array<{ id: string; name: string; args: string }>;
       usage: {
         prompt_tokens: number;
         completion_tokens: number;
@@ -168,6 +187,32 @@ export async function callLLM(params: CallLLMParams): Promise<LLMResponse> {
     };
 
     const content = response.content ?? "";
+    const toolCalls = response.tool_calls;
+
+    // Structured tool_calls from the LLM take priority over [tool:] text parsing
+    const firstToolCall = toolCalls?.[0];
+    if (firstToolCall) {
+      let toolArgs: Record<string, unknown> = {};
+      try { toolArgs = JSON.parse(firstToolCall.args); } catch { /* use empty */ }
+
+      return {
+        type: "tool_call",
+        content,
+        toolName: firstToolCall.name,
+        toolArgs,
+        toolCallId: firstToolCall.id,
+        toolCalls,
+        modelUsed: response.model_used ?? "unknown",
+        cost: response.cost ?? "$0.00",
+        usage: {
+          promptTokens: response.usage?.prompt_tokens ?? 0,
+          completionTokens: response.usage?.completion_tokens ?? 0,
+          totalTokens: response.usage?.total_tokens ?? 0,
+        },
+      };
+    }
+
+    // Fall back to [tool:] text parsing for non-native tool-calling models
     const classification = classifyLLMResponse(content);
 
     return {

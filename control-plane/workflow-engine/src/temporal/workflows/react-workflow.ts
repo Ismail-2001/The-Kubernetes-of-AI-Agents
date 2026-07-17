@@ -42,6 +42,56 @@ const {
 export const cancelSignal = defineSignal("cancel");
 export const statusQuery = defineQuery<WorkflowStatus>("status");
 
+// ─── Tool Definitions (structured tool-calling) ────────────────────────────
+
+const TOOL_DEFINITIONS: import("../types").ToolDefinition[] = [
+  {
+    name: "code_interpreter",
+    description: "Execute Python code in a sandboxed runtime. Returns stdout/stderr output.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "Python code to execute" },
+      },
+      required: ["code"],
+    },
+  },
+  {
+    name: "file_read",
+    description: "Read the contents of a file from the sandbox filesystem.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute path to the file" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "file_write",
+    description: "Write content to a file in the sandbox filesystem.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute path to the file" },
+        content: { type: "string", description: "Content to write" },
+      },
+      required: ["path", "content"],
+    },
+  },
+  {
+    name: "database_query",
+    description: "Execute a SQL query against the sandbox SQLite database at /tmp/data.db.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "SQL query to execute" },
+      },
+      required: ["query"],
+    },
+  },
+];
+
 // ─── ReAct Workflow ────────────────────────────────────────────────────────
 
 export async function reactWorkflow(
@@ -73,27 +123,16 @@ export async function reactWorkflow(
     startTime,
   }));
 
+  // Use tools from input if provided, otherwise use default set
+  const toolDefinitions = input.tools?.length ? input.tools : TOOL_DEFINITIONS;
+
   // Initialize messages
   const messages: Message[] = [
     {
       role: "system",
       content:
         input.systemPrompt ??
-        `You are a helpful AI agent with access to tools.
-
-When you need to execute code, read/write files, or query data, call a tool using EXACTLY this format:
-
-[tool:code_interpreter] {"code": "print('hello')"}
-[tool:file_read] {"path": "/tmp/data.txt"}
-[tool:file_write] {"path": "/tmp/output.txt", "content": "hello"}
-[tool:database_query] {"query": "SELECT * FROM users"}
-
-RULES:
-- If the user asks to run code, execute a command, or perform a computation — ALWAYS use [tool:code_interpreter].
-- If the user asks a simple factual question — answer directly without a tool.
-- NEVER describe how you would do something — just do it using the tool.
-- Use ONLY one tool call per response.
-- Wait for the tool result before continuing.`
+        `You are a helpful AI agent with access to functions. When you need data or computation, call a function and examine its output. Once you have the information needed to answer the user's request, provide the final answer.`
     },
     ...(input.initialMessages ?? []),
   ];
@@ -263,8 +302,18 @@ RULES:
           agentId: input.agentId,
           executionId: input.executionId,
           namespace: input.namespace,
-          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          messages: messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            toolCallId: m.toolCallId,
+            toolCalls: (m as any).toolCalls,
+          })),
           model: input.model,
+          toolDefinitions: toolDefinitions.map((td) => ({
+            name: td.name,
+            description: td.description,
+            inputSchema: td.inputSchema,
+          })),
         })) as LLMResponse;
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -294,10 +343,15 @@ RULES:
       totalCost += costValue;
 
       // Add assistant response to messages
-      messages.push({
+      // If the LLM returned structured tool_calls, attach them for conversation continuity
+      const assistantMsg: Message & { toolCalls?: Array<{ id: string; name: string; args: string }> } = {
         role: "assistant",
         content: llmResponse.content,
-      });
+      };
+      if (llmResponse.toolCalls?.length) {
+        assistantMsg.toolCalls = llmResponse.toolCalls;
+      }
+      messages.push(assistantMsg);
 
       // Check for final answer
       if (llmResponse.type === "final_answer") {
@@ -407,27 +461,35 @@ RULES:
           iteration: currentIteration,
           toolName: llmResponse.toolName,
           args: llmResponse.toolArgs ?? {},
+          toolCallId: llmResponse.toolCallId,
           status: toolResult.status,
           latencyMs: toolResult.latencyMs,
         });
 
         // Add tool result to messages
-        // NOTE: Using role "user" (not "tool") because the platform's plain-text
-        // [tool:...] convention does not populate structured tool_calls/tool_call_id
-        // fields in the message. The OpenAI API schema requires those fields when
-        // role is "tool", and omitting them causes a 400 across all providers.
-        // Moving to a fully structured tool-calling format (with proper tool_call_id
-        // and role:"tool") is a known, separate follow-up.
-        const toolResultContent =
-          toolResult.status === "succeeded"
-            ? `Tool ${toolResult.toolName} executed successfully. Result: ${JSON.stringify(toolResult.result)}`
-            : `Tool ${toolResult.toolName} failed: ${toolResult.errorMessage}`;
+        // When the LLM used structured tool-calling (toolCallId present), use role:tool
+        // with matching tool_call_id per the OpenAI/Anthropic spec. Otherwise fall back
+        // to role:user with tool name in content (for [tool:] plain-text convention).
+        if (llmResponse.toolCallId) {
+          messages.push({
+            role: "tool",
+            content: toolResult.status === "succeeded"
+              ? JSON.stringify(toolResult.result ?? "")
+              : `Error: ${toolResult.errorMessage}`,
+            toolCallId: llmResponse.toolCallId,
+          });
+        } else {
+          const toolResultContent =
+            toolResult.status === "succeeded"
+              ? `Tool ${toolResult.toolName} executed successfully. Result: ${JSON.stringify(toolResult.result)}`
+              : `Tool ${toolResult.toolName} failed: ${toolResult.errorMessage}`;
 
-        messages.push({
-          role: "user",
-          content: toolResultContent,
-          name: toolResult.toolName,
-        });
+          messages.push({
+            role: "user",
+            content: toolResultContent,
+            name: toolResult.toolName,
+          });
+        }
 
         // Persist iteration memory
         try {
