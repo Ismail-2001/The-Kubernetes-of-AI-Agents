@@ -64,5 +64,8 @@ vendor/
 # Vercel
 .vercel
 
+# Backup artifacts (test archives, not source)
+backups/
+
 # Temporary files
 tmp/

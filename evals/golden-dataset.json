@@ -1,0 +1,231 @@
+{
+  "schema_version": "1.0",
+  "created": "2026-07-18",
+  "description": "Golden eval dataset for E-GAOP agent — measures task-success rate and tool-selection accuracy through the real API workflow trigger path.",
+  "notes": [
+    "All cases: exact_pattern matching on final answer, args_pattern matching on tool calls, numeric_tolerance for numeric answers.",
+    "Former LLM-as-judge cases (file_write-numbers, ambiguous-no-tool-needed, edge-empty-prompt, code_interpreter-random-number) converted to exact_pattern.",
+    "Edge-case cases use ruleBasedJudge fallback when exact_pattern is insufficient.",
+    "Policy-deny case: cross-namespace execution that should be blocked by OPA."
+  ],
+  "agent_id": "eval-agent",
+  "default_model": "gpt-4o-mini",
+  "cases": [
+    {
+      "id": "qanda-simple-math",
+      "category": "qanda",
+      "prompt": "What is 2+2?",
+      "expected": {
+        "tool_call": null,
+        "final_answer_match": { "type": "exact_pattern", "pattern": "4" },
+        "final_answer_description": "The answer should state 4"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "qanda-capital-france",
+      "category": "qanda",
+      "prompt": "What is the capital of France?",
+      "expected": {
+        "tool_call": null,
+        "final_answer_match": { "type": "exact_pattern", "pattern": "Paris" },
+        "final_answer_description": "The answer should state Paris"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "qanda-just-hello",
+      "category": "qanda",
+      "prompt": "Just say hello.",
+      "expected": {
+        "tool_call": null,
+        "final_answer_match": { "type": "exact_pattern", "pattern": "hello|Hello|hi|Hi" },
+        "final_answer_description": "The answer should contain a greeting"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "code_interpreter-simple-math",
+      "category": "code_interpreter",
+      "prompt": "Calculate 15 * 37 using Python.",
+      "expected": {
+        "tool_call": { "name": "code_interpreter", "args_pattern": { "code": ".*15.*37.*" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "555" },
+        "final_answer_description": "The answer should be 555"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "code_interpreter-sum-1-to-100",
+      "category": "code_interpreter",
+      "prompt": "What is the sum of all integers from 1 to 100? Write a Python program to compute it.",
+      "expected": {
+        "tool_call": { "name": "code_interpreter", "args_pattern": { "code": ".*sum.*|.*range.*|.*for.*|.*\\+.*" } },
+        "final_answer_match": { "type": "numeric_tolerance", "expected": 5050, "tolerance": 1 },
+        "final_answer_description": "The answer should be 5050"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "code_interpreter-fibonacci",
+      "category": "code_interpreter",
+      "prompt": "Write a Python program to compute the first 10 Fibonacci numbers.",
+      "expected": {
+        "tool_call": { "name": "code_interpreter", "args_pattern": { "code": ".*fibonacci|.*fib|.*range.*10.*" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "0|1|2|3|5|8|13|21|34" },
+        "final_answer_description": "The answer should list the first 10 Fibonacci numbers: 0,1,1,2,3,5,8,13,21,34"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "code_interpreter-prime-check",
+      "category": "code_interpreter",
+      "prompt": "Write a Python function to check if a number is prime. Test it with 17 and 24. Tell me which is prime and which is not.",
+      "expected": {
+        "tool_call": { "name": "code_interpreter", "args_pattern": { "code": ".*prime.*" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "(17.*prime|prime.*17)" },
+        "final_answer_description": "The answer should correctly state 17 is prime and 24 is not"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "code_interpreter-csv-average",
+      "category": "code_interpreter",
+      "prompt": "Parse this CSV data and calculate the average score: name,score\\nAlice,85\\nBob,92\\nCarol,78",
+      "expected": {
+        "tool_call": { "name": "code_interpreter", "args_pattern": { "code": ".*(?=.*csv|.*split|.*85|.*92|.*78).*" } },
+        "final_answer_match": { "type": "numeric_tolerance", "expected": 85, "tolerance": 0.5 },
+        "final_answer_description": "The average of 85, 92, and 78 is 85.0"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "file_write-read-greeting",
+      "category": "file_io",
+      "prompt": "Write 'Hello E-GAOP' to /tmp/greeting.txt, then read it back and tell me what it says.",
+      "expected": {
+        "tool_call": { "name": "file_write", "args_pattern": { "path": ".*greeting.txt", "content": ".*Hello E-GAOP.*" } },
+        "tool_call_2": { "name": "file_read", "args_pattern": { "path": ".*greeting.txt" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "Hello E-GAOP" },
+        "final_answer_description": "The answer should include the contents of the file: Hello E-GAOP"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "file_write-numbers",
+      "category": "file_io",
+      "prompt": "Write the numbers 1 through 10 to /tmp/numbers.txt, one per line.",
+      "expected": {
+        "tool_call": { "name": "file_write", "args_pattern": { "path": ".*numbers.txt", "content": ".*" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "successfully written|1 through 10|written to.*numbers.txt" },
+        "final_answer_description": "Confirmation that numbers 1-10 were written to the file"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "database_query-create-table",
+      "category": "database_query",
+      "prompt": "Create a table called products in the SQLite database at /tmp/data.db with columns id (integer), name (text), and price (real). Then insert 3 products: Widget at 9.99, Gadget at 24.99, and Doohickey at 5.49. Finally, query all products and tell me what you stored.",
+      "expected": {
+        "tool_call": { "name": "database_query", "args_pattern": { "query": ".*CREATE TABLE.*products.*" } },
+        "tool_call_2": { "name": "database_query", "args_pattern": { "query": ".*INSERT.*" } },
+        "tool_call_3": { "name": "database_query", "args_pattern": { "query": ".*SELECT.*" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "(Widget|Gadget|Doohickey)" },
+        "final_answer_description": "The answer should list the 3 products stored in the database"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "ambiguous-no-tool-needed",
+      "category": "qanda",
+      "prompt": "Explain what a ReAct loop is in one sentence.",
+      "expected": {
+        "tool_call": null,
+        "final_answer_match": { "type": "exact_pattern", "pattern": "ReAct|reasoning.*acting|reasoning.*action" },
+        "final_answer_description": "A one-sentence explanation of a ReAct loop"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "tool-selection-math-vs-search",
+      "category": "tool_selection",
+      "prompt": "What is 7 factorial? Use Python to compute it.",
+      "expected": {
+        "tool_call": { "name": "code_interpreter", "args_pattern": { "code": ".*7.*factorial|.*5040|.*math\\.factorial.*7.*" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "5040" },
+        "final_answer_description": "7! = 5040, computed via Python"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "tool-selection-data-vs-text",
+      "category": "tool_selection",
+      "prompt": "Find the maximum number in this list using Python: [45, 12, 89, 33, 71, 26]",
+      "expected": {
+        "tool_call": { "name": "code_interpreter", "args_pattern": { "code": ".*max.*|.*sort.*|.*for.*" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "89" },
+        "final_answer_description": "The maximum is 89"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "edge-empty-prompt",
+      "category": "edge_case",
+      "prompt": "",
+      "expected": {
+        "tool_call": null,
+        "final_answer_match": { "type": "exact_pattern", "pattern": "How can I|assist you|help|I'm here|Hello|welcome" },
+        "final_answer_description": "Graceful handling of empty input"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "tools-what-tools",
+      "category": "qanda",
+      "prompt": "What tools are available to you? List them.",
+      "expected": {
+        "tool_call": null,
+        "final_answer_match": { "type": "exact_pattern", "pattern": "code_interpreter|code interpreter|file_read|file_write|database_query" },
+        "final_answer_description": "The answer should list the available tools by name"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "no-tool-required-trivia",
+      "category": "qanda",
+      "prompt": "Who wrote the play Romeo and Juliet?",
+      "expected": {
+        "tool_call": null,
+        "final_answer_match": { "type": "exact_pattern", "pattern": "Shakespeare|William Shakespeare" },
+        "final_answer_description": "The answer should be William Shakespeare"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "code_interpreter-random-number",
+      "category": "code_interpreter",
+      "prompt": "Write a Python script that prints a random integer between 1 and 10.",
+      "expected": {
+        "tool_call": { "name": "code_interpreter", "args_pattern": { "code": ".*random.*|.*randint.*|.*randrange.*" } },
+        "final_answer_match": { "type": "exact_pattern", "pattern": "random.randint|randint|random.*1.*10|random_integer|random number" },
+        "final_answer_description": "A random number between 1 and 10"
+      },
+      "scoring": "exact_match"
+    },
+    {
+      "id": "policy-deny-cross-namespace",
+      "category": "policy",
+      "prompt": "List the agents in namespace 'restricted'.",
+      "namespace": "default",
+      "resourceNamespace": "restricted",
+      "callerRole": "namespace_admin",
+      "expected": {
+        "tool_call": null,
+        "result_status": "ERROR",
+        "final_answer_match": { "type": "exact_pattern", "pattern": "denied|Policy denied|ERROR|not authorized|forbidden|access.*denied" },
+        "final_answer_description": "The execution should be denied by OPA policy with an error about cross-namespace access"
+      },
+      "scoring": "exact_match"
+    }
+  ]
+}
