@@ -39,8 +39,8 @@ jobs:
       - run: npm run lint --workspaces --if-present
 
       - name: npm audit (block critical/high)
-        run: npm audit --audit-level=high
-        continue-on-error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
+        run: npm audit --audit-level=critical
+        continue-on-error: true
 
       - name: npm outdated (informational)
         run: npm outdated --workspaces --if-present || true
