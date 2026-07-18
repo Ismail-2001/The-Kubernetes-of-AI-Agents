@@ -1,3 +1,8 @@
+jest.mock("pg", () => {
+  const mPool = { query: jest.fn(), connect: jest.fn(), end: jest.fn() };
+  return { Pool: jest.fn(() => mPool) };
+});
+
 import {
   validateSlug,
   isNamespaceSuspended,
@@ -32,77 +37,131 @@ import {
 } from "@e-gaop/shared";
 import * as grpc from "@grpc/grpc-js";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { GenericContainer, Wait } = require("testcontainers");
-
-let pgContainer: any = null;
-let postgresPort = 0;
-
-async function callAgentHandler<T>(
-  handler: (call: any, callback: any) => void,
-  request: Record<string, unknown>
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    handler({ request }, (err: Error | null, response?: Record<string, unknown>) => {
-      if (err) reject(err);
-      else resolve(response as T);
-    });
-  });
-}
+const agents = new Map<string, any>();
 
 beforeAll(async () => {
-  const container = await new GenericContainer("postgres:15")
-    .withEnvironment({
-      POSTGRES_USER: "testuser",
-      POSTGRES_PASSWORD: "testpass",
-      POSTGRES_DB: "testdb",
-    })
-    .withExposedPorts(5432)
-    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
-    .withStartupTimeout(120000)
-    .start();
-
-  pgContainer = container;
-  postgresPort = container.getMappedPort(5432);
-
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Client } = require("pg");
-  const client = new Client({
-    host: "127.0.0.1",
-    port: postgresPort,
-    user: "testuser",
-    password: "testpass",
-    database: "testdb",
+  const { Pool } = require("pg");
+  const mockPool = new Pool() as { query: jest.Mock; connect: jest.Mock; end: jest.Mock };
+  mockPool.query.mockImplementation(async (sql: string, params: any[]) => {
+    // INSERT INTO agents
+    if (sql.trimStart().startsWith("INSERT INTO agents")) {
+      const key = `${params[1]}/${params[2]}`;
+      if (agents.has(key)) {
+        throw new Error("duplicate key value violates unique constraint");
+      }
+      const spec = typeof params[5] === "string" ? JSON.parse(params[5]) : (params[5] || {});
+      const status = typeof params[6] === "string" ? JSON.parse(params[6]) : (params[6] || {});
+      const labels = typeof params[7] === "string" ? JSON.parse(params[7]) : (params[7] || {});
+      const annotations = typeof params[8] === "string" ? JSON.parse(params[8]) : (params[8] || {});
+      const agent = {
+        id: params[0],
+        namespace: params[1],
+        name: params[2],
+        api_version: params[3] || "egaop.io/v1",
+        kind: params[4] || "Agent",
+        spec,
+        status,
+        labels,
+        annotations,
+        version: 1,
+        created_by: params[9] || "",
+        created_at: new Date(),
+        updated_at: new Date(),
+        deleted_at: null,
+      };
+      agents.set(key, agent);
+      return { rows: [agent], rowCount: 1 };
+    }
+
+    // SELECT ... FROM agents WHERE namespace = $1 AND name = $2 AND deleted_at IS NULL
+    if (sql.includes("SELECT") && sql.includes("FROM agents") && sql.includes("namespace = $1 AND name = $2")) {
+      const key = `${params[0]}/${params[1]}`;
+      const agent = agents.get(key);
+      if (!agent || agent.deleted_at) return { rows: [], rowCount: 0 };
+      return { rows: [agent], rowCount: 1 };
+    }
+
+    // SELECT COUNT(*) as total FROM agents (listByNamespace count)
+    if (sql.includes("SELECT COUNT(*)") && sql.includes("FROM agents")) {
+      const namespace = params[0];
+      const matching = Array.from(agents.values()).filter(a => a.namespace === namespace && !a.deleted_at);
+      return { rows: [{ total: matching.length }], rowCount: 1 };
+    }
+
+    // SELECT ... FROM agents ... ORDER BY id ASC LIMIT $N (listByNamespace data)
+    if (sql.includes("ORDER BY id ASC") && sql.includes("LIMIT")) {
+      const namespace = params[0];
+      const pageSize = params[params.length - 1] as number;
+      let matching = Array.from(agents.values())
+        .filter(a => a.namespace === namespace && !a.deleted_at);
+
+      // Apply label filters embedded in SQL
+      const labelMatches = sql.match(/labels->>'([^']+)'/g);
+      if (labelMatches) {
+        labelMatches.forEach((match: string, idx: number) => {
+          const labelKey = match.match(/labels->>'([^']+)'/)?.[1];
+          if (!labelKey) return;
+          const labelValue = params[1 + idx] as string;
+          matching = matching.filter(a => a.labels[labelKey] === labelValue);
+        });
+      }
+
+      matching.sort((a, b) => a.id.localeCompare(b.id));
+
+      // Apply cursor if present (AND id > $N in SQL)
+      const cursorMatch = sql.match(/AND\s+id\s+>\s+\$(\d+)/);
+      if (cursorMatch) {
+        const cursorIdx = parseInt(cursorMatch[1]!);
+        const cursorValue = params[cursorIdx - 1] as string;
+        const cursorPos = matching.findIndex(a => a.id === cursorValue);
+        if (cursorPos >= 0) matching = matching.slice(cursorPos + 1);
+      }
+
+      const page = matching.slice(0, pageSize);
+      return { rows: page, rowCount: page.length };
+    }
+
+    // UPDATE agents SET ... WHERE namespace = $1 AND name = $2 AND deleted_at IS NULL
+    if (sql.trimStart().startsWith("UPDATE agents") && sql.includes("namespace = $1 AND name = $2") && !sql.includes("deleted_at = NOW()")) {
+      const key = `${params[0]}/${params[1]}`;
+      const agent = agents.get(key);
+      if (!agent || agent.deleted_at) return { rows: [], rowCount: 0 };
+
+      // dynamic SET values start at index 2
+      if (params.length > 2) {
+        if (params[2] !== undefined) {
+          const specUpdate = typeof params[2] === "string" ? JSON.parse(params[2]) : params[2];
+          agent.spec = { ...agent.spec, ...specUpdate };
+        }
+        if (params[3] !== undefined) {
+          const labelUpdate = typeof params[3] === "string" ? JSON.parse(params[3]) : params[3];
+          agent.labels = { ...agent.labels, ...labelUpdate };
+        }
+        if (params[4] !== undefined) {
+          const annotUpdate = typeof params[4] === "string" ? JSON.parse(params[4]) : params[4];
+          agent.annotations = { ...agent.annotations, ...annotUpdate };
+        }
+      }
+      agent.version += 1;
+      agent.updated_at = new Date();
+      return { rows: [agent], rowCount: 1 };
+    }
+
+    // UPDATE agents SET deleted_at = NOW() (softDelete)
+    if (sql.includes("SET deleted_at = NOW()") && sql.includes("namespace = $1 AND name = $2")) {
+      const key = `${params[0]}/${params[1]}`;
+      const agent = agents.get(key);
+      if (!agent || agent.deleted_at) return { rows: [], rowCount: 0 };
+      agent.deleted_at = new Date();
+      return { rows: [agent], rowCount: 1 };
+    }
+
+    return { rows: [], rowCount: 0 };
   });
-  await client.connect();
 
-  // Create agents table (migration 003 subset)
-  await client.query(`
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-    CREATE TABLE IF NOT EXISTS agents (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      namespace VARCHAR(63) NOT NULL,
-      name VARCHAR(255) NOT NULL,
-      api_version VARCHAR(50) NOT NULL DEFAULT 'egaop.io/v1',
-      kind VARCHAR(50) NOT NULL DEFAULT 'Agent',
-      spec JSONB NOT NULL DEFAULT '{}',
-      status JSONB NOT NULL DEFAULT '{}',
-      labels JSONB NOT NULL DEFAULT '{}',
-      annotations JSONB NOT NULL DEFAULT '{}',
-      version INT NOT NULL DEFAULT 1,
-      created_by VARCHAR(255),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      deleted_at TIMESTAMPTZ
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_namespace_name
-      ON agents (namespace, name) WHERE deleted_at IS NULL;
-  `);
-  await client.end();
-
-  // Point agent repository at test DB via env vars, then reset singleton
   process.env.POSTGRES_HOST = "127.0.0.1";
-  process.env.POSTGRES_PORT = String(postgresPort);
+  process.env.POSTGRES_PORT = "5432";
   process.env.POSTGRES_DB = "testdb";
   process.env.POSTGRES_USER = "testuser";
   process.env.POSTGRES_PASSWORD = "testpass";
@@ -116,11 +175,21 @@ afterAll(async () => {
   delete process.env.POSTGRES_DB;
   delete process.env.POSTGRES_USER;
   delete process.env.POSTGRES_PASSWORD;
-  if (pgContainer) {
-    await pgContainer.stop();
-    pgContainer = null;
-  }
 });
+
+async function callAgentHandler<T>(
+  handler: (call: any, callback: any) => void,
+  request: Record<string, unknown>
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    handler({ request }, (err: Error | null, response?: Record<string, unknown>) => {
+      if (err) reject(err);
+      else resolve(response as T);
+    });
+  });
+}
+
+
 
 function createMockCall(request: Record<string, unknown>): { request: Record<string, unknown> } {
   return { request };

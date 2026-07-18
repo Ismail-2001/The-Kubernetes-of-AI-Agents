@@ -93,7 +93,7 @@ describe("Sandbox Runtime", () => {
       }, (err: any, response: any) => {
         expect(err).toBeNull();
         expect(response.sandbox_id).toBe("abc123def456");
-        expect(response.status).toBe("Starting");
+        expect(response.status).toBe("Running");
         expect(mockDocker.createContainer).toHaveBeenCalledTimes(1);
         done();
       });

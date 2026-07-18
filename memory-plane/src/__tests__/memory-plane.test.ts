@@ -78,6 +78,7 @@ describe("Memory Plane", () => {
 
       client.Write({
         agent_id: "agent-1",
+        namespace: "default",
         memory_type: "working",
         key: "conversation",
         data: { message: "Hello" }
@@ -87,7 +88,7 @@ describe("Memory Plane", () => {
         expect(response.version).toMatch(/^rev-/);
         expect(mockRedis.setex).toHaveBeenCalledTimes(1);
         const [key, ttl] = mockRedis.setex.mock.calls[0];
-        expect(key).toBe("egaop:agent-1:working:conversation");
+        expect(key).toBe("egaop:default:agent-1:working:conversation");
         expect(ttl).toBe(300);
         done();
       });
@@ -98,6 +99,7 @@ describe("Memory Plane", () => {
 
       client.Write({
         agent_id: "agent-1",
+        namespace: "default",
         memory_type: "session",
         key: "prefs",
         data: { theme: "dark" }
@@ -116,6 +118,7 @@ describe("Memory Plane", () => {
 
       client.Read({
         agent_id: "agent-1",
+        namespace: "default",
         memory_type: "working",
         key: "conversation"
       }, (err: any, response: any) => {
@@ -131,6 +134,7 @@ describe("Memory Plane", () => {
 
       client.Read({
         agent_id: "agent-1",
+        namespace: "default",
         memory_type: "working",
         key: "nonexistent"
       }, (err: any, response: any) => {
@@ -145,6 +149,7 @@ describe("Memory Plane", () => {
 
       client.Read({
         agent_id: "agent-1",
+        namespace: "default",
         memory_type: "working",
         key: "fail"
       }, (err: any, response: any) => {
@@ -161,12 +166,13 @@ describe("Memory Plane", () => {
 
       client.Delete({
         agent_id: "agent-1",
+        namespace: "default",
         memory_type: "working",
         key: "temp-data"
       }, (err: any, response: any) => {
         expect(err).toBeNull();
         expect(response.status).toBe("success");
-        expect(mockRedis.del).toHaveBeenCalledWith("egaop:agent-1:working:temp-data");
+        expect(mockRedis.del).toHaveBeenCalledWith("egaop:default:agent-1:working:temp-data");
         done();
       });
     });
@@ -176,7 +182,7 @@ describe("Memory Plane", () => {
     it("should return entries from Redis scan stream", (done) => {
       const mockStream: any = (() => {
         let idx = 0;
-        const chunks = [["egaop:agent-1:working:k1", "egaop:agent-1:working:k2"]];
+        const chunks = [["egaop:default:agent-1:working:k1", "egaop:default:agent-1:working:k2"]];
         return {
           [Symbol.asyncIterator]: () => ({
             next: () => {
@@ -190,13 +196,14 @@ describe("Memory Plane", () => {
       })();
       mockRedis.scanStream.mockReturnValue(mockStream);
       mockRedis.get.mockImplementation((key: string) => {
-        if (key === "egaop:agent-1:working:k1") return Promise.resolve(JSON.stringify({ val: 1 }));
-        if (key === "egaop:agent-1:working:k2") return Promise.resolve(JSON.stringify({ val: 2 }));
+        if (key === "egaop:default:agent-1:working:k1") return Promise.resolve(JSON.stringify({ val: 1 }));
+        if (key === "egaop:default:agent-1:working:k2") return Promise.resolve(JSON.stringify({ val: 2 }));
         return Promise.resolve(null);
       });
 
       client.List({
         agent_id: "agent-1",
+        namespace: "default",
         memory_type: "working"
       }, (err: any, response: any) => {
         expect(err).toBeNull();

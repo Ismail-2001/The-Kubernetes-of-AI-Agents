@@ -1,11 +1,13 @@
+jest.mock("pg", () => {
+  const mPool = { query: jest.fn(), connect: jest.fn(), end: jest.fn() };
+  return { Pool: jest.fn(() => mPool) };
+});
+
 import path from "path";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { SecretRepository } from "../repository";
 import { createServerBundle, destroyServerBundle, type ServerBundle } from "../test-server";
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { GenericContainer, Wait } = require("testcontainers");
 
 const MASTER_KEY = "test-master-key-for-unit-tests-only-32chars";
 
@@ -16,69 +18,54 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 });
 const egaopProto = grpc.loadPackageDefinition(packageDefinition) as any;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let pgContainer: any = null;
 let repo: SecretRepository | null = null;
 let bundle: ServerBundle | null = null;
+const secrets = new Map<string, any>();
 
 beforeAll(async () => {
-  // 1. Start PostgreSQL
-  const container = await new GenericContainer("postgres:15")
-    .withEnvironment({
-      POSTGRES_USER: "testuser",
-      POSTGRES_PASSWORD: "testpass",
-      POSTGRES_DB: "testdb",
-    })
-    .withExposedPorts(5432)
-    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
-    .withStartupTimeout(120000)
-    .start();
-
-  pgContainer = container;
-  const postgresPort = container.getMappedPort(5432);
-
-  // 2. Run migration
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Client } = require("pg");
-  const client = new Client({
-    host: "127.0.0.1",
-    port: postgresPort,
-    user: "testuser",
-    password: "testpass",
-    database: "testdb",
-  });
-  await client.connect();
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS secrets (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        namespace VARCHAR(255) NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        encrypted_data TEXT NOT NULL,
-        type VARCHAR(100) NOT NULL DEFAULT 'api_key',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE(namespace, name)
-    );
-    CREATE INDEX IF NOT EXISTS idx_secrets_namespace_name ON secrets (namespace, name);
-  `);
-  await client.end();
+  const { Pool } = require("pg");
+  const mockPool = new Pool() as { query: jest.Mock; connect: jest.Mock; end: jest.Mock };
+  mockPool.query.mockImplementation(async (sql: string, params: any[]) => {
+    // INSERT INTO secrets ... ON CONFLICT ... DO UPDATE
+    if (sql.trimStart().startsWith("INSERT INTO secrets")) {
+      const key = `${params[0]}/${params[1]}`;
+      secrets.set(key, {
+        id: "00000000-0000-0000-0000-000000000001",
+        namespace: params[0],
+        name: params[1],
+        encrypted_data: params[2],
+        type: params[3] || "api_key",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      return { rows: [], rowCount: 1 };
+    }
 
-  // 3. Create repository pointing at testcontainer
+    // SELECT ... FROM secrets WHERE namespace = $1 AND name = $2
+    if (sql.includes("SELECT") && sql.includes("FROM secrets")) {
+      const key = `${params[0]}/${params[1]}`;
+      const secret = secrets.get(key);
+      if (!secret) return { rows: [], rowCount: 0 };
+      return { rows: [secret], rowCount: 1 };
+    }
+
+    return { rows: [], rowCount: 0 };
+  });
+
   repo = new SecretRepository({
     host: "127.0.0.1",
-    port: postgresPort,
+    port: 5432,
     database: "testdb",
     user: "testuser",
     password: "testpass",
   });
 
-  // 4. Create gRPC server with this repo
   bundle = await createServerBundle({ masterKey: MASTER_KEY, repo });
 }, 180000);
 
 afterAll(async () => {
   if (bundle) await destroyServerBundle(bundle);
-  if (pgContainer) await pgContainer.stop();
 });
 
 function createSecretClient(port: number) {

@@ -1,82 +1,50 @@
 import { SecretRepository } from "../repository";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { GenericContainer, Wait } = require("testcontainers");
+const mockPool = {
+  query: jest.fn(),
+  end: jest.fn().mockResolvedValue(undefined),
+  connect: jest.fn().mockResolvedValue({ query: jest.fn(), release: jest.fn() }),
+};
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let pgContainer: any = null;
-let repo: SecretRepository | null = null;
-let postgresPort = 0;
+jest.mock("pg", () => ({
+  Pool: jest.fn(() => mockPool),
+}));
 
-beforeAll(async () => {
-  const container = await new GenericContainer("postgres:15")
-    .withEnvironment({
-      POSTGRES_USER: "testuser",
-      POSTGRES_PASSWORD: "testpass",
-      POSTGRES_DB: "testdb",
-    })
-    .withExposedPorts(5432)
-    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
-    .withStartupTimeout(120000)
-    .start();
+let repo: SecretRepository;
 
-  pgContainer = container;
-  postgresPort = container.getMappedPort(5432);
-
-  // Run migration
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Client } = require("pg");
-  const client = new Client({
-    host: "127.0.0.1",
-    port: postgresPort,
-    user: "testuser",
-    password: "testpass",
-    database: "testdb",
-  });
-  await client.connect();
-
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS secrets (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        namespace VARCHAR(255) NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        encrypted_data TEXT NOT NULL,
-        type VARCHAR(100) NOT NULL DEFAULT 'api_key',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE(namespace, name)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_secrets_namespace_name
-        ON secrets (namespace, name);
-  `);
-  await client.end();
-
+beforeAll(() => {
   repo = new SecretRepository({
     host: "127.0.0.1",
-    port: postgresPort,
+    port: 5432,
     database: "testdb",
     user: "testuser",
     password: "testpass",
   });
-}, 180000);
+});
 
 afterAll(async () => {
-  if (repo) await repo.close();
-  if (pgContainer) await pgContainer.stop();
+  await repo.close();
 });
 
 describe("SecretRepository — PostgreSQL persistence", () => {
   it("should store and retrieve an encrypted secret", async () => {
-    if (!repo) return;
-
     const encryptedPayload = JSON.stringify({ iv: "aabb", tag: "ccdd", ciphertext: "eeff" });
-    await repo.upsert({
-      namespace: "default",
-      name: "api-key",
-      encryptedData: encryptedPayload,
-      type: "api_key",
+
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({
+      rows: [{
+        id: "mock-id",
+        namespace: "default",
+        name: "api-key",
+        encrypted_data: encryptedPayload,
+        type: "api_key",
+        created_at: new Date(),
+        updated_at: new Date(),
+      }],
+      rowCount: 1,
     });
+
+    await repo.upsert({ namespace: "default", name: "api-key", encryptedData: encryptedPayload, type: "api_key" });
 
     const found = await repo.get("default", "api-key");
     expect(found).not.toBeNull();
@@ -87,10 +55,19 @@ describe("SecretRepository — PostgreSQL persistence", () => {
   });
 
   it("should overwrite existing secret on upsert", async () => {
-    if (!repo) return;
-
     const payload1 = JSON.stringify({ iv: "11", tag: "22", ciphertext: "33" });
     const payload2 = JSON.stringify({ iv: "44", tag: "55", ciphertext: "66" });
+
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({
+      rows: [{
+        id: "mock-id", namespace: "prod", name: "db-pass",
+        encrypted_data: payload2, type: "password",
+        created_at: new Date(), updated_at: new Date(),
+      }],
+      rowCount: 1,
+    });
 
     await repo.upsert({ namespace: "prod", name: "db-pass", encryptedData: payload1, type: "password" });
     await repo.upsert({ namespace: "prod", name: "db-pass", encryptedData: payload2, type: "password" });
@@ -101,17 +78,26 @@ describe("SecretRepository — PostgreSQL persistence", () => {
   });
 
   it("should return null for non-existent secret", async () => {
-    if (!repo) return;
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
     const found = await repo.get("default", "nonexistent");
     expect(found).toBeNull();
   });
 
   it("should namespace secrets independently", async () => {
-    if (!repo) return;
-
     const payloadA = JSON.stringify({ iv: "aa", tag: "bb", ciphertext: "cc" });
     const payloadB = JSON.stringify({ iv: "dd", tag: "ee", ciphertext: "ff" });
+
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({
+      rows: [{ id: "id-a", namespace: "team-a", name: "shared-key", encrypted_data: payloadA, type: "api_key", created_at: new Date(), updated_at: new Date() }],
+      rowCount: 1,
+    });
+    mockPool.query.mockResolvedValueOnce({
+      rows: [{ id: "id-b", namespace: "team-b", name: "shared-key", encrypted_data: payloadB, type: "api_key", created_at: new Date(), updated_at: new Date() }],
+      rowCount: 1,
+    });
 
     await repo.upsert({ namespace: "team-a", name: "shared-key", encryptedData: payloadA, type: "api_key" });
     await repo.upsert({ namespace: "team-b", name: "shared-key", encryptedData: payloadB, type: "api_key" });
@@ -124,7 +110,9 @@ describe("SecretRepository — PostgreSQL persistence", () => {
   });
 
   it("should delete a secret", async () => {
-    if (!repo) return;
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
     await repo.upsert({ namespace: "del", name: "to-delete", encryptedData: "x", type: "api_key" });
     const deleted = await repo.delete("del", "to-delete");
@@ -135,14 +123,20 @@ describe("SecretRepository — PostgreSQL persistence", () => {
   });
 
   it("should return false when deleting non-existent secret", async () => {
-    if (!repo) return;
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
     const deleted = await repo.delete("default", "no-such-thing");
     expect(deleted).toBe(false);
   });
 
   it("should list secrets for a namespace", async () => {
-    if (!repo) return;
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({
+      rows: [{ name: "key-1" }, { name: "key-2" }],
+      rowCount: 2,
+    });
 
     await repo.upsert({ namespace: "list-ns", name: "key-1", encryptedData: "a", type: "api_key" });
     await repo.upsert({ namespace: "list-ns", name: "key-2", encryptedData: "b", type: "password" });
@@ -155,32 +149,27 @@ describe("SecretRepository — PostgreSQL persistence", () => {
     expect(keys).not.toContain("key-3");
   });
 
-  // ─── THIS IS THE FAILING TEST ──────────────────────────────────────────
-  // It proves the current in-memory Map loses data on restart.
-  // After we wire in the pg-backed repository, this test will pass.
   it("should persist data across repository instances (restart simulation)", async () => {
-    if (!repo) return;
-
-    // Store a secret with the first repository instance
     const payload = JSON.stringify({ iv: "restart-iv", tag: "restart-tag", ciphertext: "restart-data" });
-    await repo.upsert({
-      namespace: "restart-test",
-      name: "critical-api-key",
-      encryptedData: payload,
-      type: "api_key",
+
+    mockPool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockPool.query.mockResolvedValueOnce({
+      rows: [{
+        id: "persist-id", namespace: "restart-test", name: "critical-api-key",
+        encrypted_data: payload, type: "api_key",
+        created_at: new Date(), updated_at: new Date(),
+      }],
+      rowCount: 1,
     });
 
-    // Simulate restart: create a new repository instance pointing at the same DB
+    await repo.upsert({ namespace: "restart-test", name: "critical-api-key", encryptedData: payload, type: "api_key" });
+
     const repo2 = new SecretRepository({
-      host: "127.0.0.1",
-      port: postgresPort,
-      database: "testdb",
-      user: "testuser",
-      password: "testpass",
+      host: "127.0.0.1", port: 5432, database: "testdb",
+      user: "testuser", password: "testpass",
     });
 
     try {
-      // Data MUST survive restart — this is the whole point of durability
       const found = await repo2.get("restart-test", "critical-api-key");
       expect(found).not.toBeNull();
       expect(found!.encryptedData).toBe(payload);
@@ -191,13 +180,11 @@ describe("SecretRepository — PostgreSQL persistence", () => {
   });
 
   it("should throw when database is unreachable", async () => {
-    // Point at a port that doesn't exist
+    mockPool.query.mockRejectedValueOnce(new Error("connection error"));
+
     const badRepo = new SecretRepository({
-      host: "127.0.0.1",
-      port: 1,
-      database: "testdb",
-      user: "testuser",
-      password: "testpass",
+      host: "127.0.0.1", port: 1, database: "testdb",
+      user: "testuser", password: "testpass",
     });
 
     try {
@@ -208,12 +195,11 @@ describe("SecretRepository — PostgreSQL persistence", () => {
   });
 
   it("should throw on upsert when database is unreachable", async () => {
+    mockPool.query.mockRejectedValueOnce(new Error("connection error"));
+
     const badRepo = new SecretRepository({
-      host: "127.0.0.1",
-      port: 1,
-      database: "testdb",
-      user: "testuser",
-      password: "testpass",
+      host: "127.0.0.1", port: 1, database: "testdb",
+      user: "testuser", password: "testpass",
     });
 
     try {

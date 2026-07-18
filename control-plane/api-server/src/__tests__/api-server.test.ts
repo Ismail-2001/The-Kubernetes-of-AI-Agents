@@ -1,11 +1,13 @@
+jest.mock("pg", () => {
+  const mPool = { query: jest.fn(), connect: jest.fn(), end: jest.fn() };
+  return { Pool: jest.fn(() => mPool) };
+});
+
 import path from "path";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { server } from "../index";
 import { resetAgentRepository } from "../agents/repository";
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { GenericContainer, Wait } = require("testcontainers");
 
 const PROTO_PATH = path.resolve(__dirname, "../../../../api/proto/egaop/v1/agent.proto");
 
@@ -15,6 +17,8 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 });
 
 const egaopProto = grpc.loadPackageDefinition(packageDefinition) as any;
+
+const agents = new Map<string, any>();
 
 function startServer(srv: grpc.Server): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -41,62 +45,54 @@ function createHealthClient(port: number) {
   };
 }
 
-let pgContainer: any = null;
-let postgresPort = 0;
-
 beforeAll(async () => {
-  const container = await new GenericContainer("postgres:15")
-    .withEnvironment({
-      POSTGRES_USER: "testuser",
-      POSTGRES_PASSWORD: "testpass",
-      POSTGRES_DB: "testdb",
-    })
-    .withExposedPorts(5432)
-    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
-    .withStartupTimeout(120000)
-    .start();
-
-  pgContainer = container;
-  postgresPort = container.getMappedPort(5432);
-
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Client } = require("pg");
-  const client = new Client({
-    host: "127.0.0.1",
-    port: postgresPort,
-    user: "testuser",
-    password: "testpass",
-    database: "testdb",
+  const { Pool } = require("pg");
+  const mockPool = new Pool() as { query: jest.Mock; connect: jest.Mock; end: jest.Mock };
+  mockPool.query.mockImplementation(async (sql: string, params: any[]) => {
+    // INSERT INTO agents
+    if (sql.trimStart().startsWith("INSERT INTO agents")) {
+      const key = `${params[1]}/${params[2]}`;
+      if (agents.has(key)) {
+        throw new Error("duplicate key value violates unique constraint");
+      }
+      const spec = typeof params[5] === "string" ? JSON.parse(params[5]) : (params[5] || {});
+      const status = typeof params[6] === "string" ? JSON.parse(params[6]) : (params[6] || {});
+      const labels = typeof params[7] === "string" ? JSON.parse(params[7]) : (params[7] || {});
+      const annotations = typeof params[8] === "string" ? JSON.parse(params[8]) : (params[8] || {});
+      const agent = {
+        id: params[0],
+        namespace: params[1],
+        name: params[2],
+        api_version: params[3] || "egaop.io/v1",
+        kind: params[4] || "Agent",
+        spec,
+        status,
+        labels,
+        annotations,
+        version: 1,
+        created_by: params[9] || "",
+        created_at: new Date(),
+        updated_at: new Date(),
+        deleted_at: null,
+      };
+      agents.set(key, agent);
+      return { rows: [agent], rowCount: 1 };
+    }
+
+    // SELECT ... FROM agents WHERE namespace = $1 AND name = $2 AND deleted_at IS NULL
+    if (sql.includes("SELECT") && sql.includes("FROM agents") && sql.includes("namespace = $1 AND name = $2")) {
+      const key = `${params[0]}/${params[1]}`;
+      const agent = agents.get(key);
+      if (!agent || agent.deleted_at) return { rows: [], rowCount: 0 };
+      return { rows: [agent], rowCount: 1 };
+    }
+
+    return { rows: [], rowCount: 0 };
   });
-  await client.connect();
 
-  // Create agents table (migration 003 subset)
-  await client.query(`
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-    CREATE TABLE IF NOT EXISTS agents (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      namespace VARCHAR(63) NOT NULL,
-      name VARCHAR(255) NOT NULL,
-      api_version VARCHAR(50) NOT NULL DEFAULT 'egaop.io/v1',
-      kind VARCHAR(50) NOT NULL DEFAULT 'Agent',
-      spec JSONB NOT NULL DEFAULT '{}',
-      status JSONB NOT NULL DEFAULT '{}',
-      labels JSONB NOT NULL DEFAULT '{}',
-      annotations JSONB NOT NULL DEFAULT '{}',
-      version INT NOT NULL DEFAULT 1,
-      created_by VARCHAR(255),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      deleted_at TIMESTAMPTZ
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_namespace_name
-      ON agents (namespace, name) WHERE deleted_at IS NULL;
-  `);
-  await client.end();
-
-  // Point agent repository at test DB
   process.env.POSTGRES_HOST = "127.0.0.1";
-  process.env.POSTGRES_PORT = String(postgresPort);
+  process.env.POSTGRES_PORT = "5432";
   process.env.POSTGRES_DB = "testdb";
   process.env.POSTGRES_USER = "testuser";
   process.env.POSTGRES_PASSWORD = "testpass";
@@ -110,10 +106,6 @@ afterAll(async () => {
   delete process.env.POSTGRES_DB;
   delete process.env.POSTGRES_USER;
   delete process.env.POSTGRES_PASSWORD;
-  if (pgContainer) {
-    await pgContainer.stop();
-    pgContainer = null;
-  }
   server.forceShutdown();
 });
 

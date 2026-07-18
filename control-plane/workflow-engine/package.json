@@ -6,7 +6,7 @@
                     "dev":  "ts-node src/index.ts",
                     "build":  "tsc",
                     "start":  "node dist/index.js",
-                    "test":  "jest --passWithNoTests && npx ts-node scripts/check-no-fake-policy.ts",
+                    "test": "jest --passWithNoTests && ts-node scripts/check-no-fake-policy.ts",
                     "lint":  "eslint src/",
                     "typecheck":  "tsc --noEmit"
                 },

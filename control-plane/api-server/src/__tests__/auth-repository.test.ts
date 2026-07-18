@@ -1,87 +1,120 @@
+jest.mock("pg", () => {
+  const mPool = { query: jest.fn(), connect: jest.fn(), end: jest.fn() };
+  return { Pool: jest.fn(() => mPool) };
+});
+
 import { UserRepository, ensureAdminUser } from "../auth/repository";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { GenericContainer, Wait } = require("testcontainers");
+let repo: UserRepository;
+const users = new Map<string, any>();
 
-// ─── Test with real PostgreSQL via testcontainers ──────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let pgContainer: any = null;
-let repo: UserRepository | null = null;
-let postgresPort = 0;
-
-beforeAll(async () => {
-  const container = await new GenericContainer("postgres:15")
-    .withEnvironment({
-      POSTGRES_USER: "testuser",
-      POSTGRES_PASSWORD: "testpass",
-      POSTGRES_DB: "testdb",
-    })
-    .withExposedPorts(5432)
-    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
-    .withStartupTimeout(120000)
-    .start();
-
-  pgContainer = container;
-  postgresPort = container.getMappedPort(5432);
-
-  // Run migrations
+beforeEach(() => {
+  users.clear();
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Client } = require("pg");
-  const client = new Client({
-    host: "127.0.0.1",
-    port: postgresPort,
-    user: "testuser",
-    password: "testpass",
-    database: "testdb",
+  const { Pool } = require("pg");
+  const mockPool = new Pool() as { query: jest.Mock; connect: jest.Mock; end: jest.Mock };
+  mockPool.query.mockReset();
+  mockPool.query.mockImplementation(async (sql: string, params: any[]) => {
+    const email = params && params.length > 0 ? String(params[0]).toLowerCase() : "";
+
+    // INSERT INTO users
+    if (sql.trimStart().startsWith("INSERT INTO users")) {
+      const emailLower = String(params[1]).toLowerCase();
+      if (users.has(emailLower)) {
+        throw new Error("duplicate key value violates unique constraint");
+      }
+      const row = {
+        id: params[0],
+        email: params[1],
+        password_hash: params[2],
+        name: params[3],
+        role: params[4] || "developer",
+        namespace_access: params[5] || '["default"]',
+        is_active: true,
+        must_change_password: params[6] || false,
+        failed_login_attempts: 0,
+        locked_until: null,
+        last_login_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        deleted_at: null,
+      };
+      users.set(emailLower, row);
+      return { rows: [row], rowCount: 1 };
+    }
+
+    // SELECT with lower(email) = lower($1)
+    if (sql.includes("SELECT") && sql.includes("FROM users") && sql.includes("lower(email)")) {
+      const user = users.get(email);
+      if (!user || user.deleted_at) return { rows: [], rowCount: 0 };
+      return { rows: [user], rowCount: 1 };
+    }
+
+    // UPDATE ... SET failed_login_attempts = failed_login_attempts + 1 ... RETURNING failed_login_attempts
+    if (sql.includes("RETURNING failed_login_attempts")) {
+      const user = users.get(email);
+      if (!user) return { rows: [], rowCount: 0 };
+      const attempts = (user.failed_login_attempts || 0) + 1;
+      user.failed_login_attempts = attempts;
+      return { rows: [{ failed_login_attempts: attempts }], rowCount: 1 };
+    }
+
+    // UPDATE ... SET locked_until = NOW() + INTERVAL '15 minutes' (lock query)
+    if (sql.includes("SET locked_until = NOW() + INTERVAL")) {
+      const user = users.get(email);
+      if (user) {
+        user.locked_until = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        user.failed_login_attempts = 0;
+      }
+      return { rows: [], rowCount: user ? 1 : 0 };
+    }
+
+    // UPDATE ... SET failed_login_attempts = 0, locked_until = NULL (reset)
+    if (sql.includes("failed_login_attempts = 0") && sql.includes("locked_until = NULL")) {
+      const user = users.get(email);
+      if (user) {
+        user.failed_login_attempts = 0;
+        user.locked_until = null;
+        user.last_login_at = new Date().toISOString();
+      }
+      return { rows: [user || {}], rowCount: user ? 1 : 0 };
+    }
+
+    // SELECT locked_until (isLocked check)
+    if (sql.includes("SELECT locked_until") && sql.includes("FROM users")) {
+      const user = users.get(email);
+      if (!user) return { rows: [], rowCount: 0 };
+      return { rows: [{ locked_until: user.locked_until }], rowCount: 1 };
+    }
+
+    // UPDATE SET locked_until = NULL (expired lock clear)
+    if (sql.includes("UPDATE users SET locked_until = NULL") && !sql.includes("failed_login_attempts")) {
+      const user = users.get(email);
+      if (user) user.locked_until = null;
+      return { rows: [], rowCount: user ? 1 : 0 };
+    }
+
+    // UPDATE ... SET deleted_at = NOW() (soft delete from test)
+    if (sql.includes("UPDATE users SET deleted_at")) {
+      const id = params[0];
+      for (const user of users.values()) {
+        if (user.id === id) {
+          user.deleted_at = new Date().toISOString();
+          break;
+        }
+      }
+      return { rows: [], rowCount: 1 };
+    }
+
+    return { rows: [], rowCount: 0 };
   });
-  await client.connect();
-
-  // Create users table (subset of migration 004)
-  await client.query(`
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-    DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
-            CREATE TYPE user_role AS ENUM ('platform_admin', 'namespace_admin', 'developer', 'viewer');
-        END IF;
-    END $$;
-
-    CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        email VARCHAR(255) NOT NULL UNIQUE,
-        password_hash VARCHAR(255) NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        role user_role NOT NULL DEFAULT 'developer',
-        namespace_access JSONB NOT NULL DEFAULT '[]',
-        is_active BOOLEAN NOT NULL DEFAULT true,
-        must_change_password BOOLEAN NOT NULL DEFAULT false,
-        last_login_at TIMESTAMPTZ,
-        failed_login_attempts INT NOT NULL DEFAULT 0,
-        locked_until TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        deleted_at TIMESTAMPTZ
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (lower(email)) WHERE deleted_at IS NULL;
-  `);
-  await client.end();
-
-  // Create repository connected to test DB
   repo = new UserRepository({
     host: "127.0.0.1",
-    port: postgresPort,
+    port: 5432,
     database: "testdb",
     user: "testuser",
     password: "testpass",
   });
-}, 180000);
-
-afterAll(async () => {
-  if (repo) await repo.close();
-  if (pgContainer) await pgContainer.stop();
 });
 
 describe("UserRepository — PostgreSQL persistence", () => {
@@ -186,7 +219,7 @@ describe("UserRepository — PostgreSQL persistence", () => {
     // Simulate restart: create new repository instance (same DB)
     const repo2 = new UserRepository({
       host: "127.0.0.1",
-      port: postgresPort,
+      port: 5432,
       database: "testdb",
       user: "testuser",
       password: "testpass",
