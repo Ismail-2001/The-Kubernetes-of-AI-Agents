@@ -97,7 +97,7 @@ const TOOL_DEFINITIONS: import("../types").ToolDefinition[] = [
 export async function reactWorkflow(
   input: AgentExecutionInput
 ): Promise<AgentResult> {
-  const maxIterations = Math.min(input.maxIterations ?? 10, 100);
+  const maxIterations = Math.min(input.maxIterations ?? 20, 100);
 
   // NOTE: All mutable state is function-local, NOT module-level, because
   // Temporal reuses V8 isolates across workflow executions. Module-level let
@@ -132,7 +132,11 @@ export async function reactWorkflow(
       role: "system",
       content:
         input.systemPrompt ??
-        `You are a helpful AI agent with access to functions. When you need data or computation, call a function and examine its output. Once you have the information needed to answer the user's request, provide the final answer.`
+        `You are a helpful AI agent with access to functions. Rules:
+1. For simple questions you can answer from memory (trivial math, general knowledge, greetings), answer directly without calling any function.
+2. Only call a function when you genuinely need external data or computation that you cannot do yourself.
+3. After calling a function and receiving its output, use the result to answer the user. Do NOT re-call the same function with the same arguments — if the output is available, it is final.
+4. Provide your final answer as soon as you have enough information. Do not make unnecessary additional function calls.`
     },
     ...(input.initialMessages ?? []),
   ];

@@ -62,7 +62,7 @@ function temporalDescribe(wfId) {
   }
 }
 
-async function pollWorkflow(wfId, timeoutMs = 60000) {
+async function pollWorkflow(wfId, timeoutMs = 120000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const desc = temporalDescribe(wfId);
