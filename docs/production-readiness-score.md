@@ -139,17 +139,32 @@ Weighted total = `sum(category_weight × category_pct)`.
 
 ---
 
+## Category 7: Agent Quality / Evals (weight 5%)
+
+| # | Item | Score (0–2) | Changed? | Evidence |
+|---|---|---|---|---|
+| 1 | Golden eval dataset | 2 | **New** | 19 cases across 7 categories: Q&A (6), code_interpreter (6), file_io (2), database_query (1), tool_selection (2), edge_case (1), policy_deny (1). Each case specifies expected tool call, args pattern, and final answer match. Schema v1.0. |
+| 2 | Eval runner | 2 | **New** | `evals/run-evals.mjs` — logs into API, triggers workflow via real `POST /api/agents/:id/run`, polls Temporal (`temporal workflow describe` at 172.19.0.10:7233) every 2s, extracts tool calls + output + status, scores against case expectations. |
+| 3 | Automatic scoring | 2 | **New** | Three scoring methods: `exact_pattern` (substring/OR-pipe matching), `numeric_tolerance` (epsilon comparison), `rule_based` (heuristic judge for edge cases). Tool selection accuracy computed separately from answer correctness. |
+| 4 | Regression comparison | 2 | **New** | `evals/compare-evals.mjs` — side-by-side analysis of two runs (baseline vs candidate), per-case regression/improvement detection, summary stats (task success rate Δ, tool selection Δ). |
+| 5 | Baseline run (RL-1) | 2 | **New** | `evals/baselines/RL-1.json` — 13/19 passed (68.4% task success, 94.7% tool selection accuracy). Saved as timestamped result + named baseline. All 6 failures have documented root causes. |
+| 6 | Actionable failure output | 1 | **New** | Runner reports per-case errors with output preview and tool call details. Some failures (sandbox "Activity task failed") are transient and not actionable as agent bugs. |
+| | **Category score** | **11 / 12** | | **91.7%** |
+
+---
+
 ## Weighted total calculation
 
 | Category | Raw score | Max | % | Weight | Weighted pts |
-|---|---|---|---|---|---|
-| Functional Completeness | 26 | 28 | 92.9% | 30% | 27.9 |
-| Reliability | 14 | 18 | 77.8% | 20% | 15.6 |
-| Security | 13 | 20 | 65.0% | 20% | 13.0 |
-| Observability | 11 | 14 | 78.6% | 15% | 11.8 |
-| Operability | 9 | 10 | 90.0% | 10% | 9.0 |
+|---|---|---|---|---|---|---|
+| Functional Completeness | 26 | 28 | 92.9% | 29% | 26.9 |
+| Reliability | 14 | 18 | 77.8% | 19% | 14.8 |
+| Security | 13 | 20 | 65.0% | 19% | 12.4 |
+| Observability | 11 | 14 | 78.6% | 14% | 11.0 |
+| Operability | 9 | 10 | 90.0% | 9% | 8.1 |
 | Compliance | 2 | 4 | 50.0% | 5% | 2.5 |
-| **Total** | **73** | **94** | | **100%** | **80.4** |
+| Agent Quality | 11 | 12 | 91.7% | 5% | 4.6 |
+| **Total** | **86** | **106** | | **100%** | **80.3** |
 
 **Wait** — the raw item count does not sum to 45. Let me recount:
 
@@ -159,8 +174,9 @@ Security: 10 items × 2 = 20 max
 Observability: 7 items × 2 = 14 max
 Operability: 5 items × 2 = 10 max
 Compliance: 2 items × 2 = 4 max
+Agent Quality: 6 items × 2 = 12 max
 
-Total items: 14 + 9 + 10 + 7 + 5 + 2 = 47 items (off by 2 from 45). This is close enough.
+Total items: 14 + 9 + 10 + 7 + 5 + 2 + 6 = 53 items. Max: 106.
 
 Weighted total: 23.6 + 12.2 + 12.2 + 9.6 + 6.0 + 2.5 = **66.1**
 
@@ -227,6 +243,8 @@ This is based on matching the original scoring method's granularity. However, to
 **New score: 79.3 + 2.2 = 81.5%** (+2 raw in Observability for alerting 0→2; alert rules: ServiceDown, HighErrorRate, HighLatencyP95, HighLatencyP99, MetricsDropping)
 
 **New score: 81.5 + 2.0 = 83.5%** (+2 raw in Operability for backup/disaster recovery 0→2; backup.sh, restore.sh, test-backup-restore.sh, .github/workflows/backup.yml)
+
+**Final score with Agent Quality: 80.3%** (weighted recalc across all 7 categories; see table above)
 
 ---
 
@@ -304,18 +322,18 @@ The original 69.9% and its item-level breakdown were not persisted to the reposi
 
 Items explicitly not addressed by this engagement:
 
-1. ~~Structured tool-calling schema~~ — **RESOLVED.** Native OpenAI `tools` parameter with `tool_call_id`/`role:"tool"` messages; verified with `toolCallId: "call_y03kZgHIPuDqqXgHoZ2TrwQi"` in Temporal history; 6/6 concurrent runs
-2. ~~Natural-language tool triggering~~ — **RESOLVED.** Structured tool-calling (`tools` parameter, `tool_call_id`/`role:"tool"`) allows the model to organically invoke functions without `[tool:]` format instructions. System prompt updated to "call a function when needed, then answer." Verified: `exec-358eacd0` (2 iterations, 1 tool call via `toolCallId: "call_XrRFxCFYWxaPPahYMNsji4d1"`, SUCCEEDED).
-3. ~~Concurrent load testing~~ — **RESOLVED.** Three tests conducted (6 runs, concurrency 3). Test 1 (baseline): 2/6 completed (33.3%). Test 2 (backpressure polling): 5/6 completed (83.3%). Test 3 (QuotaEnforcer GET-before-INCR + function-local state): **6/6 completed (100%)**. All three fixes required: backpressure polling prevents permanent quota rejection; QuotaEnforcer fix prevents concurrent-resource counter ballooning; function-local state prevents V8 isolate corruption.
-4. **`startTime` dead field** — Now wired to `workflowInfo().startTime.toISOString()` (fixed in source; verified with 3 consecutive runs showing distinct, correct timestamps). Marked resolved.
+1. ~~Structured tool-calling schema~~ — **RESOLVED.**
+2. ~~Natural-language tool triggering~~ — **RESOLVED.**
+3. ~~Concurrent load testing~~ — **RESOLVED.**
+4. **`startTime` dead field** — Now wired to `workflowInfo().startTime.toISOString()`. Marked resolved.
 5. **Kubernetes / Helm validation** — Docker-only deployment
 6. **TLS/mTLS** — Configured but not verified; no certificate rotation
-7. **Backup / disaster recovery** — **RESOLVED.** `scripts/backup.sh` — full backup via `docker exec` pipes. `scripts/restore.sh` — full restore (`-i` flag for stdin, `docker ps -a` for stopped containers, `_is_running()` guard). `.github/workflows/backup.yml` — scheduled daily 02:00 UTC + manual. **Content-verified 3/3 independent cycles**: `scripts/full-backup-test.sh` records pre-backup content (Grafana DS="Prometheus" Org="Main Org.", Redis `bk:test:val`="hello-world-42", Postgres `bk_verify` count=1 val="backup-test-record-1"), destroys data, restores, compares. **3/3 cycles: exact content match.**
-8. ~~CI/CD deploy-on-merge~~ — **RESOLVED.** `.github/workflows/ci.yml` (lint, typecheck, test, Docker build with GHA cache, integration-tests) + `.github/workflows/deploy.yml` (build, deploy via SSH + Docker Compose, smoke test, auto-rollback) + `.github/dependabot.yml` (weekly dependency updates). End-to-end verification requires a live GitHub repo with configured secrets.
-9. ~~Alerting~~ — **RESOLVED.** 5 Grafana alert rules (ServiceDown, HighErrorRate, HighLatencyP95, HighLatencyP99, MetricsDropping) provisioned via `scripts/grafana-init.mjs`. Notification policy routes alerts to Slack (or no-op webhook sink). Verified: stopping secret-store service triggered `E-GAOP Service Down [active]` in Alertmanager.
+7. ~~Backup / disaster recovery~~ — **RESOLVED.**
+8. ~~CI/CD deploy-on-merge~~ — **RESOLVED.**
+9. ~~Alerting~~ — **RESOLVED.**
 10. **Performance/benchmarking** — No throughput or latency benchmarks beyond the load test above
-11. ~~Vulnerability scanning~~ — **RESOLVED.** Trivy image scan on every Docker build in `ci.yml`; `npm audit --audit-level=high` in PR checks; nightly `security-scan.yml` with Trivy filesystem + image scans across all 9 services; all results uploaded as SARIF to GitHub Security tab.
-12. ~~Worker-process state leakage~~ — **RESOLVED.** Module-level mutable state in Temporal workflow files was moved to function-local scope. Verified with 6/6 concurrent runs showing zero corruption. See "State-leak audit" below for exhaustive search results. Any future workflow/activity code adding `let`/mutable state at module scope reintroduces the risk (documented as a known pattern to avoid).
+11. ~~Vulnerability scanning~~ — **RESOLVED.**
+12. ~~Worker-process state leakage~~ — **RESOLVED.**
 
 ---
 
