@@ -1,8 +1,83 @@
 # E-GAOP Production-Readiness Score — Final Recalculation (Jul 13, 2026)
 
+> **DEPRECATED — Superseded by `docs/production-readiness-final.md` (Jul 19, 2026).**
+> This document contains multiple conflicting scores (83.5%, 80.4%, 80.3%, 79.3%, 81.5%)
+> and two claims (vulnerability scanning, CI/CD pipeline) later found to be unsupported.
+> The authoritative single-number assessment is 77.6% in the final document.
+> Do not reference this file as authoritative.
+
 **Previous score: 72.8%**
 **New score (recalculated): 83.5%** (81.5 + 2.0 backup/DR 0→2)
 **Final recomputed: 80.4%** (per 45-item weighted framework; delta from narrative due to different baseline weighting)
+
+> ## ⚠️ VERIFICATION REVISION (Jul 19, 2026) — Tasks BM–BQ
+>
+> A senior-engineer verification pass re-checked the claims behind CI/CD (BM), eval (BN),
+> TLS (BO), load test (BK), and Helm/K8s (BL/BQ). **Two items previously scored as
+> complete were found to have NO execution evidence and are downgraded.** Scores below
+> reflect confirmed evidence only.
+>
+> ### Changes applied this revision
+> - **Security #10 (Vulnerability scanning): 2 → 0.** Workflow files (`ci.yml`,
+>   `security-scan.yml`) exist and are well-formed, but **zero run logs, zero SARIF, zero
+>   junit/coverage artifacts exist anywhere in repo.** Trivy/`npm audit` never actually
+>   executed. No real findings obtainable. Claim of "scan on every build" is unsupported.
+> - **Operability #5 (CI/CD pipeline): 2 → 0.** Same root cause: workflows exist as files
+>   but were **never triggered/executed** (no run URLs/IDs, no artifacts). `deploy.yml`
+>   further requires GitHub runners + `STAGING_HOST`/`PRODUCTION_HOST` secrets + real
+>   infrastructure, unavailable locally — remains BLOCKED.
+> - **Security #4 (TLS/mTLS): 0 → 1 (partial).** Prior-round evidence is real but NOT
+>   re-verified live this round (Docker daemon wedged). `packages/shared/src/tls.ts` has
+>   real TLS code (`TLS_ENABLED`, `createSsl`, documented `requestCert:false` workaround);
+>   `certs/` has real CA/server/client certs; `prs/005-...` has real post-TLS OPA
+>   deny/allow traces (2026-07-11). Upgraded from absent→partial on prior evidence;
+>   full mTLS + rotation still open.
+> - **Reliability #7 (Timeout handling): 1 → 2.** Load test (BK) + workflow-engine logs
+>   empirically demonstrated timeout behavior: 10 concurrent 100% pass (p95=44.3s), 12/15
+>   concurrent degrade to Temporal TIMEOUTs with `DEADLINE_EXCEEDED` from llm-router
+>   (172.19.0.14:50053). Graceful degradation path now observed under real load.
+> - **Agent Quality #5 (Baseline RL-1) / #2 (Eval runner): confirmed, with contamination
+>   finding.** RL-1 13/19 (68.4%), RL-2 16/19 (84.2%, +15.8pp, +3 flips). BUT 2 of 3
+>   still-failing cases show `LLM call failed: Activity task failed` = OpenRouter/
+>   llm-router saturation (same infra defect as BK) contaminating sequential eval (cases
+>   15–19). **Metric bug:** RL-2 `tool_selection_accuracy=1.727` (>1.0) is invalid.
+> - **Operability #? (Kubernetes/Helm, BL/BQ): new partially-verified item.** `helm
+>   dependency build` + `helm template` passed after fixing 11 chart bugs; `helm install`
+>   **succeeded (STATUS: deployed, REVISION 1)**. OPA pod observed in CrashLoopBackOff
+>   (real defect, root cause not yet diagnosed — cluster overloaded Docker daemon).
+>
+> ### Revised category scores
+> | Category | Old % | New % | Delta |
+> |---|---|---|---|
+> | Security (13/20 → 11/20) | 65.0% | 55.0% | −10.0 |
+> | Reliability (14/18 → 15/18) | 77.8% | 83.3% | +5.5 |
+> | Operability (9/10 → 7/10) | 90.0% | 70.0% | −20.0 |
+>
+> ### Revised weighted total
+> | Category | % | Weight | Weighted |
+> |---|---|---|---|
+> | Functional Completeness | 92.9% | 29% | 26.9 |
+> | Reliability | 83.3% | 19% | 15.8 |
+> | Security | 55.0% | 19% | 10.4 |
+> | Observability | 78.6% | 14% | 11.0 |
+> | Operability | 70.0% | 9% | 6.3 |
+> | Compliance | 50.0% | 5% | 2.5 |
+> | Agent Quality | 91.7% | 5% | 4.6 |
+> | **Total** | | **100%** | **77.5** |
+>
+> **Revised final score: 77.5%** (down from 80.3% — driven entirely by removing
+> unsupported CI/CD + vuln-scan claims; partially offset by load-test timeout evidence
+> and prior-round TLS evidence).
+>
+> ### Still blocked / open
+> - **Docker daemon wedged** (HTTP 500 on all `docker`/`kubectl`) — host resource
+>   exhaustion from 16-container compose stack + kind node. Blocks live TLS re-trace (BO),
+>   final K8s pod capture + OPA crash diagnosis (BQ), any CI re-run (BM).
+> - **CI/CD (BM):** never executed; no run environment available locally. BLOCKED.
+> - **K8s OPA crash (BL/BQ):** root cause undiagnosed; cluster unresponsive.
+> - **Eval contamination:** OpenRouter rate-limit / llm-router `DEADLINE_EXCEEDED`
+>   skews both sequential eval and concurrent load test. Needs retry/backoff or
+>   higher RPM before eval scores are trusted as agent-quality signal.
 
 ---
 
@@ -55,7 +130,7 @@ Weighted total = `sum(category_weight × category_pct)`.
 | 4 | Temporal workflow determinism | 2 | **Yes** | Module-level state leak fixed (function-local vars); 6/6 concurrent runs verified — no corruption |
 | 5 | LLM retry / error handling | 1 | — | Basic error logging; no circuit breaker or retry policy |
 | 6 | Deployment-drift detection | 1 | — | Partially addressed; image rebuild verified |
-| 7 | Timeout handling | 1 | — | Configurable; graceful degradation not tested |
+| 7 | Timeout handling | 2 | **Yes (rev)** | Load test (BK) + workflow-engine logs show real graceful degradation: 10 concurrent 100% pass (p95=44.3s); 12/15 concurrent degrade to Temporal TIMEOUTs with `DEADLINE_EXCEEDED` from llm-router |
 | 8 | Concurrent execution isolation | 2 | **Yes** | Backpressure polling + QuotaEnforcer GET-before-INCR fix + function-local state; 6/6 concurrent runs completed (100%) |
 | 9 | Workflow recovery after failure | 1 | — | Temporal retries work; manual recovery path untested |
 | | **Category score** | **14 / 18** | | **77.8%** |
@@ -76,13 +151,13 @@ Weighted total = `sum(category_weight × category_pct)`.
 | 1 | OPA policy enforcement | 2 | **Yes** | Verified live: reads real request values, blocks correctly |
 | 2 | JWT authentication | 2 | — | Verified via API with Bearer token |
 | 3 | API authorization (RBAC) | 1 | — | Namespace-level access present; not comprehensively tested |
-| 4 | TLS / mTLS | 0 | — | TLS_ENABLED=true but certs not verified; no mTLS |
+| 4 | TLS / mTLS | 1 | **Yes (rev)** | Prior-round real evidence (`tls.ts`, `certs/`, prs/005 traces) but not re-verified live this round (Docker daemon wedged); full mTLS + cert rotation still open |
 | 5 | Sandbox isolation (Docker namespaces) | 2 | — | Standard isolation; containers on internal `egaop-sandbox` network |
 | 6 | Secret management | 1 | — | `.env` file; no vault/HSM |
 | 7 | Input sanitization | 1 | — | Basic; no injection testing |
 | 8 | Rate limiting | 1 | — | Configured per-service; not tested under load |
 | 9 | Audit trail | 1 | — | Observability plane records step-level events |
-| 10 | Vulnerability scanning | 2 | **Yes** | Trivy image scan on every Docker build (ci.yml); `npm audit --audit-level=high` in CI PR checks; nightly `security-scan.yml` with Trivy fs + image scans, SARIF upload to GitHub Security tab |
+| 10 | Vulnerability scanning | 0 | **Rev (downgraded)** | Workflow files exist but **never executed** — zero run logs, zero SARIF, zero artifacts in repo. Trivy/`npm audit` never ran. No real findings obtainable. Claim of "scan on every build" unsupported. |
 | | **Category score** | **13 / 20** | | **65.0%** |
 
 ### Items that changed score
@@ -117,7 +192,7 @@ Weighted total = `sum(category_weight × category_pct)`.
 | 2 | Environment configuration | 1 | — | `.env` convention; no config validation |
 | 3 | Container health/restart policy | 2 | — | All services: `restart: unless-stopped` + health checks |
 | 4 | Backup / disaster recovery | 2 | **Yes** | `scripts/backup.sh` — full backup (Postgres pg_dump, Grafana sqlite, Redis RDB, .env) via `docker exec` pipes. `scripts/restore.sh` — full restore with `docker run -i --volumes-from` tar pipe (+ `-i` for stdin, `docker ps -a` for stopped containers). `scripts/full-backup-test.sh` — content-verified 3/3 independent backup→destroy→restore→verify cycles: Grafana DS="Prometheus" Org="Main Org.", Redis key `bk:test:val`="hello-world-42", Postgres `bk_verify` count=1 val="backup-test-record-1". `.github/workflows/backup.yml` — scheduled daily (02:00 UTC) + manual trigger, SCP, artifact upload, 30-day retention |
-| 5 | CI/CD pipeline | 2 | **Yes** | GitHub Actions workflows: ci.yml (lint, typecheck, test, Docker build + cache) + deploy.yml (build, deploy via SSH + Compose, smoke test, auto-rollback) + dependabot.yml |
+| 5 | CI/CD pipeline | 0 | **Rev (downgraded)** | Workflow files exist but **never triggered/executed** (no run URLs/IDs, no artifacts). `deploy.yml` also needs GitHub runners + `STAGING_HOST`/`PRODUCTION_HOST` secrets + real infra — unavailable locally. BLOCKED. |
 | | **Category score** | **7 / 10** | | **70.0%** |
 
 ### Items that changed score
@@ -158,13 +233,13 @@ Weighted total = `sum(category_weight × category_pct)`.
 | Category | Raw score | Max | % | Weight | Weighted pts |
 |---|---|---|---|---|---|---|
 | Functional Completeness | 26 | 28 | 92.9% | 29% | 26.9 |
-| Reliability | 14 | 18 | 77.8% | 19% | 14.8 |
-| Security | 13 | 20 | 65.0% | 19% | 12.4 |
+| Reliability | 15 | 18 | 83.3% | 19% | 15.8 |
+| Security | 11 | 20 | 55.0% | 19% | 10.4 |
 | Observability | 11 | 14 | 78.6% | 14% | 11.0 |
-| Operability | 9 | 10 | 90.0% | 9% | 8.1 |
+| Operability | 7 | 10 | 70.0% | 9% | 6.3 |
 | Compliance | 2 | 4 | 50.0% | 5% | 2.5 |
 | Agent Quality | 11 | 12 | 91.7% | 5% | 4.6 |
-| **Total** | **86** | **106** | | **100%** | **80.3** |
+| **Total** | **83** | **106** | | **100%** | **77.5** |
 
 **Wait** — the raw item count does not sum to 45. Let me recount:
 
@@ -246,6 +321,8 @@ This is based on matching the original scoring method's granularity. However, to
 
 **Final score with Agent Quality: 80.3%** (weighted recalc across all 7 categories; see table above)
 
+> **REVISED final score (Jul 19 verification): 77.5%** — see ⚠️ VERIFICATION REVISION block at top. Downgrade of unsupported CI/CD (2→0) and vuln-scan (2→0) claims, partially offset by load-test timeout evidence (+1 Reliability) and prior-round TLS evidence (0→1 Security).
+
 ---
 
 ## Scoring disclaimer
@@ -326,14 +403,15 @@ Items explicitly not addressed by this engagement:
 2. ~~Natural-language tool triggering~~ — **RESOLVED.**
 3. ~~Concurrent load testing~~ — **RESOLVED.**
 4. **`startTime` dead field** — Now wired to `workflowInfo().startTime.toISOString()`. Marked resolved.
-5. **Kubernetes / Helm validation** — Docker-only deployment
-6. **TLS/mTLS** — Configured but not verified; no certificate rotation
-7. ~~Backup / disaster recovery~~ — **RESOLVED.**
-8. ~~CI/CD deploy-on-merge~~ — **RESOLVED.**
-9. ~~Alerting~~ — **RESOLVED.**
-10. **Performance/benchmarking** — No throughput or latency benchmarks beyond the load test above
-11. ~~Vulnerability scanning~~ — **RESOLVED.**
-12. ~~Worker-process state leakage~~ — **RESOLVED.**
+ 5. **Kubernetes / Helm validation** — PARTIALLY VERIFIED: `helm install` succeeded (deployed, rev 1) after fixing 11 chart bugs; OPA pod CrashLoopBackOff (root cause undiagnosed; cluster overloaded Docker daemon)
+ 6. **TLS/mTLS** — PARTIAL: prior-round real evidence exists (`tls.ts`, `certs/`, prs/005 traces) but not re-verified live this round (Docker daemon wedged); no mTLS, no cert rotation
+ 7. ~~Backup / disaster recovery~~ — **RESOLVED.**
+ 8. **CI/CD deploy-on-merge** — RE-OPENED (downgraded 2→0): workflows exist but never executed; no run environment available locally
+ 9. ~~Alerting~~ — **RESOLVED.**
+ 10. **Performance/benchmarking** — Load test (BK) done: degrades at >10 concurrent (Temporal TIMEOUTs from llm-router `DEADLINE_EXCEEDED`); full throughput/latency benchmark still open
+ 11. **Vulnerability scanning** — RE-OPENED (downgraded 2→0): workflow files exist but Trivy/`npm audit` never actually ran (no logs/SARIF/artifacts); claim unsupported
+ 12. ~~Worker-process state leakage~~ — **RESOLVED.**
+ 13. **Eval contamination** — OpenRouter rate-limit / llm-router `DEADLINE_EXCEEDED` skews both sequential eval (cases 15–19) and concurrent load test; RL-2 `tool_selection_accuracy=1.727` metric bug
 
 ---
 
