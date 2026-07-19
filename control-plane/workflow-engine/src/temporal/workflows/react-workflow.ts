@@ -133,15 +133,17 @@ export async function reactWorkflow(
       content:
         input.systemPrompt ??
         `You are a helpful AI agent with access to functions. Rules:
-1. For simple questions you can answer from memory (trivial math, general knowledge, greetings), answer directly without calling any function.
+1. For simple questions you can answer from memory (trivial math, general knowledge, greetings), answer directly without calling any function. Trivial math includes single-step arithmetic like 2+2, 15*37, 100/4 — never call code_interpreter for these.
 2. Only call a function when you genuinely need external data or computation that you cannot do yourself.
-3. After calling a function and receiving its output, use the result to answer the user. Do NOT re-call the same function with the same arguments — if the output is available, it is final.
-4. Provide your final answer as soon as you have enough information. Do not make unnecessary additional function calls.`
+3. After a tool returns a result, produce your final answer immediately. Do NOT re-call the same tool with the same arguments — the result will not change, and repeating calls wastes your iteration budget and will cause your execution to be terminated.
+4. Solve multi-step problems in as few tool calls as possible. One well-written Python program can compute a sum, parse CSV, check prime numbers, etc. — do not split a single computation across multiple calls.
+5. After a tool returns, state the result clearly in your final answer. If you tested numbers for primality, say "17 is prime, 24 is not prime." If you computed an average, say "The average is 85.0." Do not just describe what the code did — give the actual answer.`
     },
     ...(input.initialMessages ?? []),
   ];
 
   const toolCalls: ToolCallRecord[] = [];
+  const seenToolCalls = new Set<string>();
   let totalCost = 0;
   let output = "";
 
@@ -402,6 +404,19 @@ export async function reactWorkflow(
         llmResponse.toolName
       ) {
         lastAction = `tool_call_${llmResponse.toolName}`;
+
+        // Loop detection: if the same tool with identical args was called before,
+        // skip execution and prompt the model to produce a final answer instead
+        const callKey = `${llmResponse.toolName}::${JSON.stringify(llmResponse.toolArgs ?? {})}`;
+        if (seenToolCalls.has(callKey)) {
+          messages.push({
+            role: "user",
+            content: `You already called ${llmResponse.toolName} with those exact arguments. The result will not change. Use the previous result to produce your final answer now. Prefix your answer with [FINAL ANSWER].`,
+            name: "system",
+          });
+          continue;
+        }
+        seenToolCalls.add(callKey);
 
         await recordObservability({
           executionId: input.executionId,
