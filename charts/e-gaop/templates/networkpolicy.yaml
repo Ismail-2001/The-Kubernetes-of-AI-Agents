@@ -378,6 +378,7 @@ spec:
           port: 3001
         - protocol: TCP
           port: 50051
+{{- if .Values.tls.certManager.enabled }}
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -401,3 +402,4 @@ spec:
   issuerRef:
     name: {{ include "e-gaop.fullname" . }}-internal-ca
     kind: ClusterIssuer
+{{- end }}

@@ -1,4 +1,4 @@
-{{- if .Values.tool-proxy.enabled }}
+{{- if .Values.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,11 +11,11 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: {{ .Values.tool-proxy.grpcPort }}
+    - port: {{ .Values.grpcPort }}
       targetPort: grpc
       protocol: TCP
       name: grpc
-    - port: {{ .Values.tool-proxy.healthPort }}
+    - port: {{ .Values.healthPort }}
       targetPort: health
       protocol: TCP
       name: health

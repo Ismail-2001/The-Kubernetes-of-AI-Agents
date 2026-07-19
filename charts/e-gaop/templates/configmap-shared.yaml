@@ -9,11 +9,13 @@ data:
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.global.otelEndpoint | quote }}
   LOG_LEVEL: "info"
   TLS_ENABLED: "true"
-  POSTGRES_HOST: "postgres-primary"
+  POSTGRES_HOST: "{{ .Release.Name }}-postgresql"
   POSTGRES_PORT: "5432"
-  POSTGRES_DB: {{ .Values.postgres.database | quote }}
-  REDIS_HOST: "redis-master"
+  POSTGRES_DB: {{ .Values.postgresql.auth.database | quote }}
+  REDIS_HOST: "{{ .Release.Name }}-redis-master"
   REDIS_PORT: "6379"
-  TEMPORAL_HOST: "temporal-frontend"
+  TEMPORAL_HOST: "{{ .Release.Name }}-temporal-frontend"
   TEMPORAL_PORT: "7233"
   TEMPORAL_NAMESPACE: {{ .Values.temporal.namespace | quote }}
+  OPA_ADDR: "http://{{ .Release.Name }}-opa:8181"
+  OTEL_COLLECTOR_ADDR: "http://{{ .Release.Name }}-otel-collector:4317"

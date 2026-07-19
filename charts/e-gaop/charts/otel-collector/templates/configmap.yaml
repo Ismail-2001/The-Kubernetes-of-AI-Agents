@@ -1,4 +1,4 @@
-{{- if .Values.otelCollector.enabled }}
+{{- if .Values.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,9 +14,9 @@ data:
       otlp:
         protocols:
           grpc:
-            endpoint: 0.0.0.0:{{ .Values.otelCollector.ports.grpc }}
+            endpoint: 0.0.0.0:{{ .Values.ports.grpc }}
           http:
-            endpoint: 0.0.0.0:{{ .Values.otelCollector.ports.http }}
+            endpoint: 0.0.0.0:{{ .Values.ports.http }}
 
       prometheus:
         config:
@@ -56,7 +56,7 @@ data:
         loglevel: info
 
       prometheus:
-        endpoint: "0.0.0.0:{{ .Values.otelCollector.ports.prometheus }}"
+        endpoint: "0.0.0.0:{{ .Values.ports.prometheus }}"
         namespace: egaop_otel
 
       otlp/temporal:
@@ -66,7 +66,7 @@ data:
 
     extensions:
       health_check:
-        endpoint: 0.0.0.0:{{ .Values.otelCollector.ports.health }}
+        endpoint: 0.0.0.0:{{ .Values.ports.health }}
 
     service:
       extensions: [health_check]

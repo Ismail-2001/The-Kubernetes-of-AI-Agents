@@ -8,17 +8,41 @@ global:
   imageRegistry: ghcr.io
   imagePullSecrets: []
   storageClass: ""
-  otelEndpoint: "http://otel-collector-collector:4317"
+  # otel-collector service is named <release>-otel-collector (see otel-collector chart)
+  otelEndpoint: "http://egaop-test-otel-collector:4317"
+  # ServiceMonitors require prometheus-operator CRDs; disable for kind smoke tests
+  serviceMonitorEnabled: false
+  # bitnami charts now require this when images come from non-docker.io registries
+  security:
+    allowInsecureImages: true
+
+# ─── TLS / cert-manager ─────────────────────────────────────────────────────
+# Requires cert-manager CRDs installed in the cluster. Disabled for local kind.
+tls:
+  certManager:
+    enabled: false
 
 # ─── External Secrets Operator ──────────────────────────────────────────────
+# Disabled by default for local kind deploys (no Vault/ESO). When disabled,
+# templates/secrets.yaml renders a managed Secret directly from .Values.secrets.
 externalSecrets:
-  enabled: true
+  enabled: false
   vault:
     address: "http://vault:8200"
     path: "secret/data/egaop"
     kubernetesMountPath: "kubernetes"
     kubernetesRole: "egaop"
     secretsPath: "secret/data/egaop"
+
+# ─── Managed secrets (used when externalSecrets.enabled=false) ──────────────
+# For real deployments use External Secrets Operator + Vault instead.
+secrets:
+  encryptionKey: "dev-encryption-key-change-me-0000000000000000"
+  jwtSecret: "dev-jwt-secret-change-me-00000000000000000000"
+  databaseUrl: "postgres://egaop:dev-postgres-password@egaop-test-postgresql:5432/egaop"
+  redisPassword: "dev-redis-password"
+  temporalTlsCert: ""
+  openaiApiKey: "sk-dev-openai-placeholder"
 
 # ─── Ingress ────────────────────────────────────────────────────────────────
 ingress:
@@ -30,15 +54,22 @@ ingress:
   rateLimit: "100"
 
 # ─── Community Charts (infrastructure) ──────────────────────────────────────
+# NOTE: existingSecret must match the Secret rendered by templates/secrets.yaml
+# (name = <release>-e-gaop-managed-secrets). Keys below must match that Secret.
 postgresql:
   enabled: true
   auth:
-    existingSecret: e-gaop-managed-secrets
+    username: egaop
+    password: "dev-postgres-password"
+    database: egaop
+    existingSecret: "egaop-test-e-gaop-managed-secrets"
     secretKeys:
       adminPasswordKey: database-url
+      userPasswordKey: database-url
   primary:
     persistence:
       size: 10Gi
+      enabled: false
     resources:
       requests:
         cpu: 250m
@@ -53,11 +84,14 @@ redis:
   enabled: true
   architecture: standalone
   auth:
-    existingSecret: e-gaop-managed-secrets
+    enabled: true
+    password: "dev-redis-password"
+    existingSecret: "egaop-test-e-gaop-managed-secrets"
     existingPasswordKey: redis-password
   master:
     persistence:
       size: 5Gi
+      enabled: false
     resources:
       requests:
         cpu: 100m
@@ -70,6 +104,7 @@ redis:
 
 temporal:
   enabled: true
+  namespace: egaop
   server:
     replicaCount: 1
     resources:
@@ -83,14 +118,28 @@ temporal:
     enabled: false
 
 # ─── OPA + OTel (custom subcharts) ─────────────────────────────────────────
+# NOTE: values here are merged into the subchart scope. The subcharts expect
+# `image` as a {repository,tag,pullPolicy} map and `ports` as a map, so the
+# parent override must match that shape (a bare string would break templates).
 opa:
   enabled: true
-  image: openpolicyagent/opa:latest
+  image:
+    repository: openpolicyagent/opa
+    tag: latest
+    pullPolicy: IfNotPresent
   port: 8181
 
 otelCollector:
   enabled: true
-  image: otel/opentelemetry-collector-contrib:latest
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: latest
+    pullPolicy: IfNotPresent
+  ports:
+    grpc: 4317
+    http: 4318
+    prometheus: 8889
+    health: 13133
 
 # ─── Service Defaults ───────────────────────────────────────────────────────
 defaults:

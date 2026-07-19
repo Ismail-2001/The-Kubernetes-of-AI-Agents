@@ -1,0 +1,45 @@
+dependencies:
+- name: postgresql
+  repository: https://charts.bitnami.com/bitnami
+  version: 16.4.1
+- name: redis
+  repository: https://charts.bitnami.com/bitnami
+  version: 20.6.2
+- name: temporal
+  repository: https://temporalio.github.io/helm-charts
+  version: 0.44.0
+- name: opa
+  repository: ""
+  version: 0.1.0
+- name: otel-collector
+  repository: ""
+  version: 0.1.0
+- name: api-server
+  repository: ""
+  version: 0.1.0
+- name: secret-store
+  repository: ""
+  version: 0.1.0
+- name: workflow-engine
+  repository: ""
+  version: 0.1.0
+- name: llm-router
+  repository: ""
+  version: 0.1.0
+- name: tool-proxy
+  repository: ""
+  version: 0.1.0
+- name: sandbox-runtime
+  repository: ""
+  version: 0.1.0
+- name: memory-plane
+  repository: ""
+  version: 0.1.0
+- name: observability-plane
+  repository: ""
+  version: 0.1.0
+- name: admin-console
+  repository: ""
+  version: 0.1.0
+digest: sha256:152d549a0d676831c33144e97af6e6af95d8612c9e371af5416361bf6e0e42eb
+generated: "2026-07-18T23:21:26.0434364+05:00"

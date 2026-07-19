@@ -1,4 +1,4 @@
-{{- if .Values.opa.enabled }}
+{{- if .Values.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,17 +26,17 @@ spec:
         runAsUser: 1000
       containers:
         - name: opa
-          image: "{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
-          imagePullPolicy: {{ .Values.opa.image.pullPolicy }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - "run"
             - "--server"
-            - "--addr=0.0.0.0:{{ .Values.opa.port }}"
+            - "--addr=0.0.0.0:{{ .Values.port }}"
             - "--log-level=info"
             - "/policies/"
           ports:
             - name: http
-              containerPort: {{ .Values.opa.port }}
+              containerPort: {{ .Values.port }}
               protocol: TCP
           securityContext:
             runAsNonRoot: true
@@ -54,7 +54,7 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 20
           resources:
-            {{- toYaml .Values.opa.resources | nindent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: policies
               mountPath: /policies

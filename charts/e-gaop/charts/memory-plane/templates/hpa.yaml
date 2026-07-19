@@ -1,4 +1,4 @@
-{{- if .Values.memory-plane.enabled }}
+{{- if .Values.enabled }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -9,8 +9,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: {{ .Release.Name }}-memory-plane
-  minReplicas: {{ .Values.memory-plane.replicas | default 2 }}
-  maxReplicas: {{ mul (.Values.memory-plane.replicas | default 2) 3 }}
+  minReplicas: {{ .Values.replicas | default 2 }}
+  maxReplicas: {{ mul (.Values.replicas | default 2) 3 }}
   metrics:
     - type: Resource
       resource:

@@ -1,4 +1,4 @@
-{{- if .Values.observability-plane.enabled }}
+{{- if .Values.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/part-of: e-gaop
 spec:
-  replicas: {{ .Values.observability-plane.replicas | default 2 }}
+  replicas: {{ .Values.replicas | default 2 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: observability-plane
@@ -22,17 +22,17 @@ spec:
         app.kubernetes.io/part-of: e-gaop
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "{{ .Values.observability-plane.healthPort }}"
+        prometheus.io/port: "{{ .Values.healthPort }}"
     spec:
       containers:
         - name: observability-plane
-          image: "{{ .Values.observability-plane.image }}:{{ .Values.observability-plane.tag }}"
+          image: "{{ .Values.image }}:{{ .Values.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: {{ .Values.observability-plane.grpcPort }}
+            - containerPort: {{ .Values.grpcPort }}
               name: grpc
               protocol: TCP
-            - containerPort: {{ .Values.observability-plane.healthPort }}
+            - containerPort: {{ .Values.healthPort }}
               name: health
               protocol: TCP
           envFrom:
@@ -44,9 +44,9 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: egaop-observability-plane
             - name: SERVICE_GRPC_PORT
-              value: "{{ .Values.observability-plane.grpcPort }}"
+              value: "{{ .Values.grpcPort }}"
             - name: SERVICE_HEALTH_PORT
-              value: "{{ .Values.observability-plane.healthPort }}"
+              value: "{{ .Values.healthPort }}"
           livenessProbe:
             httpGet:
               path: /healthz
@@ -62,7 +62,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
           resources:
-            {{- toYaml .Values.observability-plane.resources | nindent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001

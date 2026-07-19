@@ -10,7 +10,7 @@ metadata:
     {{- if .Values.ingress.certManagerIssuer }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.certManagerIssuer | quote }}
     {{- end }}
-    nginx.ingress.kubernetes.io/rate-limit: "{{ .Values.ingress.rateLimit | default "100" }}"
+    nginx.ingress.kubernetes.io/rate-limit: "{{ .Values.ingress.rateLimit | default 100 }}"
     nginx.ingress.kubernetes.io/rate-limit-window: "1m"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
@@ -31,7 +31,7 @@ spec:
               service:
                 name: {{ .Release.Name }}-admin-console
                 port:
-                  number: {{ .Values.admin-console.port | default 3000 }}
+                  number: {{ index .Values "admin-console" "port" | default 3000 }}
     - host: {{ .Values.ingress.apiHost | quote }}
       http:
         paths:
@@ -41,5 +41,5 @@ spec:
               service:
                 name: {{ .Release.Name }}-api-server
                 port:
-                  number: {{ .Values.api-server.restPort | default 3001 }}
+                  number: {{ index .Values "api-server" "restPort" | default 3001 }}
 {{- end }}

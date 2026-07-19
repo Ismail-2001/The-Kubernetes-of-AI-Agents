@@ -1,4 +1,4 @@
-{{- if .Values.observability-plane.enabled }}
+{{- if .Values.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

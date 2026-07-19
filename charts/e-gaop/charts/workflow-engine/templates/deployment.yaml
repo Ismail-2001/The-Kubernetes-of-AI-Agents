@@ -1,4 +1,4 @@
-{{- if .Values.workflow-engine.enabled }}
+{{- if .Values.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/part-of: e-gaop
 spec:
-  replicas: {{ .Values.workflow-engine.replicas | default 2 }}
+  replicas: {{ .Values.replicas | default 2 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: workflow-engine
@@ -22,14 +22,14 @@ spec:
         app.kubernetes.io/part-of: e-gaop
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "{{ .Values.workflow-engine.healthPort }}"
+        prometheus.io/port: "{{ .Values.healthPort }}"
     spec:
       containers:
         - name: workflow-engine
-          image: "{{ .Values.workflow-engine.image }}:{{ .Values.workflow-engine.tag }}"
+          image: "{{ .Values.image }}:{{ .Values.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: {{ .Values.workflow-engine.healthPort }}
+            - containerPort: {{ .Values.healthPort }}
               name: health
               protocol: TCP
           envFrom:
@@ -41,7 +41,7 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: egaop-workflow-engine
             - name: SERVICE_HEALTH_PORT
-              value: "{{ .Values.workflow-engine.healthPort }}"
+              value: "{{ .Values.healthPort }}"
           livenessProbe:
             httpGet:
               path: /healthz
@@ -57,7 +57,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
           resources:
-            {{- toYaml .Values.workflow-engine.resources | nindent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001

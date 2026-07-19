@@ -1,4 +1,4 @@
-{{- if .Values.otelCollector.enabled }}
+{{- if .Values.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,22 +26,22 @@ spec:
         runAsUser: 1000
       containers:
         - name: otel-collector
-          image: "{{ .Values.otelCollector.image.repository }}:{{ .Values.otelCollector.image.tag }}"
-          imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - "--config=/etc/otelcol/config.yaml"
           ports:
             - name: grpc
-              containerPort: {{ .Values.otelCollector.ports.grpc }}
+              containerPort: {{ .Values.ports.grpc }}
               protocol: TCP
             - name: http
-              containerPort: {{ .Values.otelCollector.ports.http }}
+              containerPort: {{ .Values.ports.http }}
               protocol: TCP
             - name: prometheus
-              containerPort: {{ .Values.otelCollector.ports.prometheus }}
+              containerPort: {{ .Values.ports.prometheus }}
               protocol: TCP
             - name: health
-              containerPort: {{ .Values.otelCollector.ports.health }}
+              containerPort: {{ .Values.ports.health }}
               protocol: TCP
           env:
             - name: POD_NAME
@@ -68,7 +68,7 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:
-            {{- toYaml .Values.otelCollector.resources | nindent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/otelcol
