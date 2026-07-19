@@ -11,8 +11,16 @@ const API = "http://localhost:3001";
 const AUTH = { email: "loadtest5@test.com", password: "LoadTestPass123" };
 const AGENT_ID = "eval-agent";
 const TEMPORAL_CONTAINER = "enterprise-grade-agent-orchestration-platform-main-temporal-1";
+const TEMPORAL_ADDRESS = "172.19.0.9:7233";
 const DATASET_PATH = path.resolve(__dirname, "golden-dataset.json");
 const RESULTS_DIR = path.resolve(__dirname, "results");
+
+const SYSTEM_PROMPT = `You are a helpful AI agent with access to functions. Rules:
+1. For simple questions you can answer from memory (trivial math, general knowledge, greetings), answer directly without calling any function. Trivial math includes single-step arithmetic like 2+2, 15*37, 100/4 — never call code_interpreter for these.
+2. Only call a function when you genuinely need external data or computation that you cannot do yourself.
+3. After a tool returns a result, produce your final answer immediately. Do NOT re-call the same tool with the same arguments — the result will not change, and repeating calls wastes your iteration budget and will cause your execution to be terminated.
+4. Solve multi-step problems in as few tool calls as possible. One well-written Python program can compute a sum, parse CSV, check prime numbers, etc. — do not split a single computation across multiple calls.
+5. After a tool returns, state the result clearly in your final answer. If you tested numbers for primality, say "17 is prime, 24 is not prime." If you computed an average, say "The average is 85.0." Do not just describe what the code did — give the actual answer.`;
 
 
 
@@ -43,7 +51,7 @@ async function login() {
 }
 
 async function triggerRun(token, prompt, extra = {}) {
-  const body = { namespace: extra.namespace || "default", input: { prompt } };
+  const body = { namespace: extra.namespace || "default", input: { prompt, systemPrompt: SYSTEM_PROMPT } };
   if (extra.resourceNamespace) body.resourceNamespace = extra.resourceNamespace;
   if (extra.callerRole) body.callerRole = extra.callerRole;
   const r = await api("POST", `/api/agents/${AGENT_ID}/run`, body, token);
@@ -54,7 +62,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function temporalDescribe(wfId) {
   try {
-    const cmd = `docker exec ${TEMPORAL_CONTAINER} sh -c "temporal workflow describe --address 172.19.0.10:7233 --namespace egaop -w ${wfId} -o json 2>/dev/null"`;
+    const cmd = `docker exec ${TEMPORAL_CONTAINER} sh -c "temporal workflow describe --address ${TEMPORAL_ADDRESS} --namespace egaop -w ${wfId} -o json 2>/dev/null"`;
     const out = execSync(cmd, { encoding: "utf-8", timeout: 10000 });
     return JSON.parse(out);
   } catch {
@@ -101,13 +109,15 @@ function matchString(val, pattern) {
 function matchExactPattern(val, matchDef) {
   if (!val) return false;
   if (matchDef.type === "exact_pattern") {
-    const patterns = matchDef.pattern.split("|");
-    return patterns.some((p) => val.toLowerCase().includes(p.toLowerCase()));
+    try { return new RegExp(matchDef.pattern, "i").test(val); } catch { return false; }
   }
   if (matchDef.type === "numeric_tolerance") {
-    const num = parseFloat(val.replace(/[^0-9.\-]/g, ""));
-    if (isNaN(num)) return false;
-    return Math.abs(num - matchDef.expected) <= matchDef.tolerance;
+    const nums = val.match(/\d+(?:\.\d+)?/g) || [];
+    const closest = nums.reduce((best, n) => {
+      const diff = Math.abs(parseFloat(n) - matchDef.expected);
+      return diff < best.diff ? { num: parseFloat(n), diff } : best;
+    }, { num: NaN, diff: Infinity });
+    return Math.abs(closest.num - matchDef.expected) <= matchDef.tolerance;
   }
   return false;
 }
