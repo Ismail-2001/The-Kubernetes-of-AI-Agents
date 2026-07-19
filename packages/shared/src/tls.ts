@@ -5,8 +5,13 @@
  * To update, edit this file and apply the same changes to every service's
  * getServerCredentials() / getClientCredentials() functions.
  *
+ * NOTE: requestCert (mTLS) is disabled due to a bug in @grpc/grpc-js v1.14.4
+ * where gRPC client connections fail when the server requests client certs.
+ * Native TLS (without mTLS) works correctly — traffic is encrypted but
+ * client certificates are not verified at the transport layer.
+ *
  * Env vars:
- *   TLS_ENABLED=true           Enable mTLS (default: false)
+ *   TLS_ENABLED=true           Enable TLS (default: false)
  *   TLS_CERT_DIR=/path         Certificate directory (default: /etc/egaop/certs)
  */
 
@@ -33,7 +38,7 @@ export function getServerCredentials(): grpc.ServerCredentials {
   return grpc.ServerCredentials.createSsl(
     caCert,
     [{ cert_chain: serverCert, private_key: serverKey }],
-    true  // require client cert (mutual TLS)
+    false  // don't request client cert (mTLS disabled, see note above)
   );
 }
 
