@@ -1,50 +1,51 @@
 # Contributing to E-GAOP
 
-We're excited that you're interested in contributing to the Enterprise-Grade Agent Orchestration Platform! As a FAANG-grade project, we maintain high standards for code quality, security, and documentation.
-
-## 🤝 Code of Conduct
+## Code of Conduct
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## 🚀 Getting Started
+## Getting Started
 
-1.  **Fork the repository** on GitHub.
-2.  **Clone your fork** locally:
-    ```bash
-    git clone https://github.com/YOUR_USERNAME/Enterprise-Grade-Agent-Orchestration-Platform.git
-    ```
-3.  **Create a feature branch**:
-    ```bash
-    git checkout -b feat/your-feature-name
-    ```
+1. Fork the repository on GitHub.
+2. Clone your fork locally.
+3. Create a feature branch.
 
-## 🛠️ Development Standards
+## Development Guidelines
 
-### 1. Protobuf First
-Any changes to the core resource model must start with a modification to the `.proto` files in `api/proto/`. We follow strict backward compatibility rules.
+### Protobuf First
 
-### 2. Testing
-- **Unit Tests**: Mandatory for all new logic.
-- **Integration Tests**: Required for any change affecting inter-plane communication.
-- **Policy Tests**: Any new engine capability must include Rego test cases.
+Changes to the core resource model must start with a modification to the `.proto` files in `api/proto/`. We follow standard protobuf backward-compatibility rules.
 
-### 3. Documentation
-- Update `ARCHITECTURE.md` if you introduce new system patterns.
-- Ensure all public APIs are documented with Protobuf comments.
+### Testing
 
-## 📬 Pull Request Process
+- **Unit tests**: Mandatory for all new logic.
+- **Integration tests**: Required for changes affecting inter-plane communication (testcontainers-based).
+- **Policy tests**: New engine capabilities should include Rego test cases.
 
-1.  **Linting**: Ensure your code passes all linting checks.
-2.  **Atomic Commits**: Use descriptive, atomic commit messages following [Conventional Commits](https://www.conventionalcommits.org/).
-3.  **Self-Review**: Review your own PR for security implications and performance bottlenecks.
-4.  **Security Review**: Changes to the `policy-plane` or `execution-plane` sandboxes require an additional security audit.
+### Commit Messages
 
-## 🐞 Reporting Issues
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+- `feat:` — new capability
+- `fix:` — bug fix
+- `docs:` — documentation changes
+- `refactor:` — code restructuring
+- `chore:` — tooling, dependencies, CI
 
-Please use the provided issue templates for bug reports and feature requests. Provide as much context as possible, including:
-- E-GAOP version
-- Component (e.g., Tool Proxy)
-- Expected vs. Actual behavior
+## Pull Request Process
+
+1. Ensure linting and typecheck pass.
+2. Write atomic commits with descriptive messages.
+3. Self-review for security implications, especially in `policy-plane/` and `execution-plane/`.
+4. Link any related PR descriptions in `prs/` for traceability.
+
+## Reporting Issues
+
+Use the issue templates (see `.github/ISSUE_TEMPLATE/`). Include:
+- E-GAOP version (git commit hash)
+- Component (e.g., llm-router, workflow-engine)
+- Expected vs actual behavior
 - Relevant logs or traces
 
-Thank you for helping us build the future of AI orchestration!
+---
+
+> **Note on production readiness:** This project has a published readiness assessment at `docs/production-readiness-final.md`. Known limitations are documented there — please check before reporting capability gaps.
