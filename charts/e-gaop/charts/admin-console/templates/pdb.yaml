@@ -1,4 +1,4 @@
-{{- if .Values.admin-console.enabled }}
+{{- if .Values.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

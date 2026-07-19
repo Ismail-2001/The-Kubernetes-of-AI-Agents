@@ -1,4 +1,4 @@
-{{- if .Values.admin-console.enabled }}
+{{- if .Values.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/part-of: e-gaop
 spec:
-  replicas: {{ .Values.admin-console.replicas | default 2 }}
+  replicas: {{ .Values.replicas | default 2 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: admin-console
@@ -23,10 +23,10 @@ spec:
     spec:
       containers:
         - name: admin-console
-          image: "{{ .Values.admin-console.image }}:{{ .Values.admin-console.tag }}"
+          image: "{{ .Values.image }}:{{ .Values.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: {{ .Values.admin-console.port | default 3000 }}
+            - containerPort: {{ .Values.port | default 3000 }}
               name: http
               protocol: TCP
           envFrom:
@@ -38,7 +38,7 @@ spec:
             - name: NEXT_TELEMETRY_DISABLED
               value: "1"
             - name: PORT
-              value: "{{ .Values.admin-console.port | default 3000 }}"
+              value: "{{ .Values.port | default 3000 }}"
             - name: NEXT_PUBLIC_API_URL
               value: "http://{{ .Release.Name }}-api-server:50051"
             - name: NEXT_PUBLIC_SSE_URL
@@ -60,7 +60,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
           resources:
-            {{- toYaml .Values.admin-console.resources | nindent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001

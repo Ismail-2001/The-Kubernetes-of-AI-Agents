@@ -1,4 +1,4 @@
-{{- if .Values.admin-console.enabled }}
+{{- if .Values.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,7 +11,7 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: {{ .Values.admin-console.port | default 3000 }}
+    - port: {{ .Values.port | default 3000 }}
       targetPort: http
       protocol: TCP
       name: http
