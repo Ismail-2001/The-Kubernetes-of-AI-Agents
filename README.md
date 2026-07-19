@@ -1,151 +1,53 @@
 <p align="center">
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents">
-    <img src="https://img.shields.io/badge/E--GAOP-v0.6.0-blue?style=for-the-badge" alt="Version" />
-  </a>
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/License-Apache--2.0-green?style=for-the-badge" alt="License" />
-  </a>
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents">
-    <img src="https://img.shields.io/badge/TypeScript-5.7-blue?style=for-the-badge&logo=typescript" alt="TypeScript" />
-  </a>
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents">
-    <img src="https://img.shields.io/badge/gRPC-1.14-green?style=for-the-badge&logo=grpc" alt="gRPC" />
-  </a>
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents">
-    <img src="https://img.shields.io/badge/Temporal-1.11-orange?style=for-the-badge" alt="Temporal" />
-  </a>
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents">
-    <img src="https://img.shields.io/badge/PostgreSQL-15-blue?style=for-the-badge&logo=postgresql" alt="PostgreSQL" />
-  </a>
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents">
-    <img src="https://img.shields.io/badge/OTel-Collector-black?style=for-the-badge&logo=opentelemetry" alt="OpenTelemetry" />
-  </a>
+  <img src="https://img.shields.io/badge/Status-77.6%25_Readiness-yellow?style=for-the-badge" alt="Readiness" />
+  <img src="https://img.shields.io/badge/License-Apache--2.0-green?style=for-the-badge" alt="License" />
+  <img src="https://img.shields.io/badge/TypeScript-5.7-blue?style=for-the-badge" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Temporal-1.11-orange?style=for-the-badge" alt="Temporal" />
 </p>
 
-<h1 align="center">
-  <br>
-  E-GAOP
-  <br>
-</h1>
+<h1 align="center">E-GAOP</h1>
 
-<h3 align="center">The Operating System for Enterprise AI Agents</h3>
+<h3 align="center">Enterprise-Grade Agent Orchestration Platform</h3>
 
 <p align="center">
-  <em>Production-grade orchestration for autonomous AI agents with kernel-level isolation, durable execution, and real-time governance.</em>
+  <em>Agent lifecycle management with OPA-governed execution, sandboxed tool runtime, Temporal-backed workflows, and full-stack observability.</em>
 </p>
 
 <p align="center">
+  <a href="#current-status">Status</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#architecture">Architecture</a> •
   <a href="#api-reference">API</a> •
-  <a href="#security">Security</a> •
   <a href="#observability">Observability</a> •
-  <a href="#deployment">Deployment</a>
+  <a href="#known-limitations">Known Limitations</a>
 </p>
 
 ---
 
-## Executive Summary
+## Current Status
 
-**E-GAOP** (Enterprise-Grade Agent Orchestration Platform) is the infrastructure layer that transforms fragile AI agent prototypes into resilient, auditable, and scalable enterprise systems.
+**Readiness score: 77.6%** (weighted, 53 items across 7 categories).
+Full assessment: [`docs/production-readiness-final.md`](docs/production-readiness-final.md).
 
-### The Problem
+| Area | Score | What works | What's missing |
+|:---|:---:|:---|:---|
+| Functional Completeness | 93% | Full agent CRUD, LLM routing, sandboxed tool execution, structured tool-calling, natural-language tool triggering | Error handling not comprehensive; no input schema enforcement |
+| Reliability | 83% | Sandbox lifecycle, Temporal determinism, concurrent isolation (10 agents at 100%), load-tested timeout handling | No circuit breaker for LLM calls; manual recovery path untested |
+| Security | 55% | OPA enforcement, JWT auth, sandbox network isolation, encrypted secrets in Postgres | Vulnerability scanning never run; CI/CD never executed; mTLS disabled; no penetration testing |
+| Observability | 79% | JSON logging, Prometheus metrics, OTEL tracing, Grafana alerts (5 rules, verified firing) | Dashboard rendering unverified; no formal audit log format |
+| Operability | 70% | Docker Compose deployment, backup/restore (3/3 cycles verified), health checks on all 17 services | CI/CD pipeline exists in source but has never executed |
+| Agent Quality (Evals) | 92% | 19-case golden dataset, automated runner, regression comparison, RL-2 at 84.2% task success | Metric bug: `tool_selection_accuracy` >1.0 invalid; ~2 failures contaminated by LLM saturation |
 
-Enterprise AI teams face a critical gap: **LLM capabilities are advancing faster than the infrastructure to deploy them safely.** Current agent frameworks offer no isolation, no durability, no governance, and no observability — making them unsuitable for production workloads handling sensitive data or mission-critical operations.
-
-### Our Solution
-
-E-GAOP provides the **missing operating system** for AI agents:
-
-| Capability | What E-GAOP Delivers | Business Impact |
-|:---|:---|:---|
-| **Isolation** | Kernel-level sandboxing per agent on dedicated Docker network | Zero cross-contamination between workloads |
-| **Durability** | Temporal-backed execution with replay | Agents survive crashes, restarts, and upgrades |
-| **Governance** | OPA/Rego policy engine with real-time enforcement | Compliance with SOC 2, HIPAA, GDPR out-of-the-box |
-| **Observability** | Full OpenTelemetry stack with distributed tracing | Debug 10x faster, reduce MTTR by 75% |
-| **Multi-tenancy** | Namespace isolation with tier-based quotas | Run agents for multiple teams without conflicts |
-| **Security** | Dynamic secrets, mTLS, append-only audit logs | Zero-trust architecture for sensitive workloads |
-
----
-
-## Architecture
-
-E-GAOP decomposes into **five decoupled planes**, each independently scalable:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          CONTROL PLANE                                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │
-│  │   API Server │  │   Workflow   │  │ Secret Store │  │  Namespace │ │
-│  │  (REST+gRPC) │  │   Engine     │  │ (AES-256-GCM)│  │  Manager   │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └─────┬──────┘ │
-│         │                 │                 │                │         │
-├─────────┼─────────────────┼─────────────────┼────────────────┼─────────┤
-│                          EXECUTION PLANE                                │
-│  ┌──────┴───────┐  ┌──────┴───────┐  ┌─────┴────────┐                   │
-│  │  LLM Router  │  │  Tool Proxy  │  │   Sandbox    │                   │
-│  │  (Fallback)  │  │  (PII Scan)  │  │   Runtime    │                   │
-│  └──────┬───────┘  └──────────────┘  └──────────────┘                   │
-│         │                                                                │
-├─────────┼────────────────────────────────────────────────────────────────┤
-│                     egaop-sandbox (internal network)                     │
-│         │                                                                │
-│  ┌──────┴───────┐                                                        │
-│  │   Sandbox    │  ← Agent containers run here (no internet access)     │
-│  │  Containers  │  ← Can ONLY reach LLM Router for model inference     │
-│  └──────────────┘  ← CANNOT reach postgres, temporal, redis, or OPA    │
-├─────────────────────────────────────────────────────────────────────────┤
-│                          MEMORY PLANE                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
-│  │    Redis     │  │  PostgreSQL  │  │   pgvector   │                   │
-│  │  (Working)   │  │  (Entity)    │  │  (Semantic)  │                   │
-│  └──────────────┘  └──────────────┘  └──────────────┘                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│                          POLICY PLANE                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
-│  │  OPA / Rego  │  │     PII      │  │   Circuit    │                   │
-│  │   Engine     │  │  Detection   │  │   Breaker    │                   │
-│  └──────────────┘  └──────────────┘  └──────────────┘                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│                       OBSERVABILITY PLANE                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
-│  │  OTel        │  │  Prometheus  │  │   Grafana    │                   │
-│  │  Collector   │  │  Metrics     │  │  Dashboards  │                   │
-│  └──────────────┘  └──────────────┘  └──────────────┘                   │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Request Flow
-
-```
-Client Request
-    │
-    ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  API Server │────▶│  OPA Policy │────▶│  Workflow   │
-│  (Auth+JWT) │     │  Engine     │     │  Engine     │
-└─────────────┘     └─────────────┘     └──────┬──────┘
-                                               │
-                    ┌──────────────────────────┘
-                    │
-    ┌───────────────┼───────────────┐
-    │               │               │
-    ▼               ▼               ▼
-┌────────┐    ┌──────────┐    ┌──────────┐
-│  LLM   │    │  Tool    │    │  Memory  │
-│ Router │    │  Proxy   │    │  Plane   │
-└────┬───┘    └──────────┘    └──────────┘
-     │
-     ▼
-┌──────────────┐
-│   Sandbox    │  ← Isolated on egaop-sandbox network
-│  Container   │  ← Docker namespace isolation (Level 1)
-└──────────────┘  ← gVisor available when runsc installed (Level 2)
-```
+**Safe for:** Demo, single-user pilot (<10 concurrent agents).
+**Not safe for:** Multi-tenant production, unmonitored deployment, workloads requiring vulnerability-clearance.
 
 ---
 
 ## Quick Start
+
+> **Note:** These instructions match the repo's `docker-compose.yml` and API structures but have
+> not been re-run end-to-end against the current commit. The Docker daemon was in a wedged state
+> at the end of the last validation round. If you encounter issues, please file a bug.
 
 ### Prerequisites
 
@@ -153,13 +55,13 @@ Client Request
 - **Docker** 24+ with Compose v2
 - **Git**
 
-### One-Command Setup
+### Setup
 
 ```bash
 git clone https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents.git
 cd The-Kubernetes-of-AI-Agents
 
-# Generate secrets (or copy .env.example)
+# Generate secrets
 openssl rand -hex 32 > .env   # EGAOP_MASTER_ENCRYPTION_KEY
 openssl rand -base64 48 >> .env  # JWT_SECRET
 openssl rand -hex 16 >> .env  # POSTGRES_PASSWORD
@@ -171,50 +73,83 @@ docker compose up -d
 docker compose ps
 ```
 
-### Verify Health
+### Run an Agent
 
 ```bash
-# API Server (REST BFF)
-curl http://localhost:3001/health
-
-# Admin Console
-open http://localhost:3002
-
-# Grafana Dashboard
-open http://localhost:3003/grafana
-
-# Prometheus Metrics
-open http://localhost:9091
-```
-
-### Run Your First Agent
-
-```bash
-# Register a user
-curl -X POST http://localhost:3001/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Admin","email":"admin@egaop.io","password":"SecurePass123!"}'
-
-# Login (use the token from response)
+# Login
 TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@egaop.io","password":"SecurePass123!"}' | jq -r '.data.token')
+  -d '{"email":"admin@egaop.io","password":"..."}' | jq -r '.data.token')
 
 # Create an agent
 curl -X POST http://localhost:3001/api/agents \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name":"my-agent","namespace":"default","spec":{"model":"openai/gpt-4o"}}'
+  -d '{"name":"demo-agent","namespace":"default","spec":{"model":"openai/gpt-4o"}}'
 
-# Run the agent
-curl -X POST http://localhost:3001/api/agents/my-agent/run \
+# Run it
+curl -X POST http://localhost:3001/api/agents/demo-agent/run \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"namespace":"default","callerRole":"namespace_admin"}'
+  -d '{"namespace":"default"}'
+```
 
-# Check execution status
-curl http://localhost:3001/api/executions/agent-exec-<id> \
-  -H "Authorization: Bearer $TOKEN"
+---
+
+## Architecture
+
+E-GAOP decomposes into five planes, each independently scalable:
+
+```
++-------------------------------------------------------------------------------------------+
+|                                CONTROL PLANE                                               |
+|  +------------------+  +------------------+  +------------------+  +------------+          |
+|  |   API Server     |  |    Workflow      |  |   Secret Store   |  | Namespace  |          |
+|  |  (REST + gRPC)   |  |    Engine        |  | (AES-256-GCM)    |  | Manager    |          |
+|  +--------+---------+  +--------+---------+  +--------+---------+  +------------+          |
+|           |                    |                       |                                    |
++-----------+--------------------+-----------------------+------------------------------------+
+|                                    EXECUTION PLANE                                         |
+|  +--------+---------+  +--------+---------+  +--------+---------+                          |
+|  |    LLM Router    |  |   Tool Proxy     |  |   Sandbox        |                          |
+|  |  (fallback chain)|  |                  |  |   Runtime        |                          |
+|  +--------+---------+  +------------------+  +------------------+                          |
+|           |                                                                                 |
++-----------+--------------------+-----------------------------------------------------------+
+|             egaop-sandbox (internal network, no internet)                                   |
+|           |                                                                                 |
+|  +--------+---------+  Agent containers: LLM router only. No postgres/temporal/OPA.        |
+|  |    Sandbox       |  Docker network isolation (Level 1). gVisor/runsc not installed.     |
+|  |    Containers    |                                                                      |
+|  +------------------+                                                                      |
++-------------------------------------------------------------------------------------------+
+|                                MEMORY PLANE                                                |
+|  +------------------+  +------------------+                                                 |
+|  |      Redis       |  |   PostgreSQL     |                                                 |
+|  |    (working)     |  |   (entity)       |                                                 |
+|  +------------------+  +------------------+                                                 |
++-------------------------------------------------------------------------------------------+
+|                                POLICY PLANE                                                |
+|  +------------------+                                                                      |
+|  |   OPA / Rego     |                                                                      |
+|  |    Engine        |                                                                      |
+|  +------------------+                                                                      |
++-------------------------------------------------------------------------------------------+
+|                            OBSERVABILITY PLANE                                              |
+|  +------------------+  +------------------+  +------------------+                           |
+|  |   OTel Collector |  |   Prometheus     |  |     Grafana      |                           |
+|  |   (traces)       |  |   (metrics)      |  |   (dashboards +  |                           |
+|  |                  |  |                  |  |   5 alert rules)  |                           |
+|  +------------------+  +------------------+  +------------------+                           |
++-------------------------------------------------------------------------------------------+
+```
+
+### Request Flow
+
+```
+Client → API Server (JWT auth) → OPA Policy (deny/allow) → Workflow Engine (Temporal)
+    → LLM Router (model call) → Tool Proxy → Sandbox Runtime (Docker container)
+    → Result → Tool result → LLM follow-up → Final Answer
 ```
 
 ---
@@ -226,411 +161,163 @@ curl http://localhost:3001/api/executions/agent-exec-<id> \
 | Method | Endpoint | Description |
 |:---|:---|:---|
 | `POST` | `/api/auth/register` | Register new user |
-| `POST` | `/api/auth/login` | Authenticate user, return JWT |
-| `GET` | `/api/auth/me` | Get current user info |
-| `GET` | `/api/agents` | List all agents (paginated) |
-| `POST` | `/api/agents` | Create new agent |
+| `POST` | `/api/auth/login` | Authenticate, return JWT |
+| `GET` | `/api/agents` | List agents (paginated) |
+| `POST` | `/api/agents` | Create agent |
 | `GET` | `/api/agents/:id` | Get agent details |
 | `DELETE` | `/api/agents/:id` | Delete agent |
-| `POST` | `/api/agents/:id/run` | Trigger agent workflow (starts Temporal execution) |
-| `GET` | `/api/namespaces` | List all namespaces |
-| `GET` | `/api/traces` | List execution traces (real Temporal data) |
-| `GET` | `/api/traces/:traceId` | Get trace details with spans |
-| `GET` | `/api/executions/:id` | Get execution status from Temporal |
-| `GET` | `/api/executions/:id/history` | Get full Temporal event history |
-| `GET` | `/api/metrics` | Get platform metrics (real-time) |
-| `GET` | `/api/events` | SSE stream for real-time events |
+| `POST` | `/api/agents/:id/run` | Trigger Temporal workflow |
+| `GET` | `/api/executions/:id` | Execution status from Temporal |
+| `GET` | `/api/executions/:id/history` | Full Temporal event history |
 
 ### gRPC Services
 
-All inter-service communication uses **gRPC with Protocol Buffers**.
+All inter-service communication uses gRPC with Protocol Buffers (`api/proto/egaop/v1/`).
 
-```protobuf
-// Agent lifecycle management
-service AgentService {
-  rpc CreateAgent(CreateAgentRequest) returns (Agent);
-  rpc GetAgent(GetAgentRequest) returns (Agent);
-  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
-  rpc UpdateAgent(UpdateAgentRequest) returns (Agent);
-  rpc DeleteAgent(DeleteAgentRequest) returns (google.protobuf.Empty);
-}
-
-// Multi-tenant namespace management
-service NamespaceService {
-  rpc CreateNamespace(CreateNamespaceRequest) returns (Namespace);
-  rpc GetNamespace(GetNamespaceRequest) returns (Namespace);
-  rpc ListNamespaces(ListNamespacesRequest) returns (ListNamespacesResponse);
-  rpc SuspendNamespace(SuspendNamespaceRequest) returns (Namespace);
-  rpc DeleteNamespace(DeleteNamespaceRequest) returns (google.protobuf.Empty);
-}
-
-// LLM routing and generation
-service LLMService {
-  rpc Generate(GenerateRequest) returns (GenerateResponse);
-}
-
-// Tool execution proxy
-service ToolService {
-  rpc CallTool(CallToolRequest) returns (CallToolResponse);
-}
-
-// Sandbox lifecycle
-service RuntimeService {
-  rpc CreateSandbox(CreateSandboxRequest) returns (Sandbox);
-  rpc TerminateSandbox(TerminateSandboxRequest) returns (TerminateSandboxResponse);
-  rpc GetSandboxStatus(GetSandboxStatusRequest) returns (SandboxStatus);
-}
-
-// Trace ingestion and replay
-service ObservabilityService {
-  rpc ExportTrace(ExportTraceRequest) returns (ExportTraceResponse);
-  rpc GetExecutionReplay(GetExecutionReplayRequest) returns (ExecutionReplay);
-}
-```
-
----
-
-## Security
-
-### Zero-Trust Architecture
-
-E-GAOP implements defense-in-depth security:
-
-1. **Sandbox Network Isolation** — Agent containers run on `egaop-sandbox` (internal Docker network, no internet). They can ONLY reach the LLM router for model inference. Cannot reach postgres, temporal, redis, OPA, or any control-plane service.
-
-2. **mTLS Everywhere** — All gRPC communication encrypted and authenticated.
-
-3. **Dynamic Secret Injection** — Secrets injected per-execution, never stored in agent memory.
-
-4. **OPA Policy Engine** — Every request evaluated against Rego policies before execution. Supports namespace-based access control with role clearance mapping.
-
-5. **Append-Only Audit Log** — Immutable record of all agent actions for compliance.
-
-6. **Namespace Isolation** — Data, memory, and quotas strictly partitioned by namespace.
-
-7. **PII Detection** — Automatic detection and redaction of sensitive data in tool outputs.
-
-### Sandbox Isolation Levels
-
-| Level | Technology | Requirement | Security Boundary |
-|:---|:---|:---|:---|
-| **Level 1** (default) | Docker namespaces | Docker | Process isolation, network isolation via `egaop-sandbox` |
-| **Level 2** | gVisor (runsc) | `runsc` installed | Kernel-level syscall filtering |
-| **Level 3** | Firecracker microVM | Firecracker | Hardware-level isolation |
-
-### Compliance Readiness
-
-| Standard | E-GAOP Coverage |
-|:---|:---|
-| **SOC 2** | Audit trails, access controls, encryption at rest/transit |
-| **HIPAA** | PII detection, namespace isolation, audit logging |
-| **GDPR** | Data residency controls, right-to-deletion support |
-| **ISO 27001** | Policy enforcement, access monitoring, incident response |
+| Service | Primary RPC | Port |
+|:---|:---|:---:|
+| `AgentService` | CreateAgent / GetAgent / ListAgents / DeleteAgent | 50051 |
+| `LLMService` | Generate (with `tool_calls` support) | 50053 |
+| `ToolService` | CallTool | 50052 |
+| `RuntimeService` | CreateSandbox / TerminateSandbox / GetSandboxStatus | 50054 |
+| `ObservabilityService` | ExportTrace / GetExecutionReplay | 50056 |
 
 ---
 
 ## Observability
 
-### Full-Stack Visibility
-
-E-GAOP ships with a production-ready observability stack:
-
-| Layer | Tool | Purpose |
+| Tool | Access | Purpose |
 |:---|:---|:---|
-| **Traces** | OpenTelemetry → OTel Collector | Distributed tracing across all services |
-| **Metrics** | Prometheus | 35+ unique metric names with 10s scrape interval |
-| **Dashboards** | Grafana | 20 pre-built panels with namespace filtering |
-| **Alerts** | Prometheus AlertManager | 5 alert rules (error rate, latency, circuit breaker) |
+| Grafana | `http://localhost:3003/grafana` | Dashboards + 5 alert rules (ServiceDown, HighErrorRate, HighLatencyP95, HighLatencyP99, MetricsDropping) |
+| Prometheus | `http://localhost:9091` | Metrics scraping (10s interval) |
+| OTel Collector | `:4317` (gRPC) / `:4318` (HTTP) | Distributed tracing across all services |
 
-### Key Metrics
+---
 
-```
-# Request metrics
-http_server_duration_seconds     # Request latency by service
-http_client_duration_seconds     # Outbound call latency
-http_requests_total              # Request count by status
+## Evals
 
-# OTel pipeline
-otelcol_received_spans_total     # Spans received by collector
-otelcol_exported_spans_total     # Spans exported to backend
+The platform includes an automated eval suite (`evals/`) with 19 golden cases across 7 categories.
 
-# Infrastructure
-db_client_connections_active     # Database connection pool
-container_cpu_usage_seconds_total  # Container CPU usage
-```
+| Run | Date | Pass rate | Notes |
+|:---|:---|:---:|:---|
+| RL-1 (baseline) | Jul 17 | 68.4% (13/19) | All 6 failures documented |
+| RL-2 | Jul 18 | **84.2% (16/19)** | +15.8pp, 3 FLIPs |
 
-### Access Points
+**3 cases improved:** qanda-simple-math (no longer calls code_interpreter for 2+2), code_interpreter-sum-1-to-100 (completes in 1 call instead of 10 loops), code_interpreter-csv-average (writes file then computes in 2 calls).
 
-| Tool | URL | Credentials |
-|:---|:---|:---|
-| Grafana | `http://localhost:3003/grafana` | `admin` / `GRAFANA_PASSWORD` from `.env` |
-| Prometheus | `http://localhost:9091` | — |
-| OTel zpages | `http://localhost:8888` | — |
+**Still failing (3):** code_interpreter-prime-check (MAX_ITERATIONS loop), file_write-read-greeting (`LLM call failed` — probable infra contamination), database_query-create-table (same).
+
+> **Note:** ~2 of the 3 remaining failures show `LLM call failed: Activity task failed`, which matches OpenRouter rate-limit saturation after ~15 sequential calls. The true agent quality pass rate excluding infra interference may be ~94%. The `tool_selection_accuracy` metric has a known denominator bug (values >1.0).
+
+Full details: [`docs/production-readiness-final.md`](docs/production-readiness-final.md) (Eval regression section).
+
+---
+
+## Known Limitations
+
+These are documented gaps, not hidden ones. Full list in the [readiness assessment](docs/production-readiness-final.md#known-gaps-final).
+
+1. **Vulnerability scanning has never run** — Trivy and `npm audit` configurations exist in `.github/workflows/` but have never executed. No CVE review exists for the 17 container images. **Blocking for production.**
+2. **CI/CD has never executed** — Workflow files (`ci.yml`, `deploy.yml`) exist and are well-formed but have never been triggered. No automated build-test-deploy path. **Blocking for production.**
+3. **Concurrency ceiling at ~10 agents** — Sustains 10 concurrent agents at 100% success. ≥12 concurrent degrades to 60-75% due to llm-router `DEADLINE_EXCEEDED`. REST/api-server tier is not the bottleneck.
+4. **Kubernetes partial** — `helm install` succeeds (REVISION 1), but OPA pod enters CrashLoopBackOff. 11 chart bugs were fixed during validation; OPA crash root cause undiagnosed.
+5. **mTLS disabled** — TLS encryption works (traffic encrypted), but `@grpc/grpc-js` v1.14.4 bug prevents client-cert verification. `requestCert: false` workaround in place. No cert rotation.
+6. **Eval metric bug** — `tool_selection_accuracy` exceeds 1.0 (invalid for a ratio). Scoring code needs denominator fix.
+7. **No penetration testing** — No injection testing, fuzzing, or red-team exercise performed.
 
 ---
 
 ## Services
 
-### Core Services
+### Core (9 services)
 
-| Service | Port | Protocol | Health Port | Description |
-|:---|:---:|:---:|:---:|:---|
-| **api-server** | `50051`/`3001` | gRPC/REST | `15051` | Central API, auth, REST BFF |
-| **workflow-engine** | — | Temporal | `15058` | Durable agent execution: ReAct loops, HITL gates |
-| **llm-router** | `50053` | gRPC | `15053` | Multi-model routing with OpenRouter/OpenAI fallback |
-| **tool-proxy** | `50052` | gRPC | `15052` | Proxied tool execution with PII scanning |
-| **sandbox-runtime** | `50054` | gRPC | `15054` | Docker container provisioning on `egaop-sandbox` |
-| **memory-plane** | `50055` | gRPC | `15055` | Redis + PostgreSQL + pgvector |
-| **observability-plane** | `50056` | gRPC | `15056` | Trace ingestion and replay |
-| **secret-store** | `50057` | gRPC | `15057` | AES-256-GCM encrypted secret vault |
-| **policy-plane** | `50059` | HTTP | — | OPA/Rego policy evaluation |
+| Service | Port(s) | Protocol | Description |
+|:---|:---:|:---:|:---|
+| **api-server** | 50051 / 3001 | gRPC / REST | Central API, auth, agent CRUD |
+| **workflow-engine** | — | Temporal Worker | ReAct loop, HITL gates, quota enforcement |
+| **llm-router** | 50053 | gRPC | Multi-model routing (OpenAI / OpenRouter fallback) |
+| **tool-proxy** | 50052 | gRPC | Proxied tool execution |
+| **sandbox-runtime** | 50054 | gRPC | Docker container lifecycle on `egaop-sandbox` |
+| **memory-plane** | 50055 | gRPC | Redis + PostgreSQL |
+| **observability-plane** | 50056 | gRPC | Trace ingestion and replay |
+| **secret-store** | 50057 | gRPC | AES-256-GCM encrypted secrets (Postgres-backed) |
+| **policy-plane** | 50059 | HTTP | OPA/Rego policy evaluation |
 
 ### Infrastructure
 
 | Component | Port | Purpose |
 |:---|:---:|:---|
-| PostgreSQL 15 | `5432` | Entity memory, namespaces, audit log, pgvector |
-| Redis 7 | `6379` | Working memory, quota counters, session cache |
-| Temporal | `7233` | Durable workflow execution with PostgreSQL backend |
-| OPA | `8181` | Policy-as-code sidecar |
-| OTel Collector | `4317`/`4318` | Trace/metrics collection and export |
-| Prometheus | `9090` | Metrics scraping and alerting |
-| Grafana | `3000` | Dashboard visualization |
-| Docker Socket Proxy | `2375` | Sandboxed Docker API access (POST/START/STOP only) |
+| PostgreSQL 15 | 5432 | Entity storage, auth, secrets |
+| Redis 7 | 6379 | Quota counters, session cache |
+| Temporal | 7233 | Durable workflow execution |
+| OPA | 8181 | Policy-as-code sidecar |
+| OTel Collector | 4317 / 4318 | Trace/metric collection |
+| Prometheus | 9090 | Metrics storage |
+| Grafana | 3000 | Dashboards + alerting |
+| Docker Socket Proxy | 2375 | Scoped Docker API (containers only, no volumes/networks) |
 
 ### Docker Networks
 
-| Network | Driver | Purpose |
-|:---|:---|:---|
-| `egaop-net` | bridge | Inter-service communication (all services) |
-| `egaop-sandbox` | bridge (internal) | Sandbox isolation (LLM router + sandbox containers only) |
+| Network | Purpose |
+|:---|:---|
+| `egaop-net` | Inter-service communication (all services) |
+| `egaop-sandbox` | Sandbox isolation (LLM router + sandbox containers only, no internet) |
 
 ---
 
 ## Configuration
 
-### Environment Variables
-
 | Variable | Required | Default | Description |
 |:---|:---:|:---:|:---|
-| `OPENAI_API_KEY` | Yes | — | API key for LLM routing (OpenAI or OpenRouter) |
-| `OPENAI_BASE_URL` | No | `https://api.openai.com/v1` | LLM API base URL (set to `https://openrouter.ai/api/v1` for OpenRouter) |
-| `EGAOP_MASTER_ENCRYPTION_KEY` | Yes | — | Master key for secret-store encryption (64 hex chars) |
+| `OPENAI_API_KEY` | Yes | — | LLM API key (OpenAI or OpenRouter) |
+| `OPENAI_BASE_URL` | No | `https://api.openai.com/v1` | LLM base URL |
+| `EGAOP_MASTER_ENCRYPTION_KEY` | Yes | — | Secret-store master key (64 hex chars) |
 | `JWT_SECRET` | Yes | — | JWT signing secret (min 32 chars) |
 | `POSTGRES_PASSWORD` | Yes | — | PostgreSQL password |
 | `GRAFANA_PASSWORD` | Yes | — | Grafana admin password |
-| `TLS_ENABLED` | No | `false` | Enable mTLS for all gRPC services |
-| `TEMPORAL_NAMESPACE` | No | `egaop` | Temporal namespace for workflows |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://otel-collector:4318` | OTel Collector endpoint |
-
-### Secret Generation
-
-```bash
-# Generate all required secrets
-openssl rand -hex 32    # EGAOP_MASTER_ENCRYPTION_KEY
-openssl rand -base64 48 # JWT_SECRET
-openssl rand -hex 16    # POSTGRES_PASSWORD
-openssl rand -hex 16    # GRAFANA_PASSWORD
-```
-
----
-
-## Deployment
-
-### Docker Compose (Development/Staging)
-
-```bash
-docker compose up -d
-```
-
-### Kubernetes (Production)
-
-```bash
-# Helm charts available in charts/e-gaop/
-helm dependency update charts/e-gaop
-helm install egaop charts/e-gaop -f charts/e-gaop/values-production.yaml
-```
-
-### Health Checks
-
-Every service exposes health endpoints:
-
-```bash
-curl http://localhost:<HEALTH_PORT>/healthz   # Liveness
-curl http://localhost:<HEALTH_PORT>/readyz    # Readiness
-```
+| `TLS_ENABLED` | No | `false` | Enable TLS for gRPC |
 
 ---
 
 ## Project Structure
 
 ```
-The-Kubernetes-of-AI-Agents/
-├── admin-console/                  # Next.js 15 admin dashboard
-│   └── src/
-│       ├── app/                    # App router (20+ pages)
-│       ├── components/             # Reusable UI components
-│       └── lib/                    # API client, React Query hooks
-│
-├── api/
-│   └── proto/egaop/v1/             # gRPC protobuf definitions (9 services)
-│
-├── control-plane/
-│   ├── api-server/                 # Central API (REST BFF + gRPC)
-│   ├── secret-store/               # AES-256-GCM encrypted secret vault
-│   └── workflow-engine/            # Temporal worker (ReAct, HITL, quotas)
-│
-├── execution-plane/
-│   ├── llm-router/                 # Multi-model routing (OpenRouter/OpenAI)
-│   ├── tool-proxy/                 # Proxied tool execution with PII scan
-│   └── sandbox-runtime/            # Docker sandbox with network isolation
-│       └── base-runtime/           # Node.js 22 + Python 3 sandbox image
-│
-├── memory-plane/                   # Redis + PostgreSQL + pgvector
-├── observability-plane/            # Trace ingestion and replay
-├── policy-plane/                   # OPA/Rego policies with circuit breaker
-│
-├── packages/
-│   └── shared/                     # @e-gaop/shared — shared utilities
-│       └── src/
-│           ├── crypto/             # AES-256-GCM + JWT + password hashing
-│           ├── errors/             # Structured gRPC error types
-│           ├── grpc/               # Interceptors, span enrichment
-│           ├── metrics/            # Prometheus exporter
-│           ├── namespaces/         # Namespace model, Zod schemas
-│           ├── quotas/             # Redis-backed quota enforcer
-│           └── telemetry/          # OTel SDK initialization
-│
-├── tests/                          # Cross-service test suites
-│   ├── integration/                # testcontainers-based
-│   ├── contract/                   # Consumer-driven contract tests
-│   ├── chaos/                      # Chaos resilience tests
-│   ├── security/                   # Security test suite
-│   └── perf/                       # Performance baseline tests
-│
-├── charts/e-gaop/                  # Helm charts
-├── migrations/                     # PostgreSQL migrations (5 files)
-├── observability/                  # OTel collector, Prometheus, Grafana
-├── prs/                            # Expert PR descriptions
-├── docs/benchmarks/                # Performance benchmark results
-├── .github/workflows/ci.yml       # CI pipeline
-├── docker-compose.yml              # Full local development environment
-└── scripts/
-    └── verify-deployed.ps1         # Drift detection script
+├── control-plane/           # API server, workflow engine, secret store
+├── execution-plane/         # LLM router, tool proxy, sandbox runtime
+├── memory-plane/            # Redis + PostgreSQL
+├── observability-plane/     # Trace ingestion
+├── policy-plane/            # OPA/Rego engine
+├── packages/shared/         # @e-gaop/shared (TLS, quotas, telemetry)
+├── charts/e-gaop/           # Helm chart (partial — OPA CrashLoopBackOff known)
+├── evals/                   # Golden dataset, runner, baselines
+├── scripts/                 # Backup/restore, load test, drift detection, grafana-init
+├── prs/                     # PR descriptions documenting all changes
+├── migrations/              # PostgreSQL migrations (5 files)
+├── observability/           # Prometheus, Grafana, OTel config
+├── docs/                    # Production readiness assessment, architecture notes
+└── .github/workflows/       # CI/CD (not yet executed — see limitations)
 ```
 
 ---
 
-## Testing
+## Roadmap
 
-### Running Tests
+Next steps identified from the readiness assessment, not aspirational features:
 
-```bash
-# Unit tests (all packages)
-npm test
-
-# Integration tests (requires Docker)
-cd tests && npx jest --config jest.config.js --selectProjects integration
-
-# Contract tests
-cd tests && npx jest --config jest.config.js --selectProjects contract
-
-# Chaos resilience tests
-cd tests && npx jest --config jest.config.js --selectProjects chaos
-
-# Security tests
-cd tests && npx jest --config jest.config.js --selectProjects security
-
-# Performance baselines
-cd tests && npx jest --config jest.config.js --selectProjects perf
-```
-
-### Test Coverage
-
-| Category | Tools | Focus |
-|:---|:---|:---|
-| **Unit** | Jest | Business logic, pure functions |
-| **Integration** | testcontainers | Real PostgreSQL, Redis, OPA |
-| **Contract** | Jest | gRPC API compatibility |
-| **Chaos** | Custom | DB recovery, circuit breaker, LLM retry |
-| **Security** | Custom | SQL injection, JWT validation, cross-namespace isolation |
-| **Performance** | Custom | Insert throughput, query latency, p99 baselines |
-
----
-
-## CI/CD Pipeline
-
-### 5-Stage Pipeline
-
-```yaml
-Stage 1: Lint & TypeCheck     → ESLint + TypeScript strict mode
-Stage 2: Unit Tests           → 10 parallel test suites
-Stage 3: Integration Tests    → 4 testcontainers-based suites
-Stage 4: Build                → 9 parallel Docker builds
-Stage 5: Deploy Staging       → Automated staging deployment
-```
-
-### Pipeline Features
-
-- **Parallel execution** — Unit tests run across 10 parallel workers
-- **Docker layer caching** — Faster builds via GitHub Actions cache
-- **npm caching** — Dependencies cached across runs
-- **Automated staging** — Deploys to staging on merge to `main`
-- **Health verification** — Post-deploy health checks
-
----
-
-## Production Readiness
-
-### Verified Metrics
-
-| Metric | Measured | Target | Status |
-|:---|:---|:---|:---:|
-| Data durability | 100% (PostgreSQL) | 100% | ✅ |
-| Workflow success rate | 100% (Temporal) | 99.9% | ✅ |
-| HTTP transport baseline (p99) | 12ms | <50ms | ✅ |
-| Agent execution — infrastructure (p50) | 1.5s | <2s | ✅ |
-| Sandbox network isolation | Verified | Isolated | ✅ |
-| OPA policy enforcement | Verified | Enforced | ✅ |
-| Real-time traces/metrics | Verified | Live data | ✅ |
-
-### Engineering Principles
-
-1. **Zero-Trust**: Agents never get direct network access. Every call is proxied, validated, and audited.
-2. **Fail-Closed**: OPA unreachable → deny. Circuit open → deny. Never fail-open.
-3. **Deterministic Replay**: Every execution produces a trace bundle that can be replayed step-by-step.
-4. **Namespace Isolation**: Data, memory, and quotas are strictly partitioned by namespace.
-5. **No ORM**: All database access is raw parameterized queries — no query builder abstractions.
-6. **No Mocks for Infrastructure**: Integration tests use real PostgreSQL, Redis, and OPA via testcontainers.
-
----
-
-## Contributing
-
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
-
-- Code style and conventions
-- Commit message format
-- Pull request process
-- Testing requirements
+1. **Execute CI pipeline** — Trigger a real run of `ci.yml` to verify lint, typecheck, tests, and Docker builds pass.
+2. **Vulnerability scanning** — Run Trivy against all 17 container images, review findings, establish CVE triage process.
+3. **llm-router scaling** — Add retry/backoff for LLM calls to raise ceiling past 10 concurrent agents.
+4. **Fix K8s OPA crash** — Diagnose OPA CrashLoopBackOff and produce a working `helm install` with running pods.
+5. **Fix eval metric** — Correct `tool_selection_accuracy` denominator to produce valid ratio.
 
 ---
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE)
 
 ---
 
 <p align="center">
-  <strong>Built for the future of <em>Autonomous Infrastructure</em>.</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents">
-    <img src="https://img.shields.io/badge/Star--This--Repo-⭐-yellow?style=for-the-badge" alt="Star this repo" />
-  </a>
-  <a href="https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents/fork">
-    <img src="https://img.shields.io/badge/Fork--This--Repo-🍴-orange?style=for-the-badge" alt="Fork this repo" />
-  </a>
+  <em>Readiness assessment: <a href="docs/production-readiness-final.md">docs/production-readiness-final.md</a></em>
 </p>
