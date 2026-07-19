@@ -1,4 +1,4 @@
-{{- if .Values.api-server.enabled }}
+{{- if .Values.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/part-of: e-gaop
 spec:
-  replicas: {{ .Values.api-server.replicas | default 2 }}
+  replicas: {{ .Values.replicas | default 2 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: api-server
@@ -22,20 +22,20 @@ spec:
         app.kubernetes.io/part-of: e-gaop
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "{{ .Values.api-server.healthPort }}"
+        prometheus.io/port: "{{ .Values.healthPort }}"
     spec:
       containers:
         - name: api-server
-          image: "{{ .Values.api-server.image }}:{{ .Values.api-server.tag }}"
+          image: "{{ .Values.image }}:{{ .Values.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: {{ .Values.api-server.grpcPort }}
+            - containerPort: {{ .Values.grpcPort }}
               name: grpc
               protocol: TCP
-            - containerPort: {{ .Values.api-server.restPort }}
+            - containerPort: {{ .Values.restPort }}
               name: rest
               protocol: TCP
-            - containerPort: {{ .Values.api-server.healthPort }}
+            - containerPort: {{ .Values.healthPort }}
               name: health
               protocol: TCP
           envFrom:
@@ -47,11 +47,11 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: egaop-api-server
             - name: SERVICE_GRPC_PORT
-              value: "{{ .Values.api-server.grpcPort }}"
+              value: "{{ .Values.grpcPort }}"
             - name: SERVICE_REST_PORT
-              value: "{{ .Values.api-server.restPort }}"
+              value: "{{ .Values.restPort }}"
             - name: SERVICE_HEALTH_PORT
-              value: "{{ .Values.api-server.healthPort }}"
+              value: "{{ .Values.healthPort }}"
           livenessProbe:
             httpGet:
               path: /healthz
@@ -67,7 +67,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
           resources:
-            {{- toYaml .Values.api-server.resources | nindent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001
