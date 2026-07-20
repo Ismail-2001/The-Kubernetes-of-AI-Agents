@@ -161,7 +161,7 @@ jobs:
             admin-console)    echo "df=admin-console/Dockerfile" ;;
           esac >> "$GITHUB_OUTPUT"
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ steps.paths.outputs.df }}
