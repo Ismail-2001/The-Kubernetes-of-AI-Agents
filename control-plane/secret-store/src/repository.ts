@@ -91,6 +91,15 @@ export class SecretRepository {
     return result.rows.map((row) => row["name"] as string);
   }
 
+  async ping(): Promise<boolean> {
+    try {
+      await this.pool.query("SELECT 1");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }

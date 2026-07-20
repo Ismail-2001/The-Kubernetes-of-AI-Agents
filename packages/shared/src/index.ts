@@ -24,6 +24,10 @@ export {
   NamespaceSuspendedError,
   CrossNamespaceError,
   QuotaExceededError,
+  LLM400Error,
+  LLMAuthError,
+  LLMRateLimitError,
+  PIIViolationError,
   grpcStatusFromError,
   toStructuredLog,
 } from "./errors/index.js";

@@ -19,22 +19,60 @@ import type {
 
 // ─── Activity Proxies ──────────────────────────────────────────────────────
 
-const {
-  callLLM,
-  executeTool,
-  persistMemory,
-  recordObservability,
-  evaluatePolicy,
-  admitAgent,
-  createSandbox,
-  terminateSandbox,
-} = proxyActivities<typeof activities>({
+const TRANSIENT_RETRY_POLICY = {
+  maximumAttempts: 4,
+  initialInterval: "1s",
+  backoffCoefficient: 2,
+  maximumInterval: "30s",
+};
+
+const LLM_RETRY_POLICY = {
+  ...TRANSIENT_RETRY_POLICY,
+  nonRetryableErrorTypes: [
+    "LLM400Error",
+    "LLMAuthError",
+    "LLMRateLimitError",
+    "PolicyDeniedError",
+    "QuotaExceededError",
+  ],
+};
+
+const TOOL_RETRY_POLICY = {
+  ...TRANSIENT_RETRY_POLICY,
+  nonRetryableErrorTypes: [
+    "PIIViolationError",
+    "PolicyDeniedError",
+  ],
+};
+
+const { callLLM } = proxyActivities<typeof activities>({
   startToCloseTimeout: "5 minutes",
-  retry: {
-    maximumAttempts: 3,
-    initialInterval: "1s",
-    backoffCoefficient: 2,
-  },
+  retry: LLM_RETRY_POLICY,
+});
+
+const { executeTool } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "2 minutes",
+  retry: TOOL_RETRY_POLICY,
+});
+
+const { persistMemory } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "30s",
+  retry: TRANSIENT_RETRY_POLICY,
+});
+
+const { recordObservability } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "30s",
+  retry: { ...TRANSIENT_RETRY_POLICY, maximumAttempts: 2 },
+});
+
+const { evaluatePolicy, admitAgent } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "30s",
+  retry: TRANSIENT_RETRY_POLICY,
+});
+
+const { createSandbox, terminateSandbox } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "2 minutes",
+  retry: TRANSIENT_RETRY_POLICY,
 });
 
 // ─── Signal & Query Handlers ───────────────────────────────────────────────

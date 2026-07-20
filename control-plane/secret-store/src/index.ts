@@ -120,8 +120,9 @@ server.addService(secretService.service, {
 });
 
 server.addService(HEALTH_SERVICE, {
-  check: (_call: any, callback: any) => {
-    callback(null, { status: "SERVING" });
+  check: async (_call: any, callback: any) => {
+    const dbOk = await repo.ping();
+    callback(null, { status: dbOk ? "SERVING" : "NOT_SERVING" });
   }
 });
 
@@ -138,10 +139,17 @@ if (process.env.NODE_ENV !== "test") {
     logger.info(`E-GAOP Dynamic Secret Store listening on port ${port}`);
   });
 
-  const healthServer = http.createServer((req, res) => {
+  const healthServer = http.createServer(async (req, res) => {
     if (req.url === "/healthz" || req.url === "/readyz") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "SERVING", service: "secret-store", timestamp: new Date().toISOString() }));
+      const dbOk = await repo.ping();
+      const code = dbOk ? 200 : 503;
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        status: dbOk ? "SERVING" : "NOT_SERVING",
+        service: "secret-store",
+        postgres: dbOk ? "connected" : "unreachable",
+        timestamp: new Date().toISOString(),
+      }));
     } else {
       res.writeHead(404);
       res.end();

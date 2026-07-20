@@ -674,10 +674,27 @@ if (process.env.NODE_ENV !== "test") {
     logger.info(`E-GAOP Control Plane REST server listening on ${address}`);
   });
 
-  const healthServer = http.createServer((req, res) => {
+  const healthServer = http.createServer(async (req, res) => {
     if (req.url === "/healthz" || req.url === "/readyz") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "SERVING", service: "api-server", timestamp: new Date().toISOString() }));
+      let temporalOk = false;
+      try {
+        const client = await getTemporalClient();
+        await client.workflow.getHandle("health-check-test").describe();
+        temporalOk = true;
+      } catch (err: any) {
+        // Workflow not found is OK (Temporal is reachable)
+        if (err.message?.includes("not found") || err.message?.includes("NotFound")) {
+          temporalOk = true;
+        }
+      }
+      const code = temporalOk ? 200 : 503;
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        status: temporalOk ? "SERVING" : "NOT_SERVING",
+        service: "api-server",
+        temporal: temporalOk ? "connected" : "unreachable",
+        timestamp: new Date().toISOString(),
+      }));
     } else {
       res.writeHead(404);
       res.end();

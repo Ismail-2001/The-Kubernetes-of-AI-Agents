@@ -102,6 +102,52 @@ export class QuotaExceededError extends Error {
   }
 }
 
+export class LLM400Error extends Error {
+  public readonly statusCode: number;
+  public readonly model: string;
+
+  constructor(message: string, opts: { statusCode: number; model: string }) {
+    super(message);
+    this.name = "LLM400Error";
+    this.statusCode = opts.statusCode;
+    this.model = opts.model;
+  }
+}
+
+export class LLMAuthError extends Error {
+  public readonly model: string;
+
+  constructor(message: string, opts: { model: string }) {
+    super(message);
+    this.name = "LLMAuthError";
+    this.model = opts.model;
+  }
+}
+
+export class LLMRateLimitError extends Error {
+  public readonly model: string;
+  public readonly retryAfterMs: number;
+
+  constructor(message: string, opts: { model: string; retryAfterMs?: number }) {
+    super(message);
+    this.name = "LLMRateLimitError";
+    this.model = opts.model;
+    this.retryAfterMs = opts.retryAfterMs ?? 60_000;
+  }
+}
+
+export class PIIViolationError extends Error {
+  public readonly toolName: string;
+  public readonly detectedPatterns: string[];
+
+  constructor(message: string, opts: { toolName: string; detectedPatterns: string[] }) {
+    super(message);
+    this.name = "PIIViolationError";
+    this.toolName = opts.toolName;
+    this.detectedPatterns = opts.detectedPatterns;
+  }
+}
+
 export function grpcStatusFromError(err: Error): grpcStatus {
   if (err instanceof AgentError) {
     switch (err.code) {

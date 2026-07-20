@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv, LLM400Error, LLMAuthError, LLMRateLimitError } from "@e-gaop/shared";
 
 initTracing("llm-router");
 loadSecretsIntoEnv();
@@ -14,6 +14,7 @@ import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import { get_encoding } from "tiktoken";
 import OpenAI from "openai";
+import CircuitBreaker from "opossum";
 import { RateLimiter, getServerCredentials, createNamespaceServerInterceptor, createServiceTokenServerInterceptor } from "@e-gaop/shared";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
@@ -61,6 +62,19 @@ const PRICING: Record<string, { input: number; output: number }> = {
 const FALLBACK_CHAIN = process.env.LLM_FALLBACK_CHAIN
   ? process.env.LLM_FALLBACK_CHAIN.split(",")
   : ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"];
+
+// ─── Circuit Breaker ───────────────────────────────────────────────────────
+
+const circuitBreakerOptions: CircuitBreaker.Options = {
+  timeout: parseInt(process.env.LLM_CIRCUIT_BREAKER_TIMEOUT_MS || "30000", 10),
+  errorThresholdPercentage: parseInt(process.env.LLM_CIRCUIT_BREAKER_THRESHOLD || "50", 10),
+  resetTimeout: parseInt(process.env.LLM_CIRCUIT_BREAKER_RESET_MS || "30000", 10),
+  rollingCountTimeout: 10000,
+  rollingCountBuckets: 10,
+  volumeThreshold: parseInt(process.env.LLM_CIRCUIT_BREAKER_VOLUME || "5", 10),
+};
+
+let circuitState: "closed" | "open" | "half_open" = "closed";
 
 interface CompletionUsage {
   prompt_tokens: number;
@@ -134,7 +148,6 @@ async function callOpenAIWithFallback(
     if (!openaiModel) continue;
 
     try {
-      // Build OpenAI tools parameter from our tool definitions
       const openaiTools = toolDefinitions?.map((td) => ({
         type: "function" as const,
         function: {
@@ -165,7 +178,6 @@ async function callOpenAIWithFallback(
         continue;
       }
 
-      // Extract structured tool_calls from the assistant message
       const msg = choice.message;
       const toolCalls: ToolCallResult[] = (msg.tool_calls || []).map((tc) => ({
         id: tc.id,
@@ -180,10 +192,26 @@ async function callOpenAIWithFallback(
         usage: response.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       };
     } catch (err: any) {
+      const status = err.status || err.statusCode || 0;
+
+      // Classify error type for typed retries
+      if (status === 400 || status === 422) {
+        throw new LLM400Error(`LLM bad request: ${err.message}`, { statusCode: status, model });
+      }
+      if (status === 401 || status === 403) {
+        throw new LLMAuthError(`LLM auth failed: ${err.message}`, { model });
+      }
+      if (status === 429) {
+        const retryAfter = err.headers?.["retry-after"]
+          ? parseInt(err.headers["retry-after"], 10) * 1000
+          : 60_000;
+        throw new LLMRateLimitError(`LLM rate limited: ${err.message}`, { model, retryAfterMs: retryAfter });
+      }
+
       logger.warn({
         model,
         err: err.message,
-        status: err.status,
+        status,
         errorBody: err.error ? JSON.stringify(err.error).slice(0, 3000) : undefined,
         stack: err.stack?.slice(0, 300),
       }, "Model call failed, trying fallback");
@@ -192,6 +220,29 @@ async function callOpenAIWithFallback(
 
   throw new Error("All models in fallback chain exhausted");
 }
+
+// Wrap with circuit breaker
+const circuitBreaker = new CircuitBreaker(
+  (messages: any[], model: string, temp: number, maxTokens: number | undefined, tools: ToolDef[] | undefined, signal?: AbortSignal) =>
+    callOpenAIWithFallback(messages, model, temp, maxTokens, tools, signal),
+  circuitBreakerOptions
+);
+
+circuitBreaker.on("open", () => {
+  circuitState = "open";
+  logger.warn("LLM circuit breaker OPEN — requests will be fast-failed");
+});
+circuitBreaker.on("halfOpen", () => {
+  circuitState = "half_open";
+  logger.info("LLM circuit breaker HALF_OPEN — testing with limited traffic");
+});
+circuitBreaker.on("close", () => {
+  circuitState = "closed";
+  logger.info("LLM circuit breaker CLOSED — normal operation resumed");
+});
+circuitBreaker.on("fallback", () => {
+  logger.warn("LLM circuit breaker fallback triggered");
+});
 
 const server = new grpc.Server({
   interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor()],
@@ -251,14 +302,14 @@ server.addService(llmService.service, {
       const abort = new AbortController();
       const timer = setTimeout(() => abort.abort(), timeoutMs);
 
-      const result = await callOpenAIWithFallback(
+      const result = await circuitBreaker.fire(
         openaiMessages,
         preferredModel || "gpt-4o",
         temperature ?? 0.7,
         max_tokens ?? undefined,
         tool_definitions,
         abort.signal
-      );
+      ) as { content: string | null; toolCalls: ToolCallResult[]; model: string; usage: CompletionUsage };
       clearTimeout(timer);
 
       const usage = result.usage;
@@ -317,7 +368,8 @@ server.addService(llmService.service, {
 
 server.addService(HEALTH_SERVICE, {
   check: (_call: any, callback: any) => {
-    callback(null, { status: openai ? "SERVING" : "NOT_SERVING" });
+    const healthy = openai && circuitState !== "open";
+    callback(null, { status: healthy ? "SERVING" : "NOT_SERVING" });
   }
 });
 
@@ -336,10 +388,15 @@ if (process.env.NODE_ENV !== "test") {
 
   const healthServer = http.createServer((req, res) => {
     if (req.url === "/healthz" || req.url === "/readyz") {
-      const status = openai ? "SERVING" : "NOT_SERVING";
-      const code = openai ? 200 : 503;
+      const healthy = openai && circuitState !== "open";
+      const code = healthy ? 200 : 503;
       res.writeHead(code, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status, service: "llm-router" }));
+      res.end(JSON.stringify({
+        status: healthy ? "SERVING" : "NOT_SERVING",
+        service: "llm-router",
+        circuit_breaker: circuitState,
+        openai_configured: !!openai,
+      }));
     } else {
       res.writeHead(404);
       res.end();
