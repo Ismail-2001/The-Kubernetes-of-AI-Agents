@@ -14,7 +14,7 @@
         "@e-gaop/shared": "*",
         "@grpc/grpc-js": "^1.14.3",
         "@grpc/proto-loader": "^0.8.0",
-        "openai": "^4.86.0",
+        "openai": "^6.48.0",
         "opossum": "^10.0.0",
         "pino": "^10.3.1",
         "pino-pretty": "^13.0.0",
