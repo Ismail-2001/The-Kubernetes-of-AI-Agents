@@ -4,7 +4,7 @@ import * as protoLoader from "@grpc/proto-loader";
 import fs from "fs";
 import http from "http";
 import path from "path";
-import { QuotaEnforcer, getClientCredentials, QuotaExceededError } from "@e-gaop/shared";
+import { QuotaEnforcer, getClientCredentials, getStandardInterceptors, QuotaExceededError } from "@e-gaop/shared";
 import type { LLMResponse, ToolResult } from "../types";
 import { classifyLLMResponse } from "../classification";
 
@@ -63,7 +63,9 @@ function createClient(
 ) {
   const svc = loadService(path.resolve(PROTO_ROOT, serviceProto), serviceName);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new (svc as any)(address, getClientCredentials());
+  return new (svc as any)(address, getClientCredentials(), {
+    interceptors: getStandardInterceptors({ serviceName }),
+  });
 }
 
 function promisifyGRPC<TReq, TRes>(

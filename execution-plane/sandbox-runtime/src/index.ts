@@ -1,6 +1,7 @@
-import { initTracing, shutdownTracing, validateSecrets } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
 
 initTracing("sandbox-runtime");
+loadSecretsIntoEnv();
 if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }
@@ -12,7 +13,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import Docker from "dockerode";
-import { getServerCredentials, createNamespaceServerInterceptor } from "@e-gaop/shared";
+import { getServerCredentials, createNamespaceServerInterceptor, createServiceTokenServerInterceptor } from "@e-gaop/shared";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -51,7 +52,7 @@ const egaopProto = grpc.loadPackageDefinition(packageDefinition) as any;
 const runtimeService = egaopProto.egaop.v1.RuntimeService;
 
 const server = new grpc.Server({
-  interceptors: [createNamespaceServerInterceptor()],
+  interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor()],
 });
 
 server.addService(runtimeService.service, {

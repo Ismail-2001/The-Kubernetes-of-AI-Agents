@@ -1,4 +1,8 @@
-export { getStandardInterceptors, type InterceptorConfig } from "./grpc/interceptors.js";
+export {
+  getStandardInterceptors,
+  createServiceTokenServerInterceptor,
+  type InterceptorConfig,
+} from "./grpc/interceptors.js";
 export {
   encrypt,
   decrypt,
@@ -67,6 +71,7 @@ export {
   type BaseConfig,
 } from "./config/index.js";
 export { validateSecrets } from "./config/validate-secrets.js";
+export { getSecret, loadSecretsIntoEnv } from "./config/secrets.js";
 export { RateLimiter } from "./rate-limiter.js";
 export { getServerCredentials, getClientCredentials } from "./tls.js";
 export { getPool, closePool } from "./db.js";

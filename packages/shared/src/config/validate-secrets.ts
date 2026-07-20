@@ -1,4 +1,5 @@
 import pino from "pino";
+import { getSecret } from "./secrets.js";
 
 const logger = pino({
   level: process.env.LOG_LEVEL || "info",
@@ -26,6 +27,7 @@ const REQUIRED_SECRETS: SecretSpec[] = [
   { name: "POSTGRES_PASSWORD", minLength: 8 },
   { name: "OPENAI_API_KEY", minLength: 10 },
   { name: "GRAFANA_PASSWORD", minLength: 8 },
+  { name: "INTERNAL_SERVICE_TOKEN", minLength: 16 },
 ];
 
 function validateValue(spec: SecretSpec, value: string): string | null {
@@ -62,7 +64,7 @@ export function validateSecrets(extraSecrets?: SecretSpec[]): void {
   const errors: string[] = [];
 
   for (const spec of specs) {
-    const value = process.env[spec.name] ?? "";
+    const value = getSecret(spec.name) ?? "";
     const error = validateValue(spec, value);
 
     if (error) {

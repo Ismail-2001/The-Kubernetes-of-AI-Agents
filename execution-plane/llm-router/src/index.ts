@@ -1,6 +1,7 @@
-import { initTracing, shutdownTracing, validateSecrets } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
 
 initTracing("llm-router");
+loadSecretsIntoEnv();
 if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }
@@ -13,7 +14,7 @@ import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import { get_encoding } from "tiktoken";
 import OpenAI from "openai";
-import { RateLimiter, getServerCredentials, createNamespaceServerInterceptor } from "@e-gaop/shared";
+import { RateLimiter, getServerCredentials, createNamespaceServerInterceptor, createServiceTokenServerInterceptor } from "@e-gaop/shared";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -196,7 +197,7 @@ async function callOpenAIWithFallback(
 }
 
 const server = new grpc.Server({
-  interceptors: [createNamespaceServerInterceptor()],
+  interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor()],
 });
 
 server.addService(llmService.service, {

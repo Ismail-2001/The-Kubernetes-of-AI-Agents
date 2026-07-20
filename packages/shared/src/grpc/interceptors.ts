@@ -1,4 +1,6 @@
 import { Interceptor, InterceptingCall, InterceptorOptions, NextCall, Metadata, Requester, InterceptingListener, StatusObject, status as GrpcStatus } from "@grpc/grpc-js";
+import type { ServerInterceptor, ServerInterceptingCallInterface, ServerMethodDefinition } from "@grpc/grpc-js";
+import { ServerInterceptingCall } from "@grpc/grpc-js";
 
 export interface InterceptorConfig {
   serviceName: string;
@@ -14,14 +16,92 @@ export function getStandardInterceptors(config: InterceptorConfig): Interceptor[
   ];
 }
 
+/**
+ * Client-side interceptor: attaches INTERNAL_SERVICE_TOKEN to outgoing gRPC calls.
+ * Services use this to authenticate to each other.
+ */
 function authInterceptor(): Interceptor {
   return (options: InterceptorOptions, nextCall: NextCall): InterceptingCall => {
+    const token = process.env.INTERNAL_SERVICE_TOKEN ?? "";
     const requester: Requester = {
-      start(_metadata: Metadata, _listener: InterceptingListener): void {
-        // Allow all calls through after verifying cert context
+      start(metadata: Metadata, listener: InterceptingListener): void {
+        if (token) {
+          metadata.set("x-service-token", token);
+        }
       },
     };
     return new InterceptingCall(nextCall(options), requester);
+  };
+}
+
+/**
+ * Server-side interceptor: validates INTERNAL_SERVICE_TOKEN on incoming gRPC calls.
+ * Rejects calls that don't carry a valid token.
+ *
+ * Skip validation if INTERNAL_SERVICE_TOKEN is not set (dev mode).
+ */
+export function createServiceTokenServerInterceptor(): ServerInterceptor {
+  const expectedToken = process.env.INTERNAL_SERVICE_TOKEN ?? "";
+
+  return (
+    methodDescriptor: ServerMethodDefinition<any, any>,
+    call: any
+  ): ServerInterceptingCall => {
+    const methodPath = methodDescriptor.path ?? "unknown";
+
+    const wrappedCall: any = {
+      start: (callback: any) => {
+        const wrappedListener = {
+          onReceiveMetadata: (metadata: Metadata, passthrough: (m: Metadata) => void) => {
+            // Skip validation if no token is configured (dev mode)
+            if (!expectedToken) {
+              passthrough(metadata);
+              return;
+            }
+
+            const providedToken = (metadata.get("x-service-token")[0] as string) ?? "";
+
+            if (providedToken !== expectedToken) {
+              process.stderr.write(JSON.stringify({
+                level: "warn",
+                msg: "SERVICE_TOKEN_REJECTED",
+                method: methodPath,
+                timestamp: new Date().toISOString(),
+              }) + "\n");
+
+              call.sendStatus({
+                code: 16, // UNAUTHENTICATED
+                details: "Invalid or missing service token",
+                metadata: new (metadata.constructor as new () => Metadata)(),
+              });
+              return;
+            }
+
+            passthrough(metadata);
+          },
+          onReceiveMessage: (message: any, passthrough: (m: any) => void) => {
+            passthrough(message);
+          },
+          onReceiveHalfClose: (passthrough: () => void) => {
+            passthrough();
+          },
+          onCancel: () => {},
+        };
+        callback(wrappedListener);
+      },
+      sendMetadata: (metadata: any, callback: any) => callback(metadata),
+      sendMessage: (message: any, callback: any) => callback(message),
+      sendStatus: (status: any, callback: any) => callback(status),
+      startRead: () => call.startRead(),
+      getPeer: () => call.getPeer(),
+      getDeadline: () => call.getDeadline(),
+      getHost: () => call.getHost(),
+      getAuthContext: () => call.getAuthContext(),
+      getConnectionInfo: () => call.getConnectionInfo(),
+      getMetricsRecorder: () => call.getMetricsRecorder(),
+    };
+
+    return new ServerInterceptingCall(call as any, wrappedCall as any);
   };
 }
 

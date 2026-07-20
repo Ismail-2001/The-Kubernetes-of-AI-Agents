@@ -1,6 +1,7 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
 
 initTracing("observability-plane");
+loadSecretsIntoEnv();
 if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }
@@ -50,7 +51,7 @@ const obsService = egaopProto.egaop.v1.ObservabilityService;
 const traceStore: Map<string, any[]> = new Map();
 
 const server = new grpc.Server({
-  interceptors: [createNamespaceServerInterceptor()],
+  interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor()],
 });
 
 server.addService(obsService.service, {

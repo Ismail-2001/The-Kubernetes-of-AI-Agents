@@ -1,6 +1,7 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
 
 initTracing("tool-proxy");
+loadSecretsIntoEnv();
 if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }
@@ -107,7 +108,7 @@ function injectCredentials(toolName: string): Record<string, string> {
 }
 
 const server = new grpc.Server({
-  interceptors: [createNamespaceServerInterceptor()],
+  interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor()],
 });
 
 server.addService(toolService.service, {

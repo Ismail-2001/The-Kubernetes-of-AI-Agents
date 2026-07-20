@@ -1,6 +1,7 @@
-import { initTracing, shutdownTracing, validateSecrets } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
 
 initTracing("workflow-engine");
+loadSecretsIntoEnv();
 if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }

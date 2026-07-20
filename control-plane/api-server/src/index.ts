@@ -1,6 +1,7 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
 
 initTracing("api-server");
+loadSecretsIntoEnv();
 if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }
@@ -12,6 +13,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import cookie from "@fastify/cookie";
 import pino from "pino";
 import { Connection, Client } from "@temporalio/client";
@@ -71,7 +73,7 @@ const agentService = egaopProto.egaop.v1.AgentService;
 const namespaceService = nsProto.egaop.v1.NamespaceService;
 
 const server = new grpc.Server({
-  interceptors: [createNamespaceServerInterceptor()],
+  interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor()],
 });
 
 server.addService(agentService.service, {
@@ -101,7 +103,18 @@ server.addService(HEALTH_SERVICE, {
 
 const fastify = Fastify({ logger: false });
 
-fastify.register(cors, { origin: true, credentials: true });
+const corsOrigins = process.env.CORS_ALLOWED_ORIGINS
+  ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim())
+  : ["http://localhost:3000", "http://localhost:5173"];
+
+fastify.register(cors, { origin: corsOrigins, credentials: true });
+fastify.register(rateLimit, {
+  max: Number(process.env.RATE_LIMIT_MAX) || 100,
+  timeWindow: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+  keyGenerator: (request) => request.ip ?? request.socket.remoteAddress ?? "unknown",
+  addHeadersOnExceeding: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true },
+  addHeaders: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true, "retry-after": true },
+});
 fastify.register(cookie);
 
 // ── Auth routes (public) ──
