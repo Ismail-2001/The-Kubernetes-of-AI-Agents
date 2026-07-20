@@ -17,7 +17,7 @@
                          "axios":  "^1.13.6",
                          "pino":  "^10.3.1",
                          "pino-pretty":  "^13.0.0",
-                         "zod":  "^3.23.8"
+                         "zod":  "^4.4.3"
                      },
     "devDependencies":  {
                             "@types/node":  "^25.5.0",
