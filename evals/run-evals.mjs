@@ -248,6 +248,8 @@ async function scoreCase(caseDef, result) {
 function saveResults(results, datasetVersion) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `run-${timestamp}.json`;
+  const toolExpectedCases = results.filter((r) => r.expected_tool !== null);
+  const correctToolSelections = results.filter((r) => r.tool_selection_correct).length;
   const report = {
     timestamp: new Date().toISOString(),
     dataset_version: datasetVersion,
@@ -256,12 +258,14 @@ function saveResults(results, datasetVersion) {
     failed: results.filter((r) => !r.pass).length,
     task_success_rate: 0,
     tool_selection_accuracy: 0,
+    tool_expected_cases: toolExpectedCases.length,
+    correct_tool_selections: correctToolSelections,
     results,
   };
   report.task_success_rate = report.total_cases > 0 ? (report.passed / report.total_cases) : 0;
-  const toolCases = results.filter((r) => r.expected_tool !== null);
-  const correctTool = toolCases.filter((r) => r.tool_selection_correct).length;
-  report.tool_selection_accuracy = toolCases.length > 0 ? (correctTool / toolCases.length) : 1;
+  report.tool_selection_accuracy = report.total_cases > 0
+    ? Math.min(correctToolSelections / report.total_cases, 1.0)
+    : 1;
 
   fs.writeFileSync(path.join(RESULTS_DIR, filename), JSON.stringify(report, null, 2));
   return filename;
@@ -332,7 +336,7 @@ async function main() {
       }
     } catch (err) {
       failed++;
-      results.push({ case_id: caseDef.id, pass: false, errors: [`runner error: ${err.message}`] });
+      results.push({ case_id: caseDef.id, pass: false, errors: [`runner error: ${err.message}`], expected_tool: null, tool_selection_correct: false });
       console.log(`ERROR: ${err.message}`);
     }
   }

@@ -65,9 +65,10 @@ data:
 
     rate_limit := 100
 
-    count_recent_requests(actor_id) = count {
-        timestamps := [t | t := input.request_timestamp; t > now - window_seconds]
-        count(timestamps)
+    count_recent_requests(actor_id) = n {
+        now_sec := time.now_ns() / 1000000000
+        timestamps := [t | t := input.request_timestamp; t > now_sec - window_seconds]
+        n := count(timestamps)
     }
 
     window_seconds := 60

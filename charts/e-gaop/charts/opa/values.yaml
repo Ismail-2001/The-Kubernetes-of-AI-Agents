@@ -2,18 +2,32 @@ enabled: true
 
 image:
   repository: openpolicyagent/opa
-  tag: "latest"
+  tag: "0.68.0"
   pullPolicy: IfNotPresent
 
 port: 8181
 
 resources:
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 200m
+    memory: 256Mi
   limits:
-    cpu: 500m
+    cpu: "1"
     memory: 512Mi
+
+probes:
+  startup:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 12
+  readiness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 6
+  liveness:
+    initialDelaySeconds: 30
+    periodSeconds: 20
+    failureThreshold: 3
 
 nodeSelector: {}
 tolerations: []

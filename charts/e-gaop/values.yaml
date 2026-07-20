@@ -125,7 +125,7 @@ opa:
   enabled: true
   image:
     repository: openpolicyagent/opa
-    tag: latest
+    tag: "0.68.0"
     pullPolicy: IfNotPresent
   port: 8181
 

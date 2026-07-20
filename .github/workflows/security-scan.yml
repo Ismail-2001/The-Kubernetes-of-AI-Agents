@@ -1,17 +1,85 @@
 name: Security Scan
+run-name: "Security Scan ${{ github.ref_name }}"
 
 on:
   schedule:
-    - cron: '0 6 * * 1'  # Monday 06:00 UTC
-  workflow_dispatch:       # Manual trigger from Actions tab
+    - cron: '0 6 * * 1'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.mjs'
+      - '**/Dockerfile'
+      - '**/docker-compose*'
+      - 'charts/**'
+      - 'package.json'
+      - 'package-lock.json'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.mjs'
+      - '**/Dockerfile'
+      - '**/docker-compose*'
+      - 'charts/**'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: "20"
   REGISTRY: ghcr.io
 
 jobs:
+  #############################################################################
+  # SECRET SCANNING
+  #############################################################################
+  gitleaks:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  #############################################################################
+  # CODE SCANNING (CodeQL)
+  #############################################################################
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
+  #############################################################################
+  # DEPENDENCY AUDIT
+  #############################################################################
   npm-audit:
-    name: npm audit (all workspaces)
+    name: npm Audit
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -19,21 +87,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: "npm"
       - run: npm ci --prefer-offline --no-fund
-      - run: npm audit --audit-level=high
-        continue-on-error: true
-      - run: npm audit --audit-level=critical
+      - name: High severity audit
+        run: npm audit --audit-level=high
         continue-on-error: false
+      - name: Full audit (info)
+        run: npm audit
+        continue-on-error: true
 
-  trivy-fs-scan:
-    name: Trivy filesystem scan
+  #############################################################################
+  # FILESYSTEM SCAN (Trivy)
+  #############################################################################
+  trivy-fs:
+    name: Trivy Filesystem
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - name: Run Trivy on source tree
+      - name: Run Trivy on source
         uses: aquasecurity/trivy-action@0.29.0
         with:
           scan-type: fs
@@ -42,47 +114,61 @@ jobs:
           output: trivy-fs-results.sarif
           severity: CRITICAL,HIGH
           limit-severities-for-sarif: true
-
-      - name: Upload results to Security tab
+          cache-dir: /tmp/.trivy-cache
+      - name: Upload results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-fs-results.sarif
           category: filesystem
 
-  trivy-image-scan:
-    name: Trivy image scan (all services)
+  #############################################################################
+  # IMAGE SCAN (Trivy — matrix)
+  #############################################################################
+  trivy-image:
+    name: Trivy Image — ${{ matrix.service }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         service:
-          - control-plane/api-server
-          - control-plane/secret-store
-          - control-plane/workflow-engine
-          - execution-plane/llm-router
-          - execution-plane/tool-proxy
-          - execution-plane/sandbox-runtime
+          - api-server
+          - secret-store
+          - workflow-engine
+          - llm-router
+          - tool-proxy
+          - sandbox-runtime
           - memory-plane
           - observability-plane
           - admin-console
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
+      - name: Map Dockerfile path
+        id: paths
+        run: |
+          case "${{ matrix.service }}" in
+            api-server)       echo "df=control-plane/api-server/Dockerfile" ;;
+            secret-store)     echo "df=control-plane/secret-store/Dockerfile" ;;
+            workflow-engine)  echo "df=control-plane/workflow-engine/Dockerfile" ;;
+            llm-router)       echo "df=execution-plane/llm-router/Dockerfile" ;;
+            tool-proxy)       echo "df=execution-plane/tool-proxy/Dockerfile" ;;
+            sandbox-runtime)  echo "df=execution-plane/sandbox-runtime/Dockerfile" ;;
+            memory-plane)     echo "df=memory-plane/Dockerfile" ;;
+            observability-plane) echo "df=observability-plane/Dockerfile" ;;
+            admin-console)    echo "df=admin-console/Dockerfile" ;;
+          esac >> "$GITHUB_OUTPUT"
       - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./${{ matrix.service }}/Dockerfile
-          tags: ${{ matrix.service }}:nightly
+          file: ${{ steps.paths.outputs.df }}
+          tags: ${{ matrix.service }}:scan-${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           outputs: type=docker,dest=/tmp/${{ matrix.service }}.tar
-
-      - name: Run Trivy
+      - name: Scan with Trivy
         uses: aquasecurity/trivy-action@0.29.0
         with:
           input: /tmp/${{ matrix.service }}.tar
@@ -90,16 +176,17 @@ jobs:
           output: trivy-image-${{ matrix.service }}.sarif
           severity: CRITICAL,HIGH
           limit-severities-for-sarif: true
-
-      - name: Upload results to Security tab
+          cache-dir: /tmp/.trivy-cache
+      - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-image-${{ matrix.service }}.sarif
           category: image-${{ matrix.service }}
-
       - name: Summary
+        if: always()
         run: |
           echo "## ${{ matrix.service }} vulnerabilities" >> $GITHUB_STEP_SUMMARY
           trivy image --severity CRITICAL,HIGH --no-progress --format table \
-            ${{ matrix.service }}:nightly 2>/dev/null >> $GITHUB_STEP_SUMMARY || true
+            --cache-dir /tmp/.trivy-cache \
+            ${{ matrix.service }}:scan-${{ github.sha }} 2>/dev/null >> $GITHUB_STEP_SUMMARY || true

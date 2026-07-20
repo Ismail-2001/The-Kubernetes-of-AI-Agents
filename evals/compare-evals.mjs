@@ -38,10 +38,12 @@ console.log(`               ${aLabel}    ${bLabel}    Δ`);
 console.log(`Passed        ${aPassed}/${total}    ${bPassed}/${total}    ${bPassed - aPassed >= 0 ? '+' : ''}${bPassed - aPassed}`);
 console.log(`Task rate     ${(aPassed/total*100).toFixed(1)}%    ${(bPassed/total*100).toFixed(1)}%    ${(bPassed - aPassed > 0 ? '+' : '')}${(bPassed/total*100 - aPassed/total*100).toFixed(1)}%`);
 
-const aTool = A.results.filter((r) => r.tool_selection_correct).length;
-const bTool = B.results.filter((r) => r.tool_selection_correct).length;
-const toolTotal = A.results.length;
-console.log(`Tool sel acc  ${aTool}/${toolTotal}    ${bTool}/${toolTotal}    ${bTool - aTool >= 0 ? '+' : ''}${bTool - aTool}`);
+const aToolSel = A.results.filter((r) => r.tool_selection_correct).length;
+const bToolSel = B.results.filter((r) => r.tool_selection_correct).length;
+const totalCases = A.results.length;
+const aToolPct = totalCases > 0 ? Math.min((aToolSel / totalCases) * 100, 100).toFixed(1) : "N/A";
+const bToolPct = totalCases > 0 ? Math.min((bToolSel / totalCases) * 100, 100).toFixed(1) : "N/A";
+console.log(`Tool sel acc  ${aToolSel}/${totalCases} (${aToolPct}%)    ${bToolSel}/${totalCases} (${bToolPct}%)`);
 
 // Per-case breakdown
 console.log(`\n--- Per-case breakdown ---`);

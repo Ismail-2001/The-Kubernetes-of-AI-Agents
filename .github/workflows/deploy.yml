@@ -1,4 +1,5 @@
 name: Deploy
+run-name: "Deploy ${{ github.event.workflow_run.head_branch || github.ref_name }} — ${{ github.event.workflow_run.head_sha || github.sha }}"
 
 on:
   workflow_run:
@@ -6,79 +7,107 @@ on:
     types: [completed]
     branches: [main]
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
-  NODE_VERSION: '20'
   REGISTRY: ghcr.io
   IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
-  STAGING_HOST: ${{ secrets.STAGING_HOST }}
-  STAGING_USER: ${{ secrets.STAGING_USER }}
-  STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
-  PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
-  PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
-  PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
-  LAST_SUCCESSFUL_DEPLOY_TAG: ${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG || 'latest' }}
-  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
 jobs:
+  #############################################################################
+  # GATE — only proceed if CI passed
+  #############################################################################
+  check-ci-status:
+    name: Verify CI Success
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      ci_passed: ${{ steps.check.outputs.ci_passed }}
+    steps:
+      - name: Check CI workflow conclusion
+        id: check
+        env:
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CI_WORKFLOW: ${{ github.event.workflow_run.name }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          echo "CI workflow '$CI_WORKFLOW' (run #$CI_RUN_ID) concluded: $CI_CONCLUSION"
+          if [ "$CI_CONCLUSION" = "success" ]; then
+            echo "ci_passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ci_passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  #############################################################################
+  # DEPLOY STAGING
+  #############################################################################
   deploy-staging:
     name: Deploy Staging
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    needs: [check-ci-status]
+    if: needs.check-ci-status.outputs.ci_passed == 'true'
+    environment: staging
     outputs:
-      smoke_tests_passed: ${{ steps.smoke.outputs.passed }}
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-
+      smoke_passed: ${{ steps.smoke.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up SSH
-        if: env.STAGING_HOST != ''
+        if: ${{ secrets.STAGING_HOST != '' }}
         uses: webfactory/ssh-agent@v0.9
         with:
-          ssh-private-key: ${{ env.STAGING_SSH_KEY }}
+          ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
 
-      - name: Configure Docker context (remote)
-        if: env.STAGING_HOST != ''
+      - name: Configure Docker context
+        if: ${{ secrets.STAGING_HOST != '' }}
         run: |
-          docker context create staging --docker "host=ssh://${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}"
+          docker context create staging \
+            --docker "host=ssh://${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}"
           docker context use staging
-
-      - name: Login to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write .env
         run: |
           cat > .env <<-EOF
           IMAGE_TAG=${{ env.IMAGE_TAG }}
-          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          EGAOP_MASTER_ENCRYPTION_KEY=${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
-          SLACK_ALERT_WEBHOOK=${{ secrets.SLACK_ALERT_WEBHOOK }}
+          REGISTRY=${{ env.REGISTRY }}
+          LOG_LEVEL=debug
+          NODE_ENV=staging
           EOF
 
-      - name: Deploy via Docker Compose (remote)
-        if: env.STAGING_HOST != ''
-        run: docker compose up -d --wait --wait-timeout 120
-
-      - name: Deploy via Docker Compose (local runner)
-        if: env.STAGING_HOST == ''
-        run: docker compose up -d --build --wait --wait-timeout 120
-
-      - name: Initialize Grafana alerting
+      - name: Pull images
         run: |
-          docker compose exec -T grafana node /etc/grafana-init.mjs || \
-          node scripts/grafana-init.mjs 2>/dev/null || true
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+          docker compose pull --quiet
+
+      - name: Deploy
+        run: |
+          docker compose up -d --wait --wait-timeout 120 --remove-orphans
+
+      - name: Health check poll
+        run: |
+          echo "Polling API health endpoint..."
+          for i in $(seq 1 12); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" \
+              "http://${STAGING_HOST:-localhost}:15051/healthz" 2>/dev/null || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "API server is healthy (attempt $i)"
+              break
+            fi
+            echo "Waiting... (attempt $i, HTTP $status)"
+            sleep 5
+          done
+          if [ "$status" != "200" ]; then
+            echo "API server failed to become healthy"
+            exit 1
+          fi
 
       - name: Run smoke tests
         id: smoke
         run: |
-          base="${{ env.STAGING_HOST || 'localhost' }}"
+          base="${STAGING_HOST:-localhost}"
           if bash scripts/smoke-test.sh "$base"; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
           else
@@ -103,40 +132,57 @@ jobs:
             });
 
       - name: Rollback on failure
-        if: steps.smoke.outputs.passed == 'false'
+        if: steps.smoke.outputs.passed == 'false' && vars.LAST_SUCCESSFUL_DEPLOY_TAG != ''
         run: |
-          echo "⚠ Smoke tests failed. Triggering rollback..."
-          export GITHUB_SHA=${{ env.IMAGE_TAG }}
-          export GITHUB_REPOSITORY=${{ github.repository }}
-          export GITHUB_SERVER_URL=${{ github.server_url }}
-          export GITHUB_RUN_ID=${{ github.run_id }}
-          bash scripts/rollback.sh "$SLACK_WEBHOOK" "$LAST_SUCCESSFUL_DEPLOY_TAG"
-          docker compose up -d --wait --wait-timeout 120
+          echo "Smoke tests failed. Rolling back to ${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}..."
+          export IMAGE_TAG="${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}"
+          cat > .env <<-EOF
+          IMAGE_TAG=${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}
+          REGISTRY=${{ env.REGISTRY }}
+          LOG_LEVEL=debug
+          NODE_ENV=staging
+          EOF
+          docker compose pull --quiet
+          docker compose up -d --wait --wait-timeout 120 --remove-orphans
+          bash scripts/rollback.sh "${{ secrets.SLACK_WEBHOOK }}" "${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}"
 
+  #############################################################################
+  # PROMOTE TO PRODUCTION (manual approval)
+  #############################################################################
   deploy-production:
     name: Deploy Production
-    needs: [deploy-staging]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
-    if: ${{ needs.deploy-staging.outputs.smoke_tests_passed == 'true' }}
-
+    needs: [deploy-staging]
+    if: needs.deploy-staging.outputs.smoke_passed == 'true'
+    environment:
+      name: production
+      url: https://app.egaop.io
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9
         with:
-          ssh-private-key: ${{ env.PRODUCTION_SSH_KEY }}
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
 
       - name: Configure Docker context
         run: |
-          docker context create production --docker "host=ssh://${{ env.PRODUCTION_USER }}@${{ env.PRODUCTION_HOST }}"
+          docker context create production \
+            --docker "host=ssh://${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }}"
           docker context use production
+
+      - name: Login to Registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
       - name: Write .env
         run: |
           cat > .env <<-EOF
           IMAGE_TAG=${{ env.IMAGE_TAG }}
+          REGISTRY=${{ env.REGISTRY }}
+          LOG_LEVEL=info
+          NODE_ENV=production
           POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           EGAOP_MASTER_ENCRYPTION_KEY=${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
@@ -145,13 +191,40 @@ jobs:
           SLACK_ALERT_WEBHOOK=${{ secrets.SLACK_ALERT_WEBHOOK }}
           EOF
 
-      - name: Deploy
-        run: docker compose up -d --wait --wait-timeout 120
+      - name: Pull images
+        run: docker compose pull --quiet
 
-      - name: Initialize Grafana alerting
+      - name: Deploy
         run: |
-          docker compose exec -T grafana node /etc/grafana-init.mjs || \
-          node scripts/grafana-init.mjs 2>/dev/null || true
+          docker compose up -d --wait --wait-timeout 180 --remove-orphans
+
+      - name: Health check poll
+        run: |
+          for i in $(seq 1 18); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://api.egaop.io/healthz" 2>/dev/null || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "Production API is healthy (attempt $i)"
+              break
+            fi
+            echo "Waiting... (attempt $i, HTTP $status)"
+            sleep 10
+          done
+          if [ "$status" != "200" ]; then
+            echo "Production API failed to become healthy"
+            exit 1
+          fi
 
       - name: Smoke test
-        run: bash scripts/smoke-test.sh "${{ env.PRODUCTION_HOST }}"
+        run: bash scripts/smoke-test.sh "${{ secrets.PRODUCTION_HOST }}"
+
+      - name: Notify success
+        if: success()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          if [ -n "$SLACK_WEBHOOK" ]; then
+            curl -s -X POST -H "Content-Type: application/json" \
+              -d '{"text":"✅ Production deploy complete: `${{ env.IMAGE_TAG }}`"}' \
+              "$SLACK_WEBHOOK" > /dev/null 2>&1 || true
+          fi

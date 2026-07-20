@@ -1,9 +1,31 @@
 # GitHub Actions CI/CD Setup
 
+## Architecture
+
+```
+[Push/PR] → CI workflow (audit → lint → typecheck → helm-lint → test → build images)
+                                                      ↓ success
+                                      Deploy workflow (staging → smoke → production*)
+                                                      ↓ failure
+                                                   rollback
+```
+
+\* Production requires manual approval via GitHub Environments.
+
+## Workflows
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci.yml` | `push`/`PR` to `main` | Audit, lint, typecheck, Helm lint, unit + cross-cutting tests, Docker image build |
+| `deploy.yml` | CI completed on `main` | Deploy to staging, smoke test, manual promote to production |
+| `security-scan.yml` | Schedule + `push`/`PR` | Gitleaks (secrets), CodeQL (SAST), Trivy (FS + images) |
+| `backup.yml` | Schedule | Backup Postgres + config to GitHub Artifacts |
+
 ## Prerequisites
 
 1. Push the repository to GitHub
-2. Configure the following repository secrets:
+2. Enable GitHub Actions in repository settings
+3. Configure the following secrets and variables:
 
 ### Required Secrets
 
@@ -13,7 +35,7 @@
 | `STAGING_HOST` | SSH hostname for staging server | deploy.yml |
 | `STAGING_USER` | SSH user for staging server | deploy.yml |
 | `STAGING_SSH_KEY` | Private SSH key for staging access | deploy.yml |
-| `SLACK_ALERT_WEBHOOK` | Slack webhook URL for alert notifications | deploy.yml, backup.yml |
+| `SLACK_WEBHOOK` | Slack webhook URL for deploy notifications | deploy.yml, backup.yml |
 
 ### Optional Secrets
 
@@ -22,90 +44,195 @@
 | `PRODUCTION_HOST` | SSH hostname for production | deploy.yml |
 | `PRODUCTION_USER` | SSH user for production | deploy.yml |
 | `PRODUCTION_SSH_KEY` | Private SSH key for production | deploy.yml |
-| `ACTIONS_STEP_DEBUG` | `true` to enable debug logging | All workflows |
+| `POSTGRES_PASSWORD` | Production DB password | deploy.yml |
+| `JWT_SECRET` | JWT signing secret | deploy.yml |
+| `EGAOP_MASTER_ENCRYPTION_KEY` | Encryption key for secret-store | deploy.yml |
+| `GRAFANA_PASSWORD` | Grafana admin password | deploy.yml |
+
+### Repository Variables
+
+| Variable | Value | Used By |
+|----------|-------|---------|
+| `LAST_SUCCESSFUL_DEPLOY_TAG` | Set automatically on successful deploy | deploy.yml (rollback) |
 
 ---
 
-## Verifying CI Works
+## CI Pipeline (`ci.yml`)
 
-### Step 1: Push to GitHub
+Jobs and status checks:
+
+| Job | Blocking | Timeout | Depends On |
+|-----|----------|---------|------------|
+| `audit` | Yes | 5 min | — |
+| `lint` | Yes | 10 min | — |
+| `typecheck` | Yes | 10 min | — |
+| `helm-lint` | Yes | 10 min | — |
+| `docker-compose-validate` | Yes | 5 min | lint, typecheck |
+| `test-unit` | Yes | 15 min | lint, typecheck |
+| `test-cross-cutting` | Yes | 20 min | lint, typecheck |
+| `docker-build` (matrix × 9) | Yes | 20 min | test-unit, test-cross-cutting, helm-lint |
+
+Key improvements:
+- **npm cache** via `actions/setup-node` — shared across jobs
+- **npm audit now fails** on high severity (we're at 0 CVEs)
+- **Helm chart lint** validates all templates at compile time
+- **Docker images build in parallel** via matrix, push to GHCR on `main`
+- **GHA cache** for Docker layer caching (`type=gha`) — subsequent builds are ~2× faster
+- **Summary step** posts build status to PR + workflow run
+
+### Verifying CI Works
+
 ```bash
 git push origin main
 ```
 
-### Step 2: Observe Actions
-1. Go to GitHub → Actions tab
-2. The `CI` workflow should trigger on `push` to `main`
-3. Verify all jobs complete:
-   - `audit` — npm audit
-   - `lint` — ESLint across workspaces
-   - `typecheck` — TypeScript type checking
-   - `test-unit` — Unit tests (depends on lint + typecheck)
-   - `test-cross-cutting` — Contract, chaos, security tests (requires Postgres + Redis service containers)
-   - `build` — Docker Compose build (depends on all tests passing)
+Go to GitHub → Actions. The CI workflow triggers on push to `main`:
+1. Audit (must pass — 0 high vulns)
+2. Lint + TypeCheck (run in parallel)
+3. Helm lint + Docker Compose validate
+4. Unit tests + cross-cutting tests (require Postgres + Redis)
+5. Docker images built in parallel matrix, pushed to GHCR
 
-### Step 3: Open a PR
-1. Create a branch and push
-2. Open a PR against `main`
-3. Verify CI shows status checks on the PR
-4. Verify merge is blocked if checks fail
+Open a PR — all jobs appear as required status checks.
 
 ---
 
-## Deploy Pipeline
+## Deploy Pipeline (`deploy.yml`)
 
-The `deploy.yml` workflow triggers on push to `main` after CI completes:
+Triggered by successful CI completion on `main`:
 
-1. **build**: Builds all Docker images, tags with git SHA, pushes to registry
-2. **deploy-staging**: SSH into staging host, pulls images, runs Compose, smoke test
-3. **rollback**: If smoke test fails, redeploys last successful tag
-4. **deploy-production**: Manual approval gate, then deploys to production
+```
+CI success → deploy-staging → smoke test → [approval] → deploy-production
+                                ↓ fail
+                              auto-rollback
+```
 
-### Smoke Test
-The deploy runs `scripts/smoke-test.sh` which checks:
-- All 17 containers are running and healthy
-- API health endpoint returns 200
-- LLM router responds to gRPC health check
+### Staging Environment
+- Auto-deploys on CI success
+- Pulls images from GHCR (built by CI)
+- Waits for health endpoints before smoke tests
+- **Auto-rollback** if smoke tests fail — redeploys `LAST_SUCCESSFUL_DEPLOY_TAG`
 
-If any check fails, the pipeline triggers auto-rollback.
+### Production Environment
+- **Manual approval gate** via GitHub Environments
+- Configure approvers in Settings → Environments → `production`
+- Same deploy sequence: pull → up → health check → smoke test
+- Slack notification on success
+
+### Setting Up Environments
+
+1. **Staging**: Settings → Environments → `staging` (no protection needed)
+2. **Production**: Settings → Environments → `production`
+   - Required reviewers: add team members
+   - Wait timer: optional (e.g., 5 minutes)
+   - Deployment branches: `main` only
+
+---
+
+## Security Scanning
+
+Three layers run on every push/PR:
+
+| Tool | What it catches | Run time |
+|------|-----------------|----------|
+| **Gitleaks** | Hardcoded secrets, API keys, tokens | ~2 min |
+| **CodeQL** | Code vulnerabilities (XSS, injection, etc.) | ~10 min |
+| **Trivy (FS)** | Vulnerable npm packages, bad configs | ~5 min |
+| **Trivy (Image)** | OS-level CVEs in Docker images | ~15 min × 9 images |
+
+Weekly full scan runs every Monday 06:00 UTC.
+
+---
+
+## Dependabot
+
+`.github/dependabot.yml` configured for:
+
+| Ecosystem | Locations | Update | PRs/Week |
+|-----------|-----------|--------|----------|
+| `npm` | `/` | Weekly, minor+patch grouped | ≤10 |
+| `docker` | 9 Dockerfiles | Weekly | ≤3 each |
+| `github-actions` | `/` | Weekly | ≤5 |
+
+All dependabot PRs trigger the CI pipeline automatically.
 
 ---
 
 ## Local CI Validation
 
-Before pushing, run the local CI pipeline to catch issues early:
+Before pushing, run the local pipeline to catch issues early:
 
-```bash
-# Basic CI checks (no Docker, no cross-cutting)
+```powershell
+# Quick check (no Docker, no cross-cutting tests)
 .\scripts\ci-local.ps1
 
-# Full CI (requires Docker + Postgres + Redis)
-.\scripts\ci-local.ps1 -SkipDocker -SkipCrossCutting
+# Full check (requires Docker + Postgres + Redis)
+.\scripts\ci-local.ps1 -SkipCrossCutting
+
+# Build all Docker images locally
+.\scripts\docker-build-all.ps1
+
+# Full K8s validation
+.\scripts\kind-deploy.ps1
 ```
 
-The local pipeline runs all the same checks as GitHub CI:
-1. `npm audit` — 0 high-severity vulnerabilities
-2. ESLint linting
-3. TypeScript type checking
-4. Unit tests (54/54 passing)
-5. Workspace builds
+The local CI runs: audit → lint → typecheck → build (10 workspaces) → test → cross-cutting → Docker compose validate → Docker build → Helm lint/template.
+
+---
+
+## Troubleshooting
+
+### CI fails on `npm audit`
+The pipeline now **fails on high-severity vulns**. Run:
+```bash
+npm audit fix --workspaces
+```
+If a transitive dependency has no fix, override with `overrides` in `package.json` and document in `SECURITY.md`.
+
+### Docker build fails
+Check Dockerfile syntax and build context:
+```bash
+docker build -f control-plane/api-server/Dockerfile . --no-cache
+```
+The CI uses `type=gha` cache — if cache is corrupt, clear it from the GitHub Cache UI.
+
+### Deploy hangs on `--wait`
+Increase `--wait-timeout` in the workflow or check:
+```bash
+docker compose ps --all
+docker compose logs --tail=50 <service>
+```
+
+### Helm template fails
+The pipeline runs `helm lint --strict` and `helm template`. Validate locally:
+```powershell
+helm dependency update charts/e-gaop
+helm lint charts/e-gaop --strict
+helm template test charts/e-gaop --values charts/e-gaop/values.yaml
+```
+
+### Rollback fails
+If `LAST_SUCCESSFUL_DEPLOY_TAG` is not set, the rollback step is skipped. Manually deploy a known-good tag:
+```bash
+export IMAGE_TAG=<known-good-sha>
+docker compose up -d
+```
 
 ---
 
 ## Monitoring
 
 After setup, monitor:
-- **GitHub Actions tab** — workflow run history
-- **Slack** — deploy/backup notifications
-- **Security tab** — SARIF results from nightly Trivy scans
+- **GitHub Actions** — workflow run history, status badges
+- **Security tab** — SARIF results from CodeQL + Trivy + Gitleaks
+- **Slack** — deploy notifications and rollback alerts
+- **Dependabot** — automatic PRs for dependency updates
 
----
+### Status Badges
 
-## Known CI Gaps
+Add to `README.md`:
 
-| Gap | Status | Workaround |
-|-----|--------|------------|
-| Trivy image scan | Requires GitHub runner | Run `docker scout` or `trivy image` locally |
-| Cross-cutting tests | Needs Postgres/Redis services | `.\scripts\ci-local.ps1 -SkipCrossCutting` |
-| Deploy to staging | Needs SSH host configured | Manual `docker compose up -d` |
-| Deploy to production | Needs production host | Not configured |
+```markdown
+[![CI](https://github.com/${{github.repository}}/actions/workflows/ci.yml/badge.svg)](https://github.com/${{github.repository}}/actions/workflows/ci.yml)
+[![Security](https://github.com/${{github.repository}}/actions/workflows/security-scan.yml/badge.svg)](https://github.com/${{github.repository}}/actions/workflows/security-scan.yml)
+```
