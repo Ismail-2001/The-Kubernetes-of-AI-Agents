@@ -70,9 +70,8 @@ function createClient(
     "grpc.keepalive_permit_without_calls": true,
     "grpc.max_connection_age_ms": 600_000,
     "grpc.max_connection_idle_ms": 300_000,
-    "grpc.enable_retries": true,
     "grpc.service_config": JSON.stringify({
-      methodConfig: [{ name: [{}], timeout: { seconds: 10 } }],
+      methodConfig: [{ name: [{}], timeout: { seconds: 10, nanos: 0 } }],
     }),
   });
 }

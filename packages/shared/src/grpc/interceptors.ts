@@ -31,14 +31,42 @@ const BASE_DELAY_MS = 200;
 
 function retryInterceptor(): Interceptor {
   return (options: InterceptorOptions, nextCall: NextCall): InterceptingCall => {
-    let remainingRetries = MAX_RETRIES;
+    let retriesLeft = MAX_RETRIES;
+    const method = options.method_definition?.path ?? "unknown";
 
     const requester: Requester = {
-      start(_metadata: Metadata, _listener: InterceptingListener): void {
-        // Retry logic handled by wrapping the call
+      start(_metadata: Metadata, listener: InterceptingListener): Partial<InterceptingListener> {
+        return {
+          onReceiveStatus: (status: StatusObject): void => {
+            if (RETRYABLE_CODES.has(status.code) && retriesLeft > 0) {
+              retriesLeft--;
+              const attempt = MAX_RETRIES - retriesLeft;
+              const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+              const jitter = Math.floor(Math.random() * delay * 0.3);
+
+              process.stdout.write(JSON.stringify({
+                level: "info",
+                msg: "gRPC_retry",
+                method,
+                attempt,
+                max_retries: MAX_RETRIES,
+                delay_ms: delay + jitter,
+                status_code: status.code,
+              }) + "\n");
+
+              setTimeout(() => {
+                const retryCall = nextCall(options);
+                retryCall.start(new Metadata(), {
+                  onReceiveStatus: (s: StatusObject) => listener.onReceiveStatus(s),
+                });
+              }, delay + jitter);
+              return;
+            }
+            listener.onReceiveStatus(status);
+          },
+        };
       },
     };
-
     return new InterceptingCall(nextCall(options), requester);
   };
 }
@@ -89,7 +117,7 @@ export function createServiceTokenServerInterceptor(): ServerInterceptor {
             const providedToken = (metadata.get("x-service-token")[0] as string) ?? "";
 
             if (providedToken !== expectedToken) {
-              process.stderr.write(JSON.stringify({
+              process.stdout.write(JSON.stringify({
                 level: "warn",
                 msg: "SERVICE_TOKEN_REJECTED",
                 method: methodPath,
@@ -149,7 +177,7 @@ function loggingInterceptor(serviceName: string): Interceptor {
             };
             if (status.code !== 0) {
               logEntry.error = status.details;
-              process.stderr.write(JSON.stringify({ level: "warn", msg: "gRPC call failed", ...logEntry }) + "\n");
+              process.stdout.write(JSON.stringify({ level: "warn", msg: "gRPC call failed", ...logEntry }) + "\n");
             } else {
               process.stdout.write(JSON.stringify({ level: "info", msg: "gRPC call completed", ...logEntry }) + "\n");
             }

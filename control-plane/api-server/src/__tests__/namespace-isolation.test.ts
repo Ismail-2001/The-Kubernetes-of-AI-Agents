@@ -1,7 +1,26 @@
 jest.mock("pg", () => {
-  const mPool = { query: jest.fn(), connect: jest.fn(), end: jest.fn() };
+  const mPool = {
+    query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
+    connect: jest.fn(),
+    end: jest.fn(),
+  };
   return { Pool: jest.fn(() => mPool) };
 });
+
+const mockRepo = {
+  create: jest.fn(),
+  findBySlug: jest.fn(),
+  list: jest.fn(),
+  update: jest.fn(),
+  suspend: jest.fn(),
+  softDelete: jest.fn(),
+  ping: jest.fn(),
+  close: jest.fn(),
+};
+
+jest.mock("../namespaces/repository.js", () => ({
+  NamespaceRepository: jest.fn(() => mockRepo),
+}));
 
 import {
   validateSlug,
@@ -313,9 +332,73 @@ describe("Namespace model helpers", () => {
 });
 
 describe("NamespaceService CRUD", () => {
-  it("CreateNamespace → creates namespace with defaults", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRepo.create.mockImplementation((params) => Promise.resolve({
+      id: `ns-${params.slug}`,
+      slug: params.slug,
+      displayName: params.displayName,
+      tier: params.tier,
+      ownerId: params.ownerId,
+      quotas: params.quotas,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+    mockRepo.findBySlug.mockImplementation((slug) => Promise.resolve({
+      id: `ns-${slug}`,
+      slug,
+      displayName: `Namespace ${slug}`,
+      tier: "standard",
+      ownerId: "owner-1",
+      quotas: { maxAgents: 5, maxConcurrentExecutions: 2, maxMemoryMB: 512, maxToolCallsPerMinute: 30 },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+    mockRepo.list.mockResolvedValue({
+      namespaces: [
+        { id: "ns-1", slug: "list-ns-1", displayName: "List NS 1", tier: "sandbox", ownerId: "o-1", quotas: { maxAgents: 5, maxConcurrentExecutions: 2, maxMemoryMB: 512, maxToolCallsPerMinute: 30 }, createdAt: new Date(), updatedAt: new Date() },
+        { id: "ns-2", slug: "list-ns-2", displayName: "List NS 2", tier: "enterprise", ownerId: "o-1", quotas: { maxAgents: 20, maxConcurrentExecutions: 10, maxMemoryMB: 4096, maxToolCallsPerMinute: 120 }, createdAt: new Date(), updatedAt: new Date() },
+      ],
+      nextPageToken: "",
+      totalCount: 2,
+    });
+    mockRepo.update.mockImplementation((_slug, fields) => Promise.resolve({
+      id: `ns-${_slug}`,
+      slug: _slug,
+      displayName: fields.displayName ?? `Namespace ${_slug}`,
+      tier: "standard",
+      ownerId: "owner-1",
+      quotas: { maxAgents: fields.quotas?.maxAgents ?? 5, maxConcurrentExecutions: 2, maxMemoryMB: 512, maxToolCallsPerMinute: 30 },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+    mockRepo.suspend.mockImplementation((slug) => Promise.resolve({
+      id: `ns-${slug}`,
+      slug,
+      displayName: `Namespace ${slug}`,
+      tier: "standard",
+      ownerId: "owner-1",
+      quotas: { maxAgents: 5, maxConcurrentExecutions: 2, maxMemoryMB: 512, maxToolCallsPerMinute: 30 },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      suspendedAt: new Date(),
+    }));
+    mockRepo.softDelete.mockImplementation((slug) => Promise.resolve({
+      id: `ns-${slug}`,
+      slug,
+      displayName: `Namespace ${slug}`,
+      tier: "standard",
+      ownerId: "owner-1",
+      quotas: { maxAgents: 5, maxConcurrentExecutions: 2, maxMemoryMB: 512, maxToolCallsPerMinute: 30 },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: new Date(),
+    }));
+  });
+
+  it("CreateNamespace → creates namespace with defaults", async () => {
     const { callback, result } = createMockCallback();
-    namespaceHandlers.CreateNamespace(
+    await namespaceHandlers.CreateNamespace(
       createMockCall({
         slug: "test-ns",
         display_name: "Test Namespace",
@@ -338,9 +421,9 @@ describe("NamespaceService CRUD", () => {
     });
   });
 
-  it("GetNamespace → returns created namespace", () => {
+  it("GetNamespace → returns created namespace", async () => {
     const createCb = createMockCallback();
-    namespaceHandlers.CreateNamespace(
+    await namespaceHandlers.CreateNamespace(
       createMockCall({
         slug: "get-test",
         display_name: "Get Test",
@@ -351,7 +434,7 @@ describe("NamespaceService CRUD", () => {
     );
 
     const getCb = createMockCallback();
-    namespaceHandlers.GetNamespace(
+    await namespaceHandlers.GetNamespace(
       createMockCall({ slug: "get-test" }),
       getCb.callback
     );
@@ -361,9 +444,11 @@ describe("NamespaceService CRUD", () => {
     expect(getCb.result.response!.tier).toBe("NAMESPACE_TIER_STANDARD");
   });
 
-  it("GetNamespace → returns error for non-existent", () => {
+  it("GetNamespace → returns error for non-existent", async () => {
+    mockRepo.findBySlug.mockResolvedValueOnce(null);
+
     const { callback, result } = createMockCallback();
-    namespaceHandlers.GetNamespace(
+    await namespaceHandlers.GetNamespace(
       createMockCall({ slug: "non-existent" }),
       callback
     );
@@ -372,9 +457,9 @@ describe("NamespaceService CRUD", () => {
     expect(result.err!.message).toContain("not found");
   });
 
-  it("ListNamespaces → returns created namespaces", () => {
+  it("ListNamespaces → returns created namespaces", async () => {
     const createCb1 = createMockCallback();
-    namespaceHandlers.CreateNamespace(
+    await namespaceHandlers.CreateNamespace(
       createMockCall({
         slug: "list-ns-1",
         display_name: "List NS 1",
@@ -385,7 +470,7 @@ describe("NamespaceService CRUD", () => {
     );
 
     const createCb2 = createMockCallback();
-    namespaceHandlers.CreateNamespace(
+    await namespaceHandlers.CreateNamespace(
       createMockCall({
         slug: "list-ns-2",
         display_name: "List NS 2",
@@ -396,7 +481,7 @@ describe("NamespaceService CRUD", () => {
     );
 
     const listCb = createMockCallback();
-    namespaceHandlers.ListNamespaces(
+    await namespaceHandlers.ListNamespaces(
       createMockCall({ page_size: 10 }),
       listCb.callback
     );
@@ -406,9 +491,9 @@ describe("NamespaceService CRUD", () => {
     expect((listCb.result.response!.namespaces as unknown[]).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("UpdateNamespace → updates display name and quotas", () => {
+  it("UpdateNamespace → updates display name and quotas", async () => {
     const createCb = createMockCallback();
-    namespaceHandlers.CreateNamespace(
+    await namespaceHandlers.CreateNamespace(
       createMockCall({
         slug: "update-test",
         display_name: "Original",
@@ -419,7 +504,7 @@ describe("NamespaceService CRUD", () => {
     );
 
     const updateCb = createMockCallback();
-    namespaceHandlers.UpdateNamespace(
+    await namespaceHandlers.UpdateNamespace(
       createMockCall({
         slug: "update-test",
         display_name: "Updated Name",
@@ -433,9 +518,9 @@ describe("NamespaceService CRUD", () => {
     expect((updateCb.result.response!.quotas as Record<string, unknown>).max_agents).toBe(10);
   });
 
-  it("SuspendNamespace → sets suspendedAt", () => {
+  it("SuspendNamespace → sets suspendedAt", async () => {
     const createCb = createMockCallback();
-    namespaceHandlers.CreateNamespace(
+    await namespaceHandlers.CreateNamespace(
       createMockCall({
         slug: "suspend-test",
         display_name: "Suspend Test",
@@ -446,7 +531,7 @@ describe("NamespaceService CRUD", () => {
     );
 
     const suspendCb = createMockCallback();
-    namespaceHandlers.SuspendNamespace(
+    await namespaceHandlers.SuspendNamespace(
       createMockCall({ slug: "suspend-test", reason: "Violation" }),
       suspendCb.callback
     );
@@ -455,9 +540,9 @@ describe("NamespaceService CRUD", () => {
     expect(suspendCb.result.response!.suspended_at).toBeDefined();
   });
 
-  it("DeleteNamespace → soft deletes (sets deletedAt)", () => {
+  it("DeleteNamespace → soft deletes (sets deletedAt)", async () => {
     const createCb = createMockCallback();
-    namespaceHandlers.CreateNamespace(
+    await namespaceHandlers.CreateNamespace(
       createMockCall({
         slug: "delete-test",
         display_name: "Delete Test",
@@ -468,7 +553,7 @@ describe("NamespaceService CRUD", () => {
     );
 
     const deleteCb = createMockCallback();
-    namespaceHandlers.DeleteNamespace(
+    await namespaceHandlers.DeleteNamespace(
       createMockCall({ slug: "delete-test" }),
       deleteCb.callback
     );
@@ -476,7 +561,7 @@ describe("NamespaceService CRUD", () => {
     expect(deleteCb.result.err).toBeNull();
 
     const getCb = createMockCallback();
-    namespaceHandlers.GetNamespace(
+    await namespaceHandlers.GetNamespace(
       createMockCall({ slug: "delete-test" }),
       getCb.callback
     );
