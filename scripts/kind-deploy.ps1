@@ -121,7 +121,8 @@ Step -name "Load images into Kind" -block {
         "egaop/memory-plane:$Tag",
         "egaop/observability-plane:$Tag",
         "egaop/admin-console:$Tag",
-        "egaop-base-runtime:$Tag"
+        "egaop-base-runtime:$Tag",
+        "egaop/migrate:$Tag"
     )
     foreach ($img in $images) {
         Write-Host "  Loading $img..."
@@ -148,6 +149,38 @@ Step -name "Deploy Helm chart" -block {
         helm install $HELM_RELEASE $HELM_CHART --namespace default --wait --timeout 10m 2>&1
     }
     if ($LASTEXITCODE -ne 0) { throw "Helm deploy failed" }
+}
+
+# ─── Run database migrations ─────────────────────────────────────────────
+Step -name "Run database migrations" -block {
+    # Build and run the migration job
+    docker build -f infrastructure/migrate/Dockerfile -t egaop/migrate:$Tag .
+    $podName = "egaop-migrate-$([System.Guid]::NewGuid().ToString().Substring(0,8))"
+
+    # Get Postgres credentials
+    $pgUser = "egaop"
+    $pgPass = kubectl get secret egaop-secrets -o jsonpath='{.data.postgres-password}' 2>$null
+    if ($pgPass) {
+        $pgPass = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($pgPass))
+    } else {
+        $pgPass = "egaop"
+    }
+
+    # Run migration as a Kubernetes job via kubectl run
+    kubectl run $podName --image=egaop/migrate:$Tag --restart=Never `
+        --env="POSTGRES_URL=postgresql://${pgUser}:${pgPass}@postgres:5432/egaop" `
+        --command -- node scripts/migrate.mjs up 2>&1 | Out-Null
+
+    # Wait for completion
+    kubectl wait --for=condition=Complete --timeout=60s pod/$podName 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        kubectl logs pod/$podName
+        kubectl delete pod/$podName --force --grace-period=0 2>&1 | Out-Null
+        throw "Migration failed"
+    }
+    kubectl logs pod/$podName
+    kubectl delete pod/$podName --force --grace-period=0 2>&1 | Out-Null
+    Write-Host "  Migrations applied successfully" -ForegroundColor Green
 }
 
 # ─── Verify deployment ──────────────────────────────────────────────────

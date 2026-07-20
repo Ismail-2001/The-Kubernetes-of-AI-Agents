@@ -77,6 +77,11 @@ jobs:
           NODE_ENV=staging
           EOF
 
+      - name: Run database migrations
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+          docker compose run --rm migrate up
+
       - name: Pull images
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
@@ -190,6 +195,9 @@ jobs:
           GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
           SLACK_ALERT_WEBHOOK=${{ secrets.SLACK_ALERT_WEBHOOK }}
           EOF
+
+      - name: Run database migrations
+        run: docker compose run --rm migrate up
 
       - name: Pull images
         run: docker compose pull --quiet

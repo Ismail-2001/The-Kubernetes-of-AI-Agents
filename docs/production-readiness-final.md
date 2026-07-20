@@ -198,8 +198,7 @@ The verification history itself is a feature: the fact that independent re-testi
 19. **Performance benchmarks** — Open. Beyond the load test above (which targeted concurrency), no throughput (req/s under steady state) or latency (p50/p95/p99 under low load) benchmarks. **Priority: low.**
 20. **Role-based access control completeness** — Open. RBAC mapping exists (role→clearance) but not tested across all endpoints. **Priority: low.**
 21. **gVisor/runsc sandbox** — Open. Enhanced isolation requested but `runsc` runtime not installed. Docker-socket-proxy is interim. **Priority: low** (Docker isolation sufficient for pilot).
-22. **Database migration strategy** — NOT STARTED. `docker compose up -d` deploys code against existing schema. No pre-deploy migration step, no schema version tracking, no `down` migration support. Schema changes risk data loss. **Priority: high** (new finding).
-23. **Secrets management** — NOT STARTED. `deploy.yml` writes secrets (POSTGRES_PASSWORD, JWT_SECRET, OPENAI_API_KEY) to `.env` file on host disk. World-readable in containers, persists in Docker context. **Priority: high** (new finding).
+22. **Database migration strategy** — IMPLEMENTED. `scripts/migrate.mjs` engine with `up`/`down`/`status`/`create` commands. `schema_version` tracking table in Postgres. Advisory lock (pg_advisory_lock) prevents concurrent runs. Per-migration transactions with rollback on failure. `infrastructure/migrate/Dockerfile` for containerized execution. Docker Compose `migrate` service runs before api-server/secret-store/memory-plane (`depends_on: condition: service_completed_successfully`). CI/CD pre-deploy step in `deploy.yml`. Six `.down.sql` rollback files created for all existing migrations. `scripts/migrate.sh` wrapper for shell usage. K8s migration job in `kind-deploy.ps1`. Migration status: `docker compose run --rm migrate status`. **Priority: closed.**
 
 ---
 
@@ -224,12 +223,12 @@ Here's what the 83.5% means concretely:
 - **Eval metric bug** — CLOSED. `tool_selection_accuracy` denominator fixed, results clamped to [0,1], `compare-evals.mjs` aligned.
 - **CI/CD workflows** — REWRITTEN. Parallel matrix builds, GHA caching, Helm lint, Gitleaks/CodeQL/Trivy, production approval gate, auto-rollback. Still unexecuted on GitHub.
 - **Admin-console Dockerfile** — FIXED. Uses standalone Next.js build instead of all-workspaces build.
-- **New findings:** Database migration strategy (no pre-deploy migrations), secrets management (written to .env on disk).
+- **Database migration strategy** — IMPLEMENTED. `scripts/migrate.mjs` engine, `schema_version` table, `up`/`down`/`status`/`create` commands, Docker Compose `migrate` service, CI/CD pre-deploy step, K8s migration job, 6 `.down.sql` rollback files. Before services start, migrations run automatically.
+- **Remaining finding:** Secrets management (written to .env on disk).
 
 **Remaining highest-priority items:**
 1. GitHub CI/CD execution (workflow files exist, need GitHub push + Actions enablement)
-2. Database migration strategy (every schema change is a P0 risk)
-3. Secrets management (never write secrets to disk — use Docker secrets or direct env injection)
-4. Trivy image scanning (exists in security-scan.yml, never executed)
+2. Secrets management (never write secrets to disk — use Docker secrets or direct env injection)
+3. Trivy image scanning (exists in security-scan.yml, never executed)
 
 The platform has a strong foundation — real running code, real verification evidence, and a self-correcting audit trail. The remaining gaps are operational and security-hardening, not architectural. A focused sprint on the remaining high-priority items (CI/CD execution, database migrations, secrets management) would close the gap from "demo/pilot" to "production-capable."

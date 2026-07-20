@@ -19,6 +19,7 @@ $imageMap = @{
     "observability-plane" = @{ dockerfile = "observability-plane/Dockerfile";           image = "egaop/observability-plane" }
     "admin-console"     = @{ dockerfile = "admin-console/Dockerfile";                   image = "egaop/admin-console" }
     "base-runtime"      = @{ dockerfile = "execution-plane/sandbox-runtime/base-runtime/Dockerfile"; image = "egaop-base-runtime" }
+    "migrate"           = @{ dockerfile = "infrastructure/migrate/Dockerfile";           image = "egaop/migrate" }
 }
 
 if ($Services.Count -eq 0) {

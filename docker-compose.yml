@@ -266,6 +266,20 @@ services:
       - egaop-net
     restart: unless-stopped
 
+  # ─── Migration (one-shot) ──────────────────────────────────────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: infrastructure/migrate/Dockerfile
+    environment:
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-egaop}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-egaop}
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    networks:
+      - egaop-net
+    restart: no
+
   # ─── Control Plane ────────────────────────────────────────────────────────
   api-server:
     build:
@@ -308,6 +322,8 @@ services:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_healthy
       redis:
@@ -360,6 +376,8 @@ services:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       otel-collector:
@@ -646,6 +664,8 @@ services:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       pgbouncer:

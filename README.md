@@ -180,11 +180,11 @@ curl http://localhost:3001/health
 ├── observability-plane/     # Trace ingestion and replay
 ├── policy-plane/            # OPA/Rego engine (5 bugs fixed, tag 0.68.0)
 ├── packages/shared/         # @e-gaop/shared (TLS, retry interceptor, rate limiter, TokenBudget, errors)
-├── infrastructure/          # PgBouncer config
+├── infrastructure/          # PgBouncer config, migration service Dockerfile
 ├── charts/e-gaop/           # Helm chart (OPA CrashLoopBackOff: fixed)
 ├── evals/                   # Golden dataset, runner, baselines (RL-1 through RL-4)
-├── scripts/                 # Backup/restore, mock LLM, load test, grafana-init, docker-build-all, kind-deploy
-├── migrations/              # PostgreSQL migrations (5 files)
+├── scripts/                 # Backup/restore, mock LLM, load test, grafana-init, docker-build-all, kind-deploy, migrate
+├── migrations/              # PostgreSQL migrations (6 files + rollback files)
 ├── observability/           # Prometheus alerts (10 rules), Grafana provisioning, OTel config
 ├── docs/                    # Production readiness assessment, runbooks, benchmarks, CI setup
 └── .github/workflows/       # CI/CD (ci.yml, deploy.yml, security-scan.yml, backup.yml — local-validated)
@@ -200,7 +200,27 @@ curl http://localhost:3001/health
 | **LLM budget exceeded** | Identify namespace in `TokenBudget` → suspend namespace → review agent logs |
 | **Circuit breaker open** | Check `llm-router` logs → verify OpenAI API key → monitor recovery (30s auto-reset) |
 | **Service not healthy** | `docker compose logs <service>` → check OTel traces in Tempo |
+| **Schema change deploy** | `docker compose run --rm migrate up` (auto-runs via `migrate` service in compose) |
+| **Rollback last migration** | `docker compose run --rm migrate down --count=1` |
+| **Check migration status** | `docker compose run --rm migrate status` |
+| **Create new migration** | `node scripts/migrate.mjs create --name=add_index` |
+| **Dangerous rollback** | Down migration drops tables/columns — backup first: `scripts/backup.sh` |
 | **Restore from backup** | `./scripts/restore.sh /backup/backup-<date>.tar.gz` |
+
+### Migration System
+
+All schema changes go through `scripts/migrate.mjs`. Each migration has an up + down file:
+
+```
+migrations/
+  001_memory_plane.sql              # up: CREATE TABLE agent_memory
+  001_memory_plane.down.sql         # down: DROP TABLE agent_memory
+  002_observability_plane.sql
+  002_observability_plane.down.sql
+  ...
+```
+
+Migrations run automatically when Docker Compose starts (via the `migrate` service, before api-server/secret-store/memory-plane). In CI/CD, migrations run as a pre-deploy step. In Kubernetes, the `kind-deploy.ps1` runs migrations as a Kubernetes job.
 
 Backups run automatically every 6 hours via the `backup` Docker service (30-day retention).
 
@@ -218,8 +238,7 @@ These are known gaps, verified against the running codebase. Not hidden, not asp
 4. **Redis Sentinel not deployed** — Single Redis instance only. Code has conditional sentinel support but no sentinel containers are configured in `docker-compose.yml`.
 5. **Eval infra contamination** — ~2 of 19 eval cases fail due to OpenRouter/llm-router saturation, not agent defects. True agent quality may be ~94% excluding infra interference.
 6. **No penetration testing** — No injection testing, fuzzing, or red-team exercise performed.
-7. **No database migration strategy** — `docker compose up -d` deploys code against existing schema with no migration step. Schema changes risk data loss.
-8. **Secrets written to disk** — Deploy pipeline writes secrets to `.env` file on the host. Should use Docker secrets or direct env injection.
+7. **Secrets written to disk** — Deploy pipeline writes secrets to `.env` file on the host. Should use Docker secrets or direct env injection.
 
 ---
 
