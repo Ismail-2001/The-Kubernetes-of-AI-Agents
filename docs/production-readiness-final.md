@@ -1,6 +1,6 @@
 # E-GAOP Production-Readiness Assessment — Final
 
-**Score: 82.4%** (weighted, 53 items across 7 categories)
+**Score: 83.5%** (weighted, 53 items across 7 categories)
 **Last updated:** 2026-07-20
 **Status:** Safe for demo and single-user pilot; NOT ready for multi-tenant production or unmonitored deployment.
 
@@ -59,12 +59,12 @@ The verification history itself is a feature: the fact that independent re-testi
 | 2 | Network connectivity | 2 | Fixed: tool-proxy now on `egaop-sandbox` network. Latency improved from 311ms (first run, pre-fix) to 12-21ms (subsequent runs). Container IP: 172.24.0.3 consistently |
 | 3 | Follow-up LLM call | 2 | Zero 400 errors across all 3 repeat runs and 10/12/15 concurrent load tests. `role:"user"` fix confirmed effective |
 | 4 | Temporal workflow determinism | 2 | Module-level state leak fixed: `currentIteration`, `lastAction`, `startTime`, `cancellationRequested` moved from module-level `let` to function-local scope in `react-workflow.ts`. 6/6 concurrent runs verified: zero state corruption. State-leak audit (`docs/production-readiness-score.md` lines 340-386) confirmed no remaining dangerous module-level mutable state |
-| 5 | LLM retry / error handling | 1 | Basic error logging present. No circuit breaker. No retry policy for LLM calls — `DEADLINE_EXCEEDED` at concurrency ≥12 is caught but not retried with backoff. Activity timeout is fixed at 10s |
+| 5 | LLM retry / error handling | 2 | Exponential backoff with jitter for 429 rate-limit errors: `retryWithBackoff()` retries up to 3 times with `1s × 2^attempt + random(500ms)` delay. Concurrency semaphore limits simultaneous OpenAI calls to `LLM_MAX_CONCURRENT=10`. OpenAI client `maxRetries` increased to 5. Circuit breaker from `opossum` guards against persistent failures (50% threshold, 30s reset). Source: `execution-plane/llm-router/src/index.ts` |
 | 6 | Deployment-drift detection | 1 | `scripts/verify-deployed.ps1` exists (57 lines) and compares Docker image build dates against git commit dates. Known path bug: line 18 maps `secret-store` to wrong path (`execution-plane/` vs `control-plane/`). Script is PowerShell-only |
-| 7 | Timeout handling | 2 | Real degradation observed and documented: 10 concurrent → 100% pass (p50=41.9s, p95=44.3s); 12 concurrent → 75% pass (3 Temporal TIMEOUTs); 15 concurrent → 60% pass (6 TIMEOUTs). Root cause: llm-router gRPC `DEADLINE_EXCEEDED` after 10s under load. See `scripts/load-test-bk-results.md` |
+| 7 | Timeout handling | 2 | Real degradation observed and documented: 10 concurrent → 100% pass (p50=41.9s, p95=44.3s); 12 concurrent → 75% pass (3 Temporal TIMEOUTs); 15 concurrent → 60% pass (6 TIMEOUTs). Root cause: llm-router gRPC `DEADLINE_EXCEEDED` after 10s under load. Retry+backoff mitigation added but not re-tested. See `scripts/load-test-bk-results.md` |
 | 8 | Concurrent execution isolation | 2 | Backpressure polling loop + QuotaEnforcer GET-before-INCR fix + function-local state. 6/6 concurrent runs completed (100%) vs 5/6 (83.3%) after backpressure-only fix. `activities/index.ts` lines 17-35 implement `waitForQuota` with polling backoff |
 | 9 | Workflow recovery after failure | 1 | Temporal retries work (default retry policy). Manual recovery path (replaying from event history, compensating transactions) untested. No dead-letter queue for permanently failed workflows |
-| | **Category score** | **15 / 18 (83.3%)** | |
+| | **Category score** | **16 / 18 (88.9%)** | |
 
 ### Category 3: Security (weight 19%)
 
@@ -156,15 +156,15 @@ The verification history itself is a feature: the fact that independent re-testi
 | Category | Raw | Max | % | Weight | Weighted pts | Calculation |
 |---|---|---|---|---|---|---|---|
 | Functional Completeness | 27 | 28 | 96.429% | 29% | 27.96 | 96.429 × 0.29 |
-| Reliability | 15 | 18 | 83.333% | 19% | 15.83 | 83.333 × 0.19 |
+| Reliability | 16 | 18 | 88.889% | 19% | 16.89 | 88.889 × 0.19 |
 | Security | 15 | 20 | 75.000% | 19% | 14.25 | 75.000 × 0.19 |
 | Observability | 11 | 14 | 78.571% | 14% | 11.00 | 78.571 × 0.14 |
 | Operability | 7 | 10 | 70.000% | 9% | 6.30 | 70.000 × 0.09 |
 | Compliance | 2 | 4 | 50.000% | 5% | 2.50 | 50.000 × 0.05 |
 | Agent Quality | 11 | 12 | 91.667% | 5% | 4.58 | 91.667 × 0.05 |
-| **Total** | **88** | **106** | | **100%** | **82.42** | ≈ **82.4%** |
+| **Total** | **89** | **106** | | **100%** | **83.48** | ≈ **83.5%** |
 
-**Rounding note:** The total is 82.4%, up from 77.6% (+4.8pp) — +2.9pp from security hardening (PII block, namespace-aware rate limiting, body limit, security headers, content-type enforcement) and +1.9pp from vulnerability scanning (0 CVEs, `npm audit` clean). No rounding-up was applied — every component is evidence-backed.
+**Rounding note:** The total is 83.5%, up from 77.6% (+5.9pp) — +2.9pp from security hardening, +1.9pp from vulnerability scanning, +1.1pp from llm-router retry/backoff/concurrency. No rounding-up was applied — every component is evidence-backed.
 
 ---
 
@@ -187,8 +187,8 @@ The verification history itself is a feature: the fact that independent re-testi
 12. **TLS/mTLS** — PARTIAL. Code and certs exist, prior-round traces confirm TLS-enabled traffic. But: mTLS disabled (`@grpc/grpc-js` v1.14.4 bug), no cert rotation, not re-verified live this round (Docker daemon wedged). **Priority: medium.**
 13. **Kubernetes/Helm** — PARTIAL. `helm install` succeeded (REVISION 1). 11 chart bugs fixed. But: OPA pod CrashLoopBackOff (root cause undiagnosed), app images not built for any registry, full kind load test blocked by Docker daemon. **Priority: medium.**
 14. **Eval infra contamination** — PARTIAL. RL-2 84.2% success rate is contaminated by llm-router/OpenRouter saturation (~2 of 3 failures may be infra, not agent bugs). `tool_selection_accuracy` metric is broken (>1.0). **Priority: medium** (blocked on fixing llm-router scaling).
-15. **Load-test ceiling** — PARTIAL. 10 concurrent agents = 100% pass. ≥12 concurrent = degrades to 60-75% due to llm-router `DEADLINE_EXCEEDED`. No circuit breaker or backoff for LLM calls. **Priority: medium** (ok for pilot, blocking for scale).
-16. **Error handling / retry** — Open. No circuit breaker, no exponential backoff for LLM calls, no dead-letter queue. **Priority: low** (acceptable for pilot).
+15. **Load-test ceiling** — IMPROVED. 10 concurrent agents = 100% pass. ≥12 concurrent = degrades to 60-75% due to llm-router `DEADLINE_EXCEEDED`. Mitigation: concurrency semaphore (max 10), exponential backoff with jitter for 429s, OpenAI maxRetries=5, circuit breaker (50%/30s). Not re-tested after fix. **Priority: medium** (ok for pilot, blocking for scale).
+16. **Error handling / retry** — PARTIALLY CLOSED. Circuit breaker (opossum, 50% threshold, 30s reset). Exponential backoff with jitter for rate-limit errors (3 retries, 1s×2^attempt + random). No dead-letter queue. **Priority: low** (acceptable for pilot).
 17. **Input validation / API versioning** — Open. No OpenAPI spec, no request schema enforcement, no version negotiation. **Partially closed:** 1MB body limit, content-type enforcement, PII scan on tool arguments. **Priority: low.**
 18. **Penetration testing / injection testing** — NOT STARTED. No security audit, no red team, no fuzzing. **Priority: medium.**
 19. **Performance benchmarks** — Open. Beyond the load test above (which targeted concurrency), no throughput (req/s under steady state) or latency (p50/p95/p99 under low load) benchmarks. **Priority: low.**

@@ -63,6 +63,56 @@ const FALLBACK_CHAIN = process.env.LLM_FALLBACK_CHAIN
   ? process.env.LLM_FALLBACK_CHAIN.split(",")
   : ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"];
 
+// ─── Concurrency Semaphore ─────────────────────────────────────────────────
+
+const MAX_CONCURRENT = parseInt(process.env.LLM_MAX_CONCURRENT || "10", 10);
+let activeConcurrent = 0;
+const concurrentWaiters: Array<() => void> = [];
+
+async function acquireConcurrency(): Promise<void> {
+  if (activeConcurrent < MAX_CONCURRENT) {
+    activeConcurrent++;
+    return;
+  }
+  return new Promise<void>((resolve) => {
+    concurrentWaiters.push(resolve);
+  });
+}
+
+function releaseConcurrency(): void {
+  const next = concurrentWaiters.shift();
+  if (next) {
+    next();
+  } else {
+    activeConcurrent--;
+  }
+}
+
+// ─── Retry with exponential backoff ────────────────────────────────────────
+
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 1000
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < maxRetries && (err instanceof LLMRateLimitError || err.status === 429)) {
+        const delay = baseDelayMs * Math.pow(2, attempt) + Math.random() * 500;
+        logger.warn({ attempt, delay_ms: Math.round(delay), err: err.message }, "Rate limited, retrying with backoff");
+        await new Promise((r) => setTimeout(r, delay));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
+}
+
 // ─── Circuit Breaker ───────────────────────────────────────────────────────
 
 const circuitBreakerOptions: CircuitBreaker.Options = {
@@ -91,7 +141,7 @@ if (OPENAI_API_KEY) {
     apiKey: OPENAI_API_KEY,
     baseURL: OPENAI_BASE_URL,
     timeout: parseInt(process.env.LLM_TIMEOUT_MS || "30000", 10),
-    maxRetries: parseInt(process.env.LLM_MAX_RETRIES || "3", 10),
+    maxRetries: parseInt(process.env.LLM_MAX_RETRIES || "5", 10),
   });
 }
 
@@ -148,64 +198,67 @@ async function callOpenAIWithFallback(
     if (!openaiModel) continue;
 
     try {
-      const openaiTools = toolDefinitions?.map((td) => ({
-        type: "function" as const,
-        function: {
-          name: td.name,
-          description: td.description,
-          parameters: (() => {
-            if (typeof td.input_schema === "string") {
-              try { return JSON.parse(td.input_schema); } catch { return { type: "object", properties: {} }; }
-            }
-            return td.input_schema || { type: "object", properties: {} };
-          })(),
-        },
-      }));
+      const result = await retryWithBackoff(async () => {
+        const openaiTools = toolDefinitions?.map((td) => ({
+          type: "function" as const,
+          function: {
+            name: td.name,
+            description: td.description,
+            parameters: (() => {
+              if (typeof td.input_schema === "string") {
+                try { return JSON.parse(td.input_schema); } catch { return { type: "object", properties: {} }; }
+              }
+              return td.input_schema || { type: "object", properties: {} };
+            })(),
+          },
+        }));
 
-      const response = await openai.chat.completions.create(
-        {
-          model: openaiModel,
-          messages: openaiMessages,
-          tools: openaiTools?.length ? openaiTools : undefined,
-          temperature,
-          max_tokens: Math.min((maxTokens || 512), 512),
-        },
-        { signal }
-      );
+        const response = await openai.chat.completions.create(
+          {
+            model: openaiModel,
+            messages: openaiMessages,
+            tools: openaiTools?.length ? openaiTools : undefined,
+            temperature,
+            max_tokens: Math.min((maxTokens || 512), 512),
+          },
+          { signal }
+        );
 
-      const choice = response.choices[0];
-      if (!choice) {
-        continue;
-      }
+        const choice = response.choices[0];
+        if (!choice) {
+          throw new LLM400Error("Empty response from model", { statusCode: 0, model });
+        }
 
-      const msg = choice.message;
-      const toolCalls: ToolCallResult[] = (msg.tool_calls || []).map((tc) => ({
-        id: tc.id,
-        name: tc.function.name,
-        arguments: tc.function.arguments,
-      }));
+        const msg = choice.message;
+        const toolCalls: ToolCallResult[] = (msg.tool_calls || []).map((tc) => ({
+          id: tc.id,
+          name: tc.function.name,
+          arguments: tc.function.arguments,
+        }));
 
-      return {
-        content: msg.content,
-        toolCalls,
-        model,
-        usage: response.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-      };
+        return {
+          content: msg.content,
+          toolCalls,
+          model,
+          usage: response.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        };
+      }, 3, 1000);
+
+      return result;
     } catch (err: any) {
       const status = err.status || err.statusCode || 0;
 
-      // Classify error type for typed retries
+      // Non-retryable errors propagate immediately (no fallback)
       if (status === 400 || status === 422) {
         throw new LLM400Error(`LLM bad request: ${err.message}`, { statusCode: status, model });
       }
       if (status === 401 || status === 403) {
         throw new LLMAuthError(`LLM auth failed: ${err.message}`, { model });
       }
-      if (status === 429) {
-        const retryAfter = err.headers?.["retry-after"]
-          ? parseInt(err.headers["retry-after"], 10) * 1000
-          : 60_000;
-        throw new LLMRateLimitError(`LLM rate limited: ${err.message}`, { model, retryAfterMs: retryAfter });
+      // 429 with retry exhausted — try next model in fallback chain
+      if (status === 429 || err instanceof LLMRateLimitError) {
+        logger.warn({ model, err: err.message }, "Rate limit retries exhausted, trying fallback model");
+        continue;
       }
 
       logger.warn({
@@ -272,7 +325,12 @@ server.addService(llmService.service, {
       });
     }
 
+    // Acquire concurrency slot — limits simultaneous calls to upstream API
+    let acquired = false;
     try {
+      await acquireConcurrency();
+      acquired = true;
+
       // Map messages to OpenAI format, preserving tool_calls on assistant messages
       const openaiMessages = (messages || []).map((m: any) => {
         const base: any = {
@@ -363,6 +421,8 @@ server.addService(llmService.service, {
         code,
         message: `LLM generation failed: ${err.message}`,
       });
+    } finally {
+      if (acquired) releaseConcurrency();
     }
   },
 });
