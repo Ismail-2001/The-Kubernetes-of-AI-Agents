@@ -15,6 +15,8 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import cookie from "@fastify/cookie";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import pino from "pino";
 import { Connection, Client } from "@temporalio/client";
 import { getServerCredentials } from "@e-gaop/shared";
@@ -115,6 +117,34 @@ fastify.register(rateLimit, {
   addHeaders: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true, "retry-after": true },
 });
 fastify.register(cookie);
+
+fastify.register(swagger, {
+  openapi: {
+    openapi: "3.0.0",
+    info: {
+      title: "E-GAOP API",
+      description: "Enterprise-Grade Agent Orchestration Platform API",
+      version: "1.0.0",
+    },
+    servers: [
+      { url: `http://localhost:${process.env.API_SERVER_REST_PORT || 3001}`, description: "Development" },
+    ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+        },
+      },
+    },
+    security: [{ bearerAuth: [] }],
+  },
+});
+
+fastify.register(swaggerUi, {
+  routePrefix: "/api/docs",
+});
 
 // ── Auth routes (public) ──
 fastify.register(authRoutes);

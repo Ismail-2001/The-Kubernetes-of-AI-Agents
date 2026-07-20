@@ -15,6 +15,8 @@
         "@fastify/cookie": "^11.0.2",
         "@fastify/cors": "^11.0.0",
         "@fastify/rate-limit": "^11.1.0",
+        "@fastify/swagger": "^9.8.1",
+        "@fastify/swagger-ui": "^6.1.0",
         "@grpc/grpc-js": "^1.14.3",
         "@grpc/proto-loader": "^0.8.0",
         "@temporalio/client": "^1.20.2",

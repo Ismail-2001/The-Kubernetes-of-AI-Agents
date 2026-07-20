@@ -1,6 +1,6 @@
-import crypto from "crypto";
-import { type Namespace, type NamespaceTierValue, DEFAULT_QUOTAS } from "@e-gaop/shared";
+import { type Namespace, type NamespaceTierValue, DEFAULT_QUOTAS, validateSlug } from "@e-gaop/shared";
 import pino from "pino";
+import { NamespaceRepository } from "./repository.js";
 
 const logger = pino({
   level: process.env.NODE_ENV === "test" ? "silent" : (process.env.LOG_LEVEL || "info"),
@@ -9,11 +9,7 @@ const logger = pino({
   } : {}),
 });
 
-const namespaces = new Map<string, Namespace>();
-
-function generateUUID(): string {
-  return crypto.randomUUID();
-}
+const repo = new NamespaceRepository();
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -58,121 +54,123 @@ function tierFromProto(proto: string): NamespaceTierValue {
 }
 
 export const namespaceHandlers = {
-  CreateNamespace: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+  CreateNamespace: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
     const req = call.request;
     const slug = req.slug as string;
     const tier = tierFromProto(req.tier as string);
     const quotas = req.quotas as Record<string, number> | undefined;
     const defaultQuotas = DEFAULT_QUOTAS[tier];
 
-    const ns: Namespace = {
-      id: generateUUID(),
-      slug,
-      displayName: (req.display_name as string) ?? slug,
-      tier,
-      ownerId: (req.owner_id as string) ?? "",
-      quotas: {
-        maxAgents: quotas?.max_agents ?? defaultQuotas.maxAgents,
-        maxConcurrentExecutions: quotas?.max_concurrent_executions ?? defaultQuotas.maxConcurrentExecutions,
-        maxMemoryMB: quotas?.max_memory_mb ?? defaultQuotas.maxMemoryMB,
-        maxToolCallsPerMinute: quotas?.max_tool_calls_per_minute ?? defaultQuotas.maxToolCallsPerMinute,
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    namespaces.set(slug, ns);
-    logger.info({ slug, tier, ownerId: ns.ownerId }, "Namespace created");
-    callback(null, toProtoNamespace(ns));
-  },
-
-  GetNamespace: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const slug = call.request.slug as string;
-    const ns = namespaces.get(slug);
-    if (!ns || ns.deletedAt) {
-      callback(new Error(`Namespace not found: ${slug}`));
-      return;
-    }
-    callback(null, toProtoNamespace(ns));
-  },
-
-  ListNamespaces: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const ownerId = call.request.owner_id as string | undefined;
-    const pageSize = Math.min((call.request.page_size as number) || 50, 100);
-    const pageToken = (call.request.page_token as string) ?? "";
-
-    let results = Array.from(namespaces.values()).filter((ns) => !ns.deletedAt);
-    if (ownerId) {
-      results = results.filter((ns) => ns.ownerId === ownerId);
-    }
-
-    const startIndex = pageToken
-      ? results.findIndex((ns) => ns.id === pageToken) + 1
-      : 0;
-
-    const page = results.slice(startIndex, startIndex + pageSize);
-    const nextCursor = page.length === pageSize ? page[page.length - 1]!.id : "";
-
-    callback(null, {
-      namespaces: page.map(toProtoNamespace),
-      next_page_token: nextCursor,
-      total_count: results.length,
-    });
-  },
-
-  UpdateNamespace: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const slug = call.request.slug as string;
-    const ns = namespaces.get(slug);
-    if (!ns || ns.deletedAt) {
-      callback(new Error(`Namespace not found: ${slug}`));
+    if (!validateSlug(slug)) {
+      callback(new Error(`Invalid namespace slug: ${slug}. Must be 3-63 lowercase alphanumeric characters or hyphens.`));
       return;
     }
 
-    if (typeof call.request.display_name === "string" && call.request.display_name) {
-      ns.displayName = call.request.display_name;
+    try {
+      const ns = await repo.create({
+        slug,
+        displayName: (req.display_name as string) ?? slug,
+        tier,
+        ownerId: (req.owner_id as string) ?? "",
+        quotas: {
+          maxAgents: quotas?.max_agents ?? defaultQuotas.maxAgents,
+          maxConcurrentExecutions: quotas?.max_concurrent_executions ?? defaultQuotas.maxConcurrentExecutions,
+          maxMemoryMB: quotas?.max_memory_mb ?? defaultQuotas.maxMemoryMB,
+          maxToolCallsPerMinute: quotas?.max_tool_calls_per_minute ?? defaultQuotas.maxToolCallsPerMinute,
+        },
+      });
+      logger.info({ slug, tier, ownerId: ns.ownerId }, "Namespace created");
+      callback(null, toProtoNamespace(ns));
+    } catch (err: any) {
+      if (err.code === "23505") {
+        callback(new Error(`Namespace already exists: ${slug}`));
+      } else {
+        callback(new Error(`Failed to create namespace: ${err.message}`));
+      }
     }
-
-    const quotas = call.request.quotas as Record<string, number> | undefined;
-    if (quotas) {
-      if (quotas.max_agents !== undefined) ns.quotas.maxAgents = quotas.max_agents;
-      if (quotas.max_concurrent_executions !== undefined) ns.quotas.maxConcurrentExecutions = quotas.max_concurrent_executions;
-      if (quotas.max_memory_mb !== undefined) ns.quotas.maxMemoryMB = quotas.max_memory_mb;
-      if (quotas.max_tool_calls_per_minute !== undefined) ns.quotas.maxToolCallsPerMinute = quotas.max_tool_calls_per_minute;
-    }
-
-    ns.updatedAt = new Date();
-    namespaces.set(slug, ns);
-    logger.info({ slug }, "Namespace updated");
-    callback(null, toProtoNamespace(ns));
   },
 
-  SuspendNamespace: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+  GetNamespace: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
     const slug = call.request.slug as string;
-    const ns = namespaces.get(slug);
-    if (!ns || ns.deletedAt) {
-      callback(new Error(`Namespace not found: ${slug}`));
-      return;
+    try {
+      const ns = await repo.findBySlug(slug);
+      if (!ns) {
+        callback(new Error(`Namespace not found: ${slug}`));
+        return;
+      }
+      callback(null, toProtoNamespace(ns));
+    } catch (err: any) {
+      callback(new Error(`Failed to get namespace: ${err.message}`));
     }
-
-    ns.suspendedAt = new Date();
-    ns.updatedAt = new Date();
-    namespaces.set(slug, ns);
-    logger.warn({ slug, reason: call.request.reason }, "Namespace suspended");
-    callback(null, toProtoNamespace(ns));
   },
 
-  DeleteNamespace: (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
-    const slug = call.request.slug as string;
-    const ns = namespaces.get(slug);
-    if (!ns || ns.deletedAt) {
-      callback(new Error(`Namespace not found: ${slug}`));
-      return;
+  ListNamespaces: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    try {
+      const result = await repo.list({
+        ownerId: call.request.owner_id as string | undefined,
+        pageSize: (call.request.page_size as number) || 50,
+        pageToken: (call.request.page_token as string) ?? undefined,
+      });
+      callback(null, {
+        namespaces: result.namespaces.map(toProtoNamespace),
+        next_page_token: result.nextPageToken,
+        total_count: result.totalCount,
+      });
+    } catch (err: any) {
+      callback(new Error(`Failed to list namespaces: ${err.message}`));
     }
+  },
 
-    ns.deletedAt = new Date();
-    ns.updatedAt = new Date();
-    namespaces.set(slug, ns);
-    logger.warn({ slug }, "Namespace soft-deleted");
-    callback(null, {});
+  UpdateNamespace: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    const slug = call.request.slug as string;
+    try {
+      const ns = await repo.update(slug, {
+        displayName: typeof call.request.display_name === "string" ? call.request.display_name : undefined,
+        quotas: call.request.quotas ? {
+          maxAgents: (call.request.quotas as Record<string, number>).max_agents,
+          maxConcurrentExecutions: (call.request.quotas as Record<string, number>).max_concurrent_executions,
+          maxMemoryMB: (call.request.quotas as Record<string, number>).max_memory_mb,
+          maxToolCallsPerMinute: (call.request.quotas as Record<string, number>).max_tool_calls_per_minute,
+        } : undefined,
+      });
+      if (!ns) {
+        callback(new Error(`Namespace not found: ${slug}`));
+        return;
+      }
+      logger.info({ slug }, "Namespace updated");
+      callback(null, toProtoNamespace(ns));
+    } catch (err: any) {
+      callback(new Error(`Failed to update namespace: ${err.message}`));
+    }
+  },
+
+  SuspendNamespace: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    const slug = call.request.slug as string;
+    try {
+      const ns = await repo.suspend(slug);
+      if (!ns) {
+        callback(new Error(`Namespace not found: ${slug}`));
+        return;
+      }
+      logger.warn({ slug, reason: call.request.reason }, "Namespace suspended");
+      callback(null, toProtoNamespace(ns));
+    } catch (err: any) {
+      callback(new Error(`Failed to suspend namespace: ${err.message}`));
+    }
+  },
+
+  DeleteNamespace: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+    const slug = call.request.slug as string;
+    try {
+      const ns = await repo.softDelete(slug);
+      if (!ns) {
+        callback(new Error(`Namespace not found: ${slug}`));
+        return;
+      }
+      logger.warn({ slug }, "Namespace soft-deleted");
+      callback(null, {});
+    } catch (err: any) {
+      callback(new Error(`Failed to delete namespace: ${err.message}`));
+    }
   },
 };

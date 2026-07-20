@@ -17,8 +17,9 @@ services:
   # ─── Infrastructure ───────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -31,6 +32,11 @@ services:
         limits:
           memory: 512M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   postgres:
@@ -78,6 +84,11 @@ services:
         limits:
           memory: 1G
           cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   temporal:
@@ -100,8 +111,11 @@ services:
         limits:
           memory: 1G
           cpus: "1.0"
-    networks:
-      - egaop-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   opa:
@@ -120,6 +134,11 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   # ─── Observability Infrastructure ─────────────────────────────────────────
@@ -134,6 +153,11 @@ services:
     volumes:
       - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - egaop-net
     restart: unless-stopped
@@ -146,6 +170,11 @@ services:
     volumes:
       - ./observability/tempo-config.yml:/etc/tempo/config.yml:ro
       - tempo-data:/tempo
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - egaop-net
     restart: unless-stopped
@@ -162,6 +191,11 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
       - "--web.enable-lifecycle"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - egaop-net
     restart: unless-stopped
@@ -183,6 +217,11 @@ services:
     depends_on:
       - prometheus
       - tempo
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - egaop-net
     restart: unless-stopped
@@ -229,6 +268,10 @@ services:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       otel-collector:
         condition: service_started
     networks:
@@ -238,6 +281,11 @@ services:
         limits:
           memory: 512M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   secret-store:
@@ -262,6 +310,12 @@ services:
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-secret-store
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:15057/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
@@ -277,6 +331,11 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   workflow-engine:
@@ -308,12 +367,18 @@ services:
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-workflow-engine
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:15058/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
       temporal:
-        condition: service_started
+        condition: service_healthy
       otel-collector:
         condition: service_started
     networks:
@@ -323,6 +388,11 @@ services:
         limits:
           memory: 512M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   # ─── Execution Plane ──────────────────────────────────────────────────────
@@ -369,6 +439,11 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   tool-proxy:
@@ -404,6 +479,11 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   # Docker socket proxy — exposes a filtered Docker API to sandbox-runtime
@@ -422,6 +502,11 @@ services:
       LOG_LEVEL: info
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - egaop-net
     restart: unless-stopped
@@ -430,6 +515,11 @@ services:
     image: egaop-base-runtime:latest
     build:
       context: execution-plane/sandbox-runtime/base-runtime
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: "no"
 
   sandbox-runtime:
@@ -472,6 +562,11 @@ services:
         limits:
           memory: 1G
           cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   # ─── Data / Observability Planes ──────────────────────────────────────────
@@ -500,6 +595,12 @@ services:
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-memory-plane
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:15055/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
@@ -517,6 +618,11 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   observability-plane:
@@ -541,6 +647,12 @@ services:
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:15056/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
@@ -556,6 +668,11 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   # ─── Admin Console ───────────────────────────────────────────────────────
@@ -591,6 +708,11 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - egaop-net
     restart: unless-stopped

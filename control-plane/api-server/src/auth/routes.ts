@@ -1,11 +1,14 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import crypto from "crypto";
+import pino from "pino";
 import { hashPassword, comparePassword, signJWT, verifyJWT, type JWTClaims } from "@e-gaop/shared";
 import {
   getUserRepository,
   ensureAdminUser,
   type UserRow,
 } from "./repository";
+
+const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 
 const JWT_SECRET = process.env.JWT_SECRET || "";
 const JWT_EXPIRES_SEC = 86400; // 24 hours
@@ -55,12 +58,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   if (process.env.NODE_ENV !== "test") {
     const adminPassword = await ensureAdminUser(repo);
     if (adminPassword) {
-      console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
-      console.log(`║  First boot: Admin account created                          ║`);
-      console.log(`║  Email:    admin@egaop.io                                    ║`);
-      console.log(`║  Password: ${adminPassword.padEnd(46)}║`);
-      console.log(`║  ⚠  Change this password immediately after first login!     ║`);
-      console.log(`╚══════════════════════════════════════════════════════════════╝\n`);
+      logger.warn({ username: "admin" }, "First boot: admin account created. Check /run/secrets/ for initial password.");
     }
   }
 
