@@ -39,6 +39,19 @@ const redis = new Redis({
   port: parseInt(process.env.REDIS_PORT || "6379", 10),
   lazyConnect: true,
   retryStrategy: (times) => Math.min(times * 50, 2000),
+  // Sentinel support for HA
+  ...(process.env.REDIS_SENTINEL_HOSTS
+    ? {
+        sentinels: process.env.REDIS_SENTINEL_HOSTS.split(",").map((s) => {
+          const [host, port] = s.trim().split(":");
+          return { host: host!, port: parseInt(port || "26379", 10) };
+        }),
+        name: process.env.REDIS_SENTINEL_MASTER || "mymaster",
+        sentinelPassword: process.env.REDIS_SENTINEL_PASSWORD || undefined,
+        enableOfflineQueue: true,
+        maxRetriesPerRequest: 3,
+      }
+    : {}),
 });
 
 redis.on("error", (err) => logger.warn({ err: err.message }, "Redis connection issue"));

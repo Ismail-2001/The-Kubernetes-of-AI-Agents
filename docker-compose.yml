@@ -26,6 +26,11 @@ services:
       - redis-data:/data
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
     restart: unless-stopped
 
   postgres:
@@ -34,6 +39,28 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
+    command:
+      - "postgres"
+      - "-c" 
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=3"
+      - "-c"
+      - "wal_keep_size=256MB"
+      - "-c"
+      - "archive_mode=on"
+      - "-c"
+      - "archive_command=test ! -f /archive/%f && cp %p /archive/%f"
+      - "-c"
+      - "log_statement=ddl"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=512MB"
+      - "-c"
+      - "work_mem=8MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
     healthcheck:
       test: ["CMD-SHELL", "psql -U ${POSTGRES_USER:-egaop} -d ${POSTGRES_DB:-egaop} -c 'SELECT 1' || exit 1"]
       interval: 10s
@@ -42,9 +69,15 @@ services:
       start_period: 30s
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - postgres-archive:/archive
       - ./migrations:/docker-entrypoint-initdb.d:ro
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
     restart: unless-stopped
 
   temporal:
@@ -66,6 +99,7 @@ services:
       resources:
         limits:
           memory: 1G
+          cpus: "1.0"
     networks:
       - egaop-net
     restart: unless-stopped
@@ -81,6 +115,11 @@ services:
       - "/policies"
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
     restart: unless-stopped
 
   # ─── Observability Infrastructure ─────────────────────────────────────────
@@ -194,6 +233,11 @@ services:
         condition: service_started
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
     restart: unless-stopped
 
   secret-store:
@@ -228,6 +272,11 @@ services:
         condition: service_started
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
     restart: unless-stopped
 
   workflow-engine:
@@ -269,6 +318,11 @@ services:
         condition: service_started
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
     restart: unless-stopped
 
   # ─── Execution Plane ──────────────────────────────────────────────────────
@@ -310,6 +364,11 @@ services:
     networks:
       - egaop-net
       - egaop-sandbox
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
     restart: unless-stopped
 
   tool-proxy:
@@ -340,6 +399,11 @@ services:
     networks:
       - egaop-net
       - egaop-sandbox
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
     restart: unless-stopped
 
   # Docker socket proxy — exposes a filtered Docker API to sandbox-runtime
@@ -403,6 +467,11 @@ services:
         condition: service_started
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
     restart: unless-stopped
 
   # ─── Data / Observability Planes ──────────────────────────────────────────
@@ -443,6 +512,11 @@ services:
         condition: service_started
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
     restart: unless-stopped
 
   observability-plane:
@@ -477,6 +551,11 @@ services:
         condition: service_started
     networks:
       - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
     restart: unless-stopped
 
   # ─── Admin Console ───────────────────────────────────────────────────────
@@ -519,6 +598,7 @@ services:
 volumes:
   redis-data:
   postgres-data:
+  postgres-archive:
   prometheus-data:
   grafana-data:
   tempo-data:

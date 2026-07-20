@@ -65,6 +65,15 @@ function createClient(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new (svc as any)(address, getClientCredentials(), {
     interceptors: getStandardInterceptors({ serviceName }),
+    "grpc.keepalive_time_ms": 30_000,
+    "grpc.keepalive_timeout_ms": 10_000,
+    "grpc.keepalive_permit_without_calls": true,
+    "grpc.max_connection_age_ms": 600_000,
+    "grpc.max_connection_idle_ms": 300_000,
+    "grpc.enable_retries": true,
+    "grpc.service_config": JSON.stringify({
+      methodConfig: [{ name: [{}], timeout: { seconds: 10 } }],
+    }),
   });
 }
 
@@ -100,6 +109,8 @@ const toolProxyAddr = process.env.TOOL_PROXY_ADDR || "localhost:50052";
 const memoryPlaneAddr = process.env.MEMORY_PLANE_ADDR || "localhost:50055";
 const observabilityAddr =
   process.env.OBSERVABILITY_PLANE_ADDR || "localhost:50056";
+const apiServerAddr = process.env.API_SERVER_ADDR || "localhost:50051";
+const sandboxAddr = process.env.SANDBOX_RUNTIME_ADDR || "localhost:50054";
 
 const llmClient = createClient(
   "egaop/v1/llm.proto",
@@ -120,6 +131,16 @@ const obsClient = createClient(
   "egaop/v1/execution.proto",
   "egaop.v1.ObservabilityService",
   observabilityAddr
+);
+const agentClient = createClient(
+  "egaop/v1/agent.proto",
+  "egaop.v1.AgentService",
+  apiServerAddr
+);
+const runtimeClient = createClient(
+  "egaop/v1/runtime.proto",
+  "egaop.v1.RuntimeService",
+  sandboxAddr
 );
 
 const llmGenerateCall = promisifyGRPC<unknown, unknown>(llmClient, "Generate");
@@ -480,18 +501,9 @@ interface AdmitAgentParams {
 }
 
 export async function admitAgent(params: AdmitAgentParams): Promise<boolean> {
-  const apiServerAddr =
-    process.env.API_SERVER_ADDR || "localhost:50051";
-
-  const svc = loadService("egaop/v1/agent.proto", "egaop.v1.AgentService");
-  const client = new (
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    svc as any
-  )(apiServerAddr, getClientCredentials());
-
   try {
     const response = await promisifyGRPC<unknown, unknown>(
-      client,
+      agentClient,
       "CreateAgent"
     )({
       api_version: "egaop/v1",
@@ -534,18 +546,9 @@ interface SandboxResult {
 export async function createSandbox(
   params: CreateSandboxParams
 ): Promise<SandboxResult> {
-  const sandboxAddr =
-    process.env.SANDBOX_RUNTIME_ADDR || "localhost:50054";
-
-  const svc = loadService("egaop/v1/runtime.proto", "egaop.v1.RuntimeService");
-  const client = new (
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    svc as any
-  )(sandboxAddr, getClientCredentials());
-
   try {
     const response = await promisifyGRPC<unknown, unknown>(
-      client,
+      runtimeClient,
       "CreateSandbox"
     )({
       agent_id: params.agentId,
@@ -587,18 +590,9 @@ interface TerminateSandboxParams {
 export async function terminateSandbox(
   params: TerminateSandboxParams
 ): Promise<{ success: boolean }> {
-  const sandboxAddr =
-    process.env.SANDBOX_RUNTIME_ADDR || "localhost:50054";
-
-  const svc = loadService("egaop/v1/runtime.proto", "egaop.v1.RuntimeService");
-  const client = new (
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    svc as any
-  )(sandboxAddr, getClientCredentials());
-
   try {
     const response = await promisifyGRPC<unknown, unknown>(
-      client,
+      runtimeClient,
       "TerminateSandbox"
     )({
       sandbox_id: params.sandboxId,
