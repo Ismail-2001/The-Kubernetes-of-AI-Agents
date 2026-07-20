@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY admin-console/package.json ./admin-console/
@@ -10,7 +10,7 @@ ENV NODE_PATH=/app/node_modules
 RUN node /app/node_modules/next/dist/bin/next build /app/admin-console
 
 # Stage 2: Production
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
