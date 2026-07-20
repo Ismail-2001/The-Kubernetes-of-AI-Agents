@@ -91,6 +91,44 @@ services:
         max-file: "3"
     restart: unless-stopped
 
+  pgbouncer:
+    image: bitnami/pgbouncer:latest
+    environment:
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_USERNAME: ${POSTGRES_USER:-egaop}
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRESQL_DATABASE: egaop
+      PGBOUNCER_PORT: 6432
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_DEFAULT_POOL_SIZE: "25"
+      PGBOUNCER_MAX_CLIENT_CONN: "100"
+      PGBOUNCER_QUERY_TIMEOUT: "30"
+      PGBOUNCER_IDLE_TRANSACTION_TIMEOUT: "60"
+      PGBOUNCER_CLIENT_IDLE_TIMEOUT: "600"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - egaop-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
   temporal:
     image: temporalio/auto-setup:latest
     environment:
@@ -247,8 +285,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      POSTGRES_HOST: pgbouncer
+      POSTGRES_PORT: "6432"
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -268,7 +306,7 @@ services:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -301,8 +339,8 @@ services:
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      POSTGRES_HOST: pgbouncer
+      POSTGRES_PORT: "6432"
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -377,7 +415,7 @@ services:
       - ./api/proto:/api/proto:ro
       - ./certs:/etc/egaop/certs:ro
     depends_on:
-      temporal:
+      pgbouncer:
         condition: service_healthy
       otel-collector:
         condition: service_started
@@ -584,8 +622,8 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      POSTGRES_HOST: pgbouncer
+      POSTGRES_PORT: "6432"
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
@@ -608,7 +646,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      pgbouncer:
         condition: service_healthy
       otel-collector:
         condition: service_started
@@ -638,8 +676,8 @@ services:
       OBSERVABILITY_PLANE_HEALTH_PORT: "15056"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-observability-plane
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      POSTGRES_HOST: pgbouncer
+      POSTGRES_PORT: "6432"
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
@@ -718,6 +756,34 @@ services:
       - egaop-net
     restart: unless-stopped
 
+  # ─── Backup ────────────────────────────────────────────────────────────────
+  backup:
+    image: alpine:3.19
+    entrypoint: ["/bin/sh", "/scripts/backup-cron.sh"]
+    volumes:
+      - postgres-data:/data/postgres:ro
+      - redis-data:/data/redis:ro
+      - backup-data:/backup
+      - ./scripts/backup-cron.sh:/scripts/backup-cron.sh:ro
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BACKUP_RETENTION_DAYS: "30"
+      BACKUP_DIR: /backup
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
 volumes:
   redis-data:
   postgres-data:
@@ -725,6 +791,7 @@ volumes:
   prometheus-data:
   grafana-data:
   tempo-data:
+  backup-data:
 
 networks:
   egaop-net:

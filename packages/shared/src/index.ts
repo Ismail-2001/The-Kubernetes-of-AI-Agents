@@ -77,5 +77,6 @@ export {
 export { validateSecrets } from "./config/validate-secrets.js";
 export { getSecret, loadSecretsIntoEnv } from "./config/secrets.js";
 export { RateLimiter } from "./rate-limiter.js";
+export { TokenBudget, extractNamespace } from "./budget/index.js";
 export { getServerCredentials, getClientCredentials } from "./tls.js";
 export { getPool, closePool } from "./db.js";

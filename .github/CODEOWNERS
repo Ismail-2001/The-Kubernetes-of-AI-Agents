@@ -1,0 +1,13 @@
+# Default owner for all files — requires review from any team lead
+* @Ismail-2001
+
+# CI/CD pipeline changes require build team review
+/.github/ @Ismail-2001
+
+# Docker / infrastructure changes require infra review
+/docker-compose.yml @Ismail-2001
+/infrastructure/ @Ismail-2001
+
+# Secrets and security-critical code
+/secrets/ @Ismail-2001
+.env.example @Ismail-2001
