@@ -14,11 +14,13 @@ import { ServerInterceptingCall } from "@grpc/grpc-js";
 import { verifyJWT } from "../crypto";
 
 interface InterceptingServerListener {
-  onReceiveMetadata(metadata: Metadata): void;
-  onReceiveMessage(message: any): void;
-  onReceiveHalfClose(): void;
+  onReceiveMetadata(metadata: Metadata, callback: (metadata: Metadata) => void): void;
+  onReceiveMessage(message: any, callback: (message: any) => void): void;
+  onReceiveHalfClose(callback: () => void): void;
   onCancel(): void;
 }
+
+type StartCallback = (listener: InterceptingServerListener) => void;
 
 export interface NamespaceEnforcementConfig {
   jwtSecret?: string;
@@ -205,14 +207,14 @@ export function createNamespaceServerInterceptor(
 
   return (
     methodDescriptor: ServerMethodDefinition<any, any>,
-    call: ServerInterceptingCallInterface
+    call: any
   ): ServerInterceptingCall => {
     const methodPath = methodDescriptor.path ?? "unknown";
 
-    const wrappedCall: ServerInterceptingCallInterface = {
-      start: (listener: InterceptingServerListener) => {
+    const wrappedCall: any = {
+      start: (callback: any) => {
         const wrappedListener: InterceptingServerListener = {
-          onReceiveMetadata: (metadata: Metadata) => {
+          onReceiveMetadata: (metadata: Metadata, passthrough: (m: Metadata) => void) => {
             const claimsRaw = (metadata.get("x-agent-claims")[0] as string) ?? "";
             const claims = parseClaims(claimsRaw);
 
@@ -268,29 +270,23 @@ export function createNamespaceServerInterceptor(
             metadata.set("x-caller-namespace", callerNamespace);
             metadata.set("x-caller-role", callerRole);
 
-            listener.onReceiveMetadata(metadata);
+            passthrough(metadata);
           },
-          onReceiveMessage: (message: any) => {
-            if (listener.onReceiveMessage) {
-              listener.onReceiveMessage(message);
-            }
+          onReceiveMessage: (message: any, passthrough: (m: any) => void) => {
+            passthrough(message);
           },
-          onReceiveHalfClose: () => {
-            if (listener.onReceiveHalfClose) {
-              listener.onReceiveHalfClose();
-            }
+          onReceiveHalfClose: (passthrough: () => void) => {
+            passthrough();
           },
           onCancel: () => {
-            if (listener.onCancel) {
-              listener.onCancel();
-            }
+            // no passthrough — call was cancelled
           },
         };
-        call.start(wrappedListener);
+        callback(wrappedListener);
       },
-      sendMetadata: (metadata: Metadata) => call.sendMetadata(metadata),
-      sendMessage: (message: any, callback: () => void) => call.sendMessage(message, callback),
-      sendStatus: (status) => call.sendStatus(status),
+      sendMetadata: (metadata: any, callback: any) => callback(metadata),
+      sendMessage: (message: any, callback: any) => callback(message),
+      sendStatus: (status: any, callback: any) => callback(status),
       startRead: () => call.startRead(),
       getPeer: () => call.getPeer(),
       getDeadline: () => call.getDeadline(),
@@ -300,6 +296,6 @@ export function createNamespaceServerInterceptor(
       getMetricsRecorder: () => call.getMetricsRecorder(),
     };
 
-    return new ServerInterceptingCall(wrappedCall);
+    return new ServerInterceptingCall(call as any, wrappedCall as any);
   };
 }

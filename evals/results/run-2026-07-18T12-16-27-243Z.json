@@ -1,0 +1,254 @@
+{
+  "timestamp": "2026-07-18T12:16:27.848Z",
+  "dataset_version": "1.0",
+  "total_cases": 19,
+  "passed": 0,
+  "failed": 19,
+  "task_success_rate": 0,
+  "tool_selection_accuracy": 0.7272727272727273,
+  "results": [
+    {
+      "pass": false,
+      "errors": [
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "qanda-simple-math",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "qanda-capital-france",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "qanda-just-hello",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool code_interpreter, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "code_interpreter-simple-math",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool code_interpreter, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "code_interpreter-sum-1-to-100",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool code_interpreter, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "code_interpreter-fibonacci",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool code_interpreter, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "code_interpreter-prime-check",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool code_interpreter, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "code_interpreter-csv-average",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool file_write, got none",
+        "expected second tool file_read, not found",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "file_write-read-greeting",
+      "expected_tool": "file_write",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool file_write, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "file_write-numbers",
+      "expected_tool": "file_write",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool database_query, got none",
+        "expected second tool database_query, not found",
+        "expected third tool database_query, not found",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "database_query-create-table",
+      "expected_tool": "database_query",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "ambiguous-no-tool-needed",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool code_interpreter, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "tool-selection-math-vs-search",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool code_interpreter, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "tool-selection-data-vs-text",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "edge-empty-prompt",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "tools-what-tools",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "no-tool-required-trivia",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected tool code_interpreter, got none",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "code_interpreter-random-number",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": false
+    },
+    {
+      "pass": false,
+      "errors": [
+        "expected status ERROR, got TIMEOUT",
+        "final answer did not match expected pattern. Got: \"Workflow did not complete in time\""
+      ],
+      "tool_calls_made": [],
+      "output_preview": "Workflow did not complete in time",
+      "result_status": "TIMEOUT",
+      "case_id": "policy-deny-cross-namespace",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    }
+  ]
+}

@@ -355,7 +355,11 @@ export async function reactWorkflow(
         content: llmResponse.content,
       };
       if (llmResponse.toolCalls?.length) {
-        assistantMsg.toolCalls = llmResponse.toolCalls;
+        // Only retain the tool_call that was actually executed (one per iteration).
+        // The LLM may return multiple tool_calls but we only execute the first one.
+        assistantMsg.toolCalls = llmResponse.toolCallId
+          ? llmResponse.toolCalls.filter((tc) => tc.id === llmResponse.toolCallId)
+          : llmResponse.toolCalls;
       }
       messages.push(assistantMsg);
 

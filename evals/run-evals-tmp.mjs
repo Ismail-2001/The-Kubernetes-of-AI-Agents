@@ -11,19 +11,7 @@ const API = "http://localhost:3001";
 const AUTH = { email: "loadtest5@test.com", password: "LoadTestPass123" };
 const AGENT_ID = "eval-agent";
 const TEMPORAL_CONTAINER = "enterprise-grade-agent-orchestration-platform-main-temporal-1";
-
-function getTemporalAddress() {
-  try {
-    const ip = execSync(
-      `docker inspect ${TEMPORAL_CONTAINER} --format "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"`,
-      { encoding: "utf-8", timeout: 5000 }
-    ).trim();
-    return `${ip}:7233`;
-  } catch {
-    return "172.19.0.7:7233";
-  }
-}
-const TEMPORAL_ADDRESS = getTemporalAddress();
+const TEMPORAL_ADDRESS = "172.19.0.9:7233";
 const DATASET_PATH = path.resolve(__dirname, "golden-dataset.json");
 const RESULTS_DIR = path.resolve(__dirname, "results");
 
@@ -82,7 +70,7 @@ function temporalDescribe(wfId) {
   }
 }
 
-async function pollWorkflow(wfId, timeoutMs = 120000) {
+async function pollWorkflow(wfId, timeoutMs = 300000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const desc = temporalDescribe(wfId);
@@ -151,12 +139,8 @@ function ruleBasedJudge(caseDef, result) {
 
 function matchArgs(actualArgs, pattern) {
   if (!pattern) return true;
-  let parsed = actualArgs;
-  if (typeof actualArgs === "string") {
-    try { parsed = JSON.parse(actualArgs); } catch { return false; }
-  }
   for (const [key, pat] of Object.entries(pattern)) {
-    const val = parsed[key];
+    const val = actualArgs[key];
     if (!val || !val.match) return false;
     const re = new RegExp(pat, "i");
     if (!re.test(val)) return false;

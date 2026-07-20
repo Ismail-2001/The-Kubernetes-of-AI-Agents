@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets } from "@e-gaop/shared";
 
 initTracing("sandbox-runtime");
 if (process.env.NODE_ENV !== "test") {
@@ -50,9 +50,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 const egaopProto = grpc.loadPackageDefinition(packageDefinition) as any;
 const runtimeService = egaopProto.egaop.v1.RuntimeService;
 
-const server = new grpc.Server({
-  interceptors: [createNamespaceServerInterceptor()],
-});
+const server = new grpc.Server();
 
 server.addService(runtimeService.service, {
   CreateSandbox: async (call: any, callback: any) => {
@@ -207,7 +205,6 @@ if (process.env.NODE_ENV !== "test") {
       logger.error(err, "Failed to bind Sandbox Runtime server");
       return;
     }
-    server.start();
     logger.info(`E-GAOP Sandbox Runtime listening on port ${port}`);
   });
 

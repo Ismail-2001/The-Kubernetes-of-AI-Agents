@@ -1,0 +1,317 @@
+{
+  "timestamp": "2026-07-20T07:48:55.499Z",
+  "dataset_version": "1.0",
+  "total_cases": 19,
+  "passed": 17,
+  "failed": 2,
+  "task_success_rate": 0.8947368421052632,
+  "tool_selection_accuracy": 1.7272727272727273,
+  "results": [
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [],
+      "output_preview": "2 + 2 equals 4.",
+      "result_status": "SUCCEEDED",
+      "case_id": "qanda-simple-math",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [],
+      "output_preview": "The capital of France is Paris.",
+      "result_status": "SUCCEEDED",
+      "case_id": "qanda-capital-france",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [],
+      "output_preview": "Hello!",
+      "result_status": "SUCCEEDED",
+      "case_id": "qanda-just-hello",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "code_interpreter",
+          "args": {
+            "code": "15 * 37"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "The result of \\( 15 \\times 37 \\) is 555.",
+      "result_status": "SUCCEEDED",
+      "case_id": "code_interpreter-simple-math",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "code_interpreter",
+          "args": {
+            "code": "# Calculate the sum of all integers from 1 to 100\nsum_of_integers = sum(range(1, 101))\nsum_of_integers"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "The sum of all integers from 1 to 100 is 5050.",
+      "result_status": "SUCCEEDED",
+      "case_id": "code_interpreter-sum-1-to-100",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "code_interpreter",
+          "args": {
+            "code": "def fibonacci(n):\n    fib_sequence = [0, 1]\n    for i in range(2, n):\n        next_fib = fib_sequence[-1] + fib_sequence[-2]\n        fib_sequence.append(next_fib)\n    return fib_sequence[:n]\n\nfirst_10_fib = fibonacci(10)\nfirst_10_fib"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "The first 10 Fibonacci numbers are: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34.",
+      "result_status": "SUCCEEDED",
+      "case_id": "code_interpreter-fibonacci",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "code_interpreter",
+          "args": {
+            "code": "def is_prime(n):\n    if n <= 1:\n        return False\n    for i in range(2, int(n**0.5) + 1):\n        if n % i == 0:\n            return False\n    return True\n\n# Test the function with 17 and 24\nresults = {n: is_prime(n) for n in [17, 24]}\nresults"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "17 is prime, while 24 is not prime.",
+      "result_status": "SUCCEEDED",
+      "case_id": "code_interpreter-prime-check",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "code_interpreter",
+          "args": {
+            "code": "import csv\nfrom io import StringIO\n\n# CSV data\ndata = \"name,score\\nAlice,85\\nBob,92\\nCarol,78\"\n\n# Parse CSV and calculate average score\nscores = []\nreader = csv.DictReader(StringIO(data))\nfor row in reader:\n    scores.append(int(row['score']))\n\naverage_score = sum(scores) / len(scores)\naverage_score"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "The average score is 85.0.",
+      "result_status": "SUCCEEDED",
+      "case_id": "code_interpreter-csv-average",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "final answer did not match expected pattern. Got: \"LLM call failed: Activity task failed\""
+      ],
+      "tool_calls_made": [
+        {
+          "name": "file_write",
+          "args": {
+            "content": "Hello E-GAOP",
+            "path": "/tmp/greeting.txt"
+          },
+          "status": "succeeded"
+        },
+        {
+          "name": "file_read",
+          "args": {
+            "path": "/tmp/greeting.txt"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "LLM call failed: Activity task failed",
+      "result_status": "ERROR",
+      "case_id": "file_write-read-greeting",
+      "expected_tool": "file_write",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "file_write",
+          "args": {
+            "content": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10",
+            "path": "/tmp/numbers.txt"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "The numbers 1 through 10 have been successfully written to `/tmp/numbers.txt`, one per line.",
+      "result_status": "SUCCEEDED",
+      "case_id": "file_write-numbers",
+      "expected_tool": "file_write",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": false,
+      "errors": [
+        "tool database_query args did not match pattern",
+        "final answer did not match expected pattern. Got: \"LLM call failed: Activity task failed\""
+      ],
+      "tool_calls_made": [
+        {
+          "name": "database_query",
+          "args": {
+            "query": "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price REAL);"
+          },
+          "status": "succeeded"
+        },
+        {
+          "name": "database_query",
+          "args": {
+            "query": "INSERT INTO products (name, price) VALUES ('Widget', 9.99), ('Gadget', 24.99), ('Doohickey', 5.49);"
+          },
+          "status": "succeeded"
+        },
+        {
+          "name": "database_query",
+          "args": {
+            "query": "SELECT * FROM products;"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "LLM call failed: Activity task failed",
+      "result_status": "ERROR",
+      "case_id": "database_query-create-table",
+      "expected_tool": "database_query",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [],
+      "output_preview": "A ReAct loop is a cognitive framework that combines reasoning and action, allowing an agent to iteratively process information, make decisions, and take actions based on feedback from its environment.",
+      "result_status": "SUCCEEDED",
+      "case_id": "ambiguous-no-tool-needed",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "code_interpreter",
+          "args": {
+            "code": "import math\nresult = math.factorial(7)\nresult"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "7 factorial (7!) is 5040.",
+      "result_status": "SUCCEEDED",
+      "case_id": "tool-selection-math-vs-search",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "code_interpreter",
+          "args": {
+            "code": "max_number = max([45, 12, 89, 33, 71, 26])\nmax_number"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "The maximum number in the list [45, 12, 89, 33, 71, 26] is 89.",
+      "result_status": "SUCCEEDED",
+      "case_id": "tool-selection-data-vs-text",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [],
+      "output_preview": "Hello! How can I assist you today?",
+      "result_status": "SUCCEEDED",
+      "case_id": "edge-empty-prompt",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [],
+      "output_preview": "The available tools are:\n\n1. **functions.code_interpreter**: Execute Python code in a sandboxed runtime.\n2. **functions.file_read**: Read the contents of a file from the sandbox filesystem.\n3. **funct",
+      "result_status": "SUCCEEDED",
+      "case_id": "tools-what-tools",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [],
+      "output_preview": "The play \"Romeo and Juliet\" was written by William Shakespeare.",
+      "result_status": "SUCCEEDED",
+      "case_id": "no-tool-required-trivia",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [
+        {
+          "name": "code_interpreter",
+          "args": {
+            "code": "import random\n\nrandom_integer = random.randint(1, 10)\nprint(random_integer)"
+          },
+          "status": "succeeded"
+        }
+      ],
+      "output_preview": "Here is a Python script that prints a random integer between 1 and 10:\n\n```python\nimport random\n\nrandom_integer = random.randint(1, 10)\nprint(random_integer)\n```",
+      "result_status": "SUCCEEDED",
+      "case_id": "code_interpreter-random-number",
+      "expected_tool": "code_interpreter",
+      "tool_selection_correct": true
+    },
+    {
+      "pass": true,
+      "errors": [],
+      "tool_calls_made": [],
+      "output_preview": "Policy denied: Policy denied",
+      "result_status": "ERROR",
+      "case_id": "policy-deny-cross-namespace",
+      "expected_tool": null,
+      "tool_selection_correct": true
+    }
+  ]
+}

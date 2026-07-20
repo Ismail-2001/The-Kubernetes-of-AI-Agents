@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, validateSecrets } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets } from "@e-gaop/shared";
 
 initTracing("llm-router");
 if (process.env.NODE_ENV !== "test") {
@@ -84,9 +84,9 @@ if (OPENAI_API_KEY) {
 }
 
 const MODEL_TO_OPENAI = {
-  "gpt-4o": "gpt-4o",
-  "gpt-4o-mini": "gpt-4o-mini",
-  "gpt-3.5-turbo": "gpt-3.5-turbo",
+  "gpt-4o": process.env.OPENAI_BASE_URL?.includes("openrouter") ? "openai/gpt-4o" : "gpt-4o",
+  "gpt-4o-mini": process.env.OPENAI_BASE_URL?.includes("openrouter") ? "openai/gpt-4o-mini" : "gpt-4o-mini",
+  "gpt-3.5-turbo": process.env.OPENAI_BASE_URL?.includes("openrouter") ? "openai/gpt-3.5-turbo" : "gpt-3.5-turbo",
 } as Record<string, string>;
 
 function countTokens(text: string): number {
@@ -142,7 +142,12 @@ async function callOpenAIWithFallback(
         function: {
           name: td.name,
           description: td.description,
-          parameters: td.input_schema || { type: "object", properties: {} },
+          parameters: (() => {
+            if (typeof td.input_schema === "string") {
+              try { return JSON.parse(td.input_schema); } catch { return { type: "object", properties: {} }; }
+            }
+            return td.input_schema || { type: "object", properties: {} };
+          })(),
         },
       }));
 
@@ -181,7 +186,8 @@ async function callOpenAIWithFallback(
         model,
         err: err.message,
         status: err.status,
-        body: err.body ? JSON.stringify(err.body).slice(0, 2000) : undefined,
+        errorBody: err.error ? JSON.stringify(err.error).slice(0, 3000) : undefined,
+        stack: err.stack?.slice(0, 300),
       }, "Model call failed, trying fallback");
     }
   }
@@ -189,9 +195,7 @@ async function callOpenAIWithFallback(
   throw new Error("All models in fallback chain exhausted");
 }
 
-const server = new grpc.Server({
-  interceptors: [createNamespaceServerInterceptor()],
-});
+const server = new grpc.Server();
 
 server.addService(llmService.service, {
   Generate: async (call: any, callback: any) => {
@@ -236,7 +240,7 @@ server.addService(llmService.service, {
             type: "function",
             function: {
               name: tc.name,
-              arguments: JSON.stringify(tc.args || {}),
+              arguments: typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args || {}),
             },
           }));
         }
