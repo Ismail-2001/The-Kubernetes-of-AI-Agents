@@ -1,8 +1,8 @@
 {
-  "name": "egaop",
+  "name": "@k8s-ai-agents/monorepo",
   "version": "1.0.0",
   "private": true,
-  "description": "Enterprise-Grade Agent Orchestration Platform — The Kubernetes of AI Agents",
+  "description": "The Kubernetes of AI Agents — Production-grade orchestration for LLM-powered agents at scale",
   "workspaces": [
     "packages/shared",
     "control-plane/api-server",

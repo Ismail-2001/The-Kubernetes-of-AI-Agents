@@ -1,5 +1,5 @@
 #!/bin/sh
-# backup.sh — E-GAOP backup & disaster recovery
+# backup.sh — Backup & disaster recovery (The Kubernetes of AI Agents)
 #
 # Creates a timestamped backup archive of all persistent data.
 # Uses tar over docker exec pipes — avoids docker cp path issues.
@@ -24,7 +24,7 @@ trap 'rm -rf "${TMPDIR}"' EXIT
 
 mkdir -p "${BACKUP_DIR}"
 
-echo "=== E-GAOP Backup: ${DATE_STAMP} ==="
+echo "=== Backup: ${DATE_STAMP} ==="
 echo "Project: ${PROJECT}"
 echo "Output:  ${OUT_FILE}.gz"
 echo ""

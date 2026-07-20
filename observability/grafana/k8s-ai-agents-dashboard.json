@@ -389,7 +389,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["e-gaop", "observability"],
+  "tags": ["k8s-ai-agents", "observability"],
   "templating": {
     "list": [
       {
@@ -413,7 +413,7 @@
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "E-GAOP Platform",
-  "uid": "e-gaop-main",
+  "title": "K8s AI Agents",
+  "uid": "k8s-ai-agents",
   "version": 2
 }

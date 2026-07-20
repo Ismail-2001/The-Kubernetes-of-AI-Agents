@@ -1,5 +1,5 @@
 {
-  "benchmark": "E-GAOP Real Execution Path — Single-Trace",
+  "benchmark": "K8s AI Agents Real Execution Path — Single-Trace",
   "measured": "2026-07-11",
   "environment": "Windows 11, Docker Desktop, AMD64",
   "method": "Real Temporal workflow execution via `temporal workflow execute`, trace extracted from Temporal event history",

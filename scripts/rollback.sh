@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# E-GAOP Rollback Script
+# Rollback script (The Kubernetes of AI Agents)
 # =============================================================================
 # Called by CI when smoke tests fail. Redeploys previous image tags and
 # sends a notification.
@@ -13,7 +13,7 @@ SLACK_WEBHOOK="${1:-}"
 PREVIOUS_TAG="${2:-}"
 
 echo "══════════════════════════════════════════════════════════════"
-echo "  ⚠️  E-GAOP AUTO-ROLLBACK TRIGGERED"
+echo "  ⚠️  AUTO-ROLLBACK TRIGGERED"
 echo "══════════════════════════════════════════════════════════════"
 echo ""
 echo "  Rolling back to: $PREVIOUS_TAG"
@@ -52,13 +52,13 @@ if [ -n "$SLACK_WEBHOOK" ]; then
   echo "Sending Slack notification..."
   PAYLOAD=$(cat <<EOF
 {
-  "text": "🚨 *E-GAOP Auto-Rollback Triggered*",
+  "text": "🚨 *Auto-Rollback Triggered*",
   "blocks": [
     {
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "🚨 *E-GAOP Auto-Rollback*\n\n*Failed commit:* \`${GITHUB_SHA:-unknown:0:7}\`\n*Rolled back to:* \`${PREVIOUS_TAG}\`\n*Workflow:* <${GITHUB_SERVER_URL:-unknown}/${GITHUB_REPOSITORY:-unknown}/actions/runs/${GITHUB_RUN_ID:-unknown}|View Logs>"
+        "text": "🚨 *Auto-Rollback*\n\n*Failed commit:* \`${GITHUB_SHA:-unknown:0:7}\`\n*Rolled back to:* \`${PREVIOUS_TAG}\`\n*Workflow:* <${GITHUB_SERVER_URL:-unknown}/${GITHUB_REPOSITORY:-unknown}/actions/runs/${GITHUB_RUN_ID:-unknown}|View Logs>"
       }
     }
   ]

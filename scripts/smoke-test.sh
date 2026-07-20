@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# E-GAOP Deployment Smoke Tests
+# Smoke tests (The Kubernetes of AI Agents)
 # =============================================================================
 # Runs after deploy-staging. Exits 1 on any failure to trigger rollback.
 # Usage: bash scripts/smoke-test.sh <staging-base-url>
@@ -22,7 +22,7 @@ SERVICES=(
 )
 
 echo "══════════════════════════════════════════════════════════════"
-echo "  E-GAOP Smoke Tests — $BASE_URL"
+echo "  Smoke Tests — $BASE_URL"
 echo "══════════════════════════════════════════════════════════════"
 
 # ─── Health Checks ──────────────────────────────────────────────────────────

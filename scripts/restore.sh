@@ -1,5 +1,5 @@
 #!/bin/sh
-# restore.sh — E-GAOP restore from backup archive
+# restore.sh — Restore from backup archive (The Kubernetes of AI Agents)
 #
 # Restores all persistent data from a backup .tar.gz created by backup.sh.
 # Uses tar pipes over docker exec — avoids docker cp path issues.
@@ -23,7 +23,7 @@ PROJECT="${COMPOSE_PROJECT:-enterprise-grade-agent-orchestration-platform-main}"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "${TMPDIR}"' EXIT
 
-echo "=== E-GAOP Restore ==="
+echo "=== Restore ==="
 echo "Source:  ${BACKUP_FILE}"
 echo "Project: ${PROJECT}"
 echo ""

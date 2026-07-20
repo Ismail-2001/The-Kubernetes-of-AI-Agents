@@ -1,9 +1,9 @@
 apiVersion: 1
 
 providers:
-  - name: "E-GAOP Dashboards"
+  - name: "K8s AI Agents"
     orgId: 1
-    folder: "E-GAOP"
+    folder: "K8s AI Agents"
     type: file
     disableDeletion: false
     editable: true

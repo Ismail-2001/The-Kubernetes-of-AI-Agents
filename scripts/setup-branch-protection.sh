@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# E-GAOP Branch Protection Setup
+# Branch Protection Setup (The Kubernetes of AI Agents)
 # =============================================================================
 # Requires: gh CLI authenticated with admin access to the repo
 # Usage: bash scripts/setup-branch-protection.sh

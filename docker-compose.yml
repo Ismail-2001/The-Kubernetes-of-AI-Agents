@@ -1,5 +1,5 @@
 # =============================================================================
-# E-GAOP Docker Compose — All 8 services + infrastructure
+# The Kubernetes of AI Agents — Docker Compose (all services + infrastructure)
 # =============================================================================
 # Usage:
 #   docker compose up -d                     # Start all services
@@ -12,6 +12,8 @@
 #   - Copy .env.example to .env and fill in secrets (OPENAI_API_KEY, etc.)
 #   - Docker socket available for sandbox-runtime
 # =============================================================================
+
+name: k8s-ai-agents
 
 services:
   # ─── Infrastructure ───────────────────────────────────────────────────────
@@ -248,7 +250,7 @@ services:
       SLACK_ALERT_WEBHOOK: ${SLACK_ALERT_WEBHOOK:-}
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/e-gaop-dashboard.json:/var/lib/grafana/dashboards/e-gaop.json:ro
+      - ./observability/grafana/k8s-ai-agents-dashboard.json:/var/lib/grafana/dashboards/k8s-ai-agents.json:ro
       - ./scripts/grafana-init.sh:/etc/grafana-init.sh:ro
       - grafana-data:/var/lib/grafana
     entrypoint: ["/bin/sh", "-c", "sleep 10 && chmod +x /etc/grafana-init.sh && /etc/grafana-init.sh & /run.sh"]

@@ -1,5 +1,5 @@
 {
-  "benchmark": "E-GAOP Real Execution Path — SUPERSEDED",
+  "benchmark": "K8s AI Agents Real Execution Path — SUPERSEDED",
   "superseded_by": "execution-path-single-trace-2026-07-11.json",
   "reason": "This benchmark measured independent component pings, not a real execution path. Replaced with single-trace Temporal workflow execution.",
   "measured": "2026-07-11",
