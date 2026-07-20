@@ -1,0 +1,48 @@
+# =============================================================================
+# The Kubernetes of AI Agents — Load Test Environment
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+#                       -f docker-compose.loadtest.yml up -d
+#
+# Runs a k6 container against the staging environment.
+# Results are written to tests/load/results/ as JSON.
+# =============================================================================
+
+name: k8s-ai-agents-loadtest
+
+services:
+  k6:
+    image: grafana/k6:latest
+    entrypoint: []
+    command:
+      - run
+      - /tests/k6-script.js
+      - --scenario
+      - ${K6_SCENARIO:-load}
+      - --out
+      - json=/results/k6-output.json
+      - --summary-export
+      - /results/k6-summary.json
+      - -e
+      - BASE_URL=http://api-server:3001
+    volumes:
+      - ./tests/load:/tests:ro
+      - ./tests/load/results:/results
+    depends_on:
+      api-server:
+        condition: service_healthy
+    networks:
+      - egaop-net
+    environment:
+      K6_SCENARIO: ${K6_SCENARIO:-load}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+    restart: "no"

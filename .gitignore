@@ -67,6 +67,10 @@ vendor/
 # Backup artifacts (test archives, not source)
 backups/
 
+# k6 load test results (keep gitkeep for dir structure)
+tests/load/results/*.json
+tests/load/results/*.tar.gz
+
 # Temporary files
 tmp/
 charts/e-gaop/tmpcharts*/

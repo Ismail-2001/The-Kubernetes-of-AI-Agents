@@ -1,0 +1,247 @@
+# =============================================================================
+# The Kubernetes of AI Agents — Staging Environment Override
+# =============================================================================
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+#
+# Differences from production:
+#   - Mock LLM server replaces OpenAI (no API key needed)
+#   - Staging-specific Postgres & Redis instances
+#   - Debug logging enabled
+#   - mTLS disabled, shorter timeouts
+#   - Auto-seeded test data
+# =============================================================================
+
+name: k8s-ai-agents-staging
+
+services:
+  # ─── Staging infrastructure ────────────────────────────────────────────────
+  staging-redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass staging-redis-pw
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "staging-redis-pw", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - staging-redis-data:/data
+    networks:
+      - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+    restart: unless-stopped
+
+  staging-postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: egaop
+      POSTGRES_PASSWORD: staging-pg-pw
+      POSTGRES_DB: egaop
+    command:
+      - "postgres"
+      - "-c"
+      - "log_statement=all"
+    healthcheck:
+      test: ["CMD-SHELL", "psql -U egaop -d egaop -c 'SELECT 1' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    volumes:
+      - staging-postgres-data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+    restart: unless-stopped
+
+  # ─── Mock LLM Server ──────────────────────────────────────────────────────
+  mock-llm:
+    image: node:20-alpine
+    working_dir: /app
+    entrypoint: ["node", "/app/scripts/mock-llm-server.js"]
+    ports:
+      - "8080:8080"
+    environment:
+      MOCK_LLM_PORT: "8080"
+      MOCK_LLM_LATENCY: "50"
+      MOCK_LLM_LATENCY_JITTER: "25"
+      MOCK_LLM_ERROR_RATE: "0.0"
+    volumes:
+      - ./scripts/mock-llm-server.js:/app/scripts/mock-llm-server.js:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.1"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+    restart: unless-stopped
+
+  # ─── Service overrides ─────────────────────────────────────────────────────
+
+  redis:
+    profiles:
+      - disabled
+    deploy:
+      replicas: 0
+
+  postgres:
+    profiles:
+      - disabled
+    deploy:
+      replicas: 0
+
+  api-server:
+    environment:
+      REDIS_URL: redis://:staging-redis-pw@staging-redis:6379
+      POSTGRES_HOST: staging-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: egaop
+      POSTGRES_PASSWORD: staging-pg-pw
+      POSTGRES_DB: egaop
+      # mTLS off for staging
+      TLS_ENABLED: "false"
+      # Debug logging
+      LOG_LEVEL: debug
+      # Shorter timeouts for faster feedback
+      RATE_LIMIT_MAX: "1000"
+      RATE_LIMIT_WINDOW_MS: "60000"
+      # LLM points to mock
+      OPENAI_API_KEY: sk-mock-key
+      OPENAI_BASE_URL: http://mock-llm:8080/v1
+    depends_on:
+      staging-postgres:
+        condition: service_healthy
+      staging-redis:
+        condition: service_healthy
+      mock-llm:
+        condition: service_healthy
+
+  secret-store:
+    environment:
+      TLS_ENABLED: "false"
+      LOG_LEVEL: debug
+      POSTGRES_HOST: staging-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_PASSWORD: staging-pg-pw
+    depends_on:
+      staging-postgres:
+        condition: service_healthy
+
+  workflow-engine:
+    environment:
+      TLS_ENABLED: "false"
+      LOG_LEVEL: debug
+      REDIS_URL: redis://:staging-redis-pw@staging-redis:6379
+      POSTGRES_PASSWORD: staging-pg-pw
+      OPENAI_API_KEY: sk-mock-key
+      LLM_ROUTER_ADDR: mock-llm:8080
+    depends_on:
+      staging-postgres:
+        condition: service_healthy
+      staging-redis:
+        condition: service_healthy
+
+  llm-router:
+    environment:
+      TLS_ENABLED: "false"
+      LOG_LEVEL: debug
+      OPENAI_API_KEY: sk-mock-key
+      OPENAI_BASE_URL: http://mock-llm:8080/v1
+      LLM_FALLBACK_CHAIN: mock-gpt-4o-mini
+      LLM_TIMEOUT_MS: "5000"
+      LLM_MAX_RETRIES: "1"
+      RATE_LIMIT_RPM: "500"
+    depends_on:
+      mock-llm:
+        condition: service_healthy
+
+  tool-proxy:
+    environment:
+      TLS_ENABLED: "false"
+      LOG_LEVEL: debug
+      RATE_LIMIT_RPM: "500"
+
+  sandbox-runtime:
+    environment:
+      TLS_ENABLED: "false"
+      LOG_LEVEL: debug
+
+  memory-plane:
+    environment:
+      TLS_ENABLED: "false"
+      LOG_LEVEL: debug
+      REDIS_HOST: staging-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: staging-redis-pw
+      REDIS_URL: redis://:staging-redis-pw@staging-redis:6379
+      POSTGRES_HOST: staging-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_PASSWORD: staging-pg-pw
+    depends_on:
+      staging-postgres:
+        condition: service_healthy
+      staging-redis:
+        condition: service_healthy
+
+  observability-plane:
+    environment:
+      TLS_ENABLED: "false"
+      LOG_LEVEL: debug
+      POSTGRES_HOST: staging-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_PASSWORD: staging-pg-pw
+    depends_on:
+      staging-postgres:
+        condition: service_healthy
+
+  admin-console:
+    environment:
+      LOG_LEVEL: debug
+      POSTGRES_PASSWORD: staging-pg-pw
+      OPENAI_API_KEY: sk-mock-key
+      NEXT_PUBLIC_API_URL: http://api-server:50051
+      NEXT_PUBLIC_SSE_URL: http://api-server:3001
+    depends_on:
+      api-server:
+        condition: service_healthy
+
+  backup:
+    profiles:
+      - disabled
+    deploy:
+      replicas: 0
+
+volumes:
+  staging-redis-data:
+  staging-postgres-data:
