@@ -3,11 +3,10 @@ import { type Namespace, type NamespaceTierValue, DEFAULT_QUOTAS } from "@e-gaop
 import pino from "pino";
 
 const logger = pino({
-  level: process.env.LOG_LEVEL ?? "info",
-  transport: process.env.NODE_ENV !== "test" ? {
-    target: "pino-pretty",
-    options: { colorize: true },
-  } : undefined,
+  level: process.env.NODE_ENV === "test" ? "silent" : (process.env.LOG_LEVEL || "info"),
+  ...(process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test" ? {
+    transport: { target: "pino-pretty", options: { colorize: true } }
+  } : {}),
 });
 
 const namespaces = new Map<string, Namespace>();

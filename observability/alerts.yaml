@@ -23,6 +23,16 @@ groups:
           summary: "gRPC P95 latency >5s"
           description: "P95 latency for {{ $labels.service_name }} is {{ $value }}ms."
 
+      - alert: HighGrpcLatencyP99
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_client_duration_bucket[5m])) by (le, service_name)) > 10000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "gRPC P99 latency >10s"
+          description: "P99 latency for {{ $labels.service_name }} is {{ $value }}ms."
+
       - alert: AgentExecutionFailureSpike
         expr: |
           sum(rate(e_gaop_otelcol_exporter_send_failed_spans[5m]))
@@ -54,3 +64,53 @@ groups:
         annotations:
           summary: "Tool execution P99 latency >30s"
           description: "P99 latency for {{ $labels.service_name }} is {{ $value }}ms."
+
+      - alert: LLMCostBudgetExceeded
+        expr: |
+          sum(increase(e_gaop_llm_tokens_used_total[1h])) * 0.00003 > 50
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM cost budget exceeded ($50/hr)"
+          description: "Estimated LLM cost is ${{ $value | printf \"%.2f\" }} per hour."
+
+      - alert: LLMTokenRateHigh
+        expr: |
+          sum(rate(e_gaop_llm_tokens_used_total[5m])) > 100000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM token consumption rate >100k/min"
+          description: "Token consumption rate is {{ $value | printf \"%.0f\" }} tokens/second."
+
+      - alert: ActiveAgentsHigh
+        expr: |
+          e_gaop_active_agents > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Active agents count >50"
+          description: "{{ $value }} agents are currently active — may indicate resource contention."
+
+      - alert: SandboxCreationFailure
+        expr: |
+          sum(rate(e_gaop_sandbox_creation_failures_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sandbox creation failures detected"
+          description: "Sandbox creation is failing at {{ $value | printf \"%.2f\" }}/second."
+
+      - alert: ServiceDown
+        expr: |
+          min(up{job="egaop-services"}) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service is DOWN"
+          description: "One or more E-GAOP services are unreachable."

@@ -12,8 +12,10 @@ import path from 'path';
 import pino from 'pino';
 
 const logger = pino({
-  level: process.env.NODE_ENV === 'test' ? 'silent' : (process.env.LOG_LEVEL || 'info'),
-  transport: process.env.NODE_ENV !== 'test' ? { target: 'pino-pretty' } : undefined,
+  level: process.env.NODE_ENV === "test" ? "silent" : (process.env.LOG_LEVEL || "info"),
+  ...(process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test" ? {
+    transport: { target: "pino-pretty", options: { colorize: true } }
+  } : {}),
 });
 
 const HEALTH_PORT = parseInt(process.env.WORKFLOW_ENGINE_HEALTH_PORT || '15058', 10);

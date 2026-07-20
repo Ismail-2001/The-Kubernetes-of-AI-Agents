@@ -1,6 +1,7 @@
 import { Interceptor, InterceptingCall, InterceptorOptions, NextCall, Metadata, Requester, InterceptingListener, StatusObject, status as GrpcStatus } from "@grpc/grpc-js";
 import type { ServerInterceptor, ServerInterceptingCallInterface, ServerMethodDefinition } from "@grpc/grpc-js";
 import { ServerInterceptingCall } from "@grpc/grpc-js";
+import { spanEnrichmentInterceptor } from "./span-enrichment.js";
 
 export interface InterceptorConfig {
   serviceName: string;
@@ -9,6 +10,7 @@ export interface InterceptorConfig {
 
 export function getStandardInterceptors(config: InterceptorConfig): Interceptor[] {
   return [
+    spanEnrichmentInterceptor({ serviceName: config.serviceName }),
     authInterceptor(),
     loggingInterceptor(config.serviceName),
     metricsInterceptor(config.serviceName),

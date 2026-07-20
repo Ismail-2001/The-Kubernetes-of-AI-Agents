@@ -28,15 +28,12 @@ const HEALTH_SERVICE: grpc.ServiceDefinition = {
 
 const rateLimiter = new RateLimiter();
 
-const logger = process.env.NODE_ENV === "test"
-  ? pino({ level: "silent" })
-  : pino({
-      level: process.env.LOG_LEVEL || "info",
-      transport: {
-        target: "pino-pretty",
-        options: { colorize: true }
-      }
-    });
+const logger = pino({
+  level: process.env.NODE_ENV === "test" ? "silent" : (process.env.LOG_LEVEL || "info"),
+  ...(process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test" ? {
+    transport: { target: "pino-pretty", options: { colorize: true } }
+  } : {}),
+});
 
 const PROTO_PATH = path.resolve(__dirname, "../../../api/proto/egaop/v1/tool.proto");
 

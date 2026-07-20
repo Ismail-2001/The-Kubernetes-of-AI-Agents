@@ -99,12 +99,25 @@ services:
       - egaop-net
     restart: unless-stopped
 
+  tempo:
+    image: grafana/tempo:latest
+    ports:
+      - "3200:3200"   # Tempo HTTP API
+    command: ["-config.file=/etc/tempo/config.yml"]
+    volumes:
+      - ./observability/tempo-config.yml:/etc/tempo/config.yml:ro
+      - tempo-data:/tempo
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     ports:
       - "9091:9090"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -127,8 +140,10 @@ services:
       - ./observability/grafana/e-gaop-dashboard.json:/var/lib/grafana/dashboards/e-gaop.json:ro
       - ./scripts/grafana-init.sh:/etc/grafana-init.sh:ro
       - grafana-data:/var/lib/grafana
+    entrypoint: ["/bin/sh", "-c", "sleep 10 && chmod +x /etc/grafana-init.sh && /etc/grafana-init.sh & /run.sh"]
     depends_on:
       - prometheus
+      - tempo
     networks:
       - egaop-net
     restart: unless-stopped
@@ -506,6 +521,7 @@ volumes:
   postgres-data:
   prometheus-data:
   grafana-data:
+  tempo-data:
 
 networks:
   egaop-net:
