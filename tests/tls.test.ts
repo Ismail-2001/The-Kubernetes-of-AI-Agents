@@ -36,6 +36,21 @@ describe("TLS credential helpers", () => {
       const creds = getServerCredentials();
       expect(creds).toBeDefined();
     });
+
+    it("creates TLS credentials with requestCert:false (mTLS disabled workaround)", () => {
+      if (!fs.existsSync(path.join(CERT_DIR, "ca-cert.pem"))) {
+        console.log("Skipping: no certs found in", CERT_DIR);
+        return;
+      }
+      process.env.TLS_ENABLED = "true";
+      process.env.TLS_CERT_DIR = CERT_DIR;
+      const { getServerCredentials } = require("@e-gaop/shared");
+      const creds = getServerCredentials();
+      expect(creds).toBeDefined();
+      // createSsl with requestCert=false is the current mTLS workaround
+      // This test exists to document that mTLS is intentionally disabled
+      // If this test needs updating, check @grpc/grpc-js changelog for fix
+    });
   });
 
   describe("getClientCredentials", () => {

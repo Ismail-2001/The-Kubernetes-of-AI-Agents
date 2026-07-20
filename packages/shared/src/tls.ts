@@ -18,9 +18,18 @@
 import * as grpc from "@grpc/grpc-js";
 import fs from "fs";
 import path from "path";
+import pino from "pino";
+
+const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 
 const CERT_DIR = process.env.TLS_CERT_DIR || "/etc/egaop/certs";
 const TLS_ENABLED = process.env.TLS_ENABLED === "true";
+
+if (TLS_ENABLED) {
+  logger.info({ certDir: CERT_DIR }, "TLS enabled — mTLS (client-cert verification) disabled due to @grpc/grpc-js v1.14.4 bug (requestCert:false)");
+} else {
+  logger.warn("TLS disabled — all gRPC traffic is in plaintext");
+}
 
 function readCertBuffer(filename: string): Buffer {
   return fs.readFileSync(path.join(CERT_DIR, filename));

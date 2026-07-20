@@ -102,7 +102,22 @@ server.addService(HEALTH_SERVICE, {
 
 // ── REST API (BFF for frontend) ──────────────────────────────────────────────
 
-const fastify = Fastify({ logger: false });
+const fastify = Fastify({
+  logger: false,
+  bodyLimit: 1048576, // 1MB max request body
+});
+
+// Security headers on every response
+fastify.addHook("onSend", async (request, reply, payload) => {
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("X-Frame-Options", "DENY");
+  reply.header("X-XSS-Protection", "1; mode=block");
+  reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  reply.header("Content-Security-Policy", "default-src 'self'");
+  reply.header("Referrer-Policy", "no-referrer");
+  reply.header("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  return payload;
+});
 
 const corsOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim())
@@ -112,7 +127,12 @@ fastify.register(cors, { origin: corsOrigins, credentials: true });
 fastify.register(rateLimit, {
   max: Number(process.env.RATE_LIMIT_MAX) || 100,
   timeWindow: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
-  keyGenerator: (request) => request.ip ?? request.socket.remoteAddress ?? "unknown",
+  keyGenerator: (request) => {
+    // Use x-namespace header if present, fall back to IP
+    const ns = request.headers["x-namespace"];
+    if (ns && typeof ns === "string" && ns.length > 0) return `ns:${ns}`;
+    return request.ip ?? request.socket.remoteAddress ?? "unknown";
+  },
   addHeadersOnExceeding: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true },
   addHeaders: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true, "retry-after": true },
 });

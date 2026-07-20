@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, validateSecrets, loadSecretsIntoEnv, PIIViolationError } from "@e-gaop/shared";
 
 initTracing("tool-proxy");
 loadSecretsIntoEnv();
@@ -12,7 +12,7 @@ import fs from "fs";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
-import { RateLimiter, getServerCredentials } from "@e-gaop/shared";
+import { RateLimiter, extractNamespace, getServerCredentials } from "@e-gaop/shared";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -115,9 +115,10 @@ server.addService(toolService.service, {
 
     logger.info({ agent_id, execution_id, tool_name }, "Incoming tool invocation");
 
-    const { allowed, retryAfterMs } = rateLimiter.check(agent_id);
+    const rateKey = `${extractNamespace(agent_id)}:${agent_id}`;
+    const { allowed, retryAfterMs } = rateLimiter.check(rateKey);
     if (!allowed) {
-      logger.warn({ agent_id, tool_name, retryAfterMs }, "Rate limit hit");
+      logger.warn({ agent_id, tool_name, retryAfterMs, rateKey }, "Rate limit hit");
       return callback({
         code: grpc.status.RESOURCE_EXHAUSTED,
         message: `Rate limit exceeded. Retry after ${Math.ceil(retryAfterMs / 1000)}s.`,
@@ -134,7 +135,8 @@ server.addService(toolService.service, {
     }
 
     if (scanForPII(args)) {
-      logger.warn({ agent_id, execution_id }, "PII detected in tool arguments");
+      logger.warn({ agent_id, execution_id, tool_name }, "PII detected in tool arguments — blocking");
+      return callback(new PIIViolationError("PII detected in tool arguments", { toolName: tool_name, detectedPatterns: ["SSN", "email"] }), null);
     }
 
     try {

@@ -15,7 +15,7 @@ import pino from "pino";
 import { get_encoding } from "tiktoken";
 import OpenAI from "openai";
 import CircuitBreaker from "opossum";
-import { RateLimiter, getServerCredentials, createNamespaceServerInterceptor, createServiceTokenServerInterceptor } from "@e-gaop/shared";
+import { RateLimiter, extractNamespace, getServerCredentials, createNamespaceServerInterceptor, createServiceTokenServerInterceptor } from "@e-gaop/shared";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -262,9 +262,10 @@ server.addService(llmService.service, {
       });
     }
 
-    const { allowed, retryAfterMs } = rateLimiter.check(agent_id);
+    const rateKey = `${extractNamespace(agent_id)}:${agent_id}`;
+    const { allowed, retryAfterMs } = rateLimiter.check(rateKey);
     if (!allowed) {
-      logger.warn({ agent_id, execution_id, retryAfterMs }, "LLM rate limit hit");
+      logger.warn({ agent_id, execution_id, retryAfterMs, rateKey }, "LLM rate limit hit");
       return callback({
         code: grpc.status.RESOURCE_EXHAUSTED,
         message: `Rate limit exceeded. Retry after ${Math.ceil(retryAfterMs / 1000)}s.`,
