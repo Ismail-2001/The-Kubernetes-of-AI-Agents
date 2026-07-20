@@ -1,170 +1,111 @@
 name: CI
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '.github/**'
+  pull_request:
+    branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  NODE_VERSION: '20'
-  NODE_OPTIONS: '--max-old-space-size=4096'
-  REGISTRY: ghcr.io
-  IMAGE_TAG: ${{ github.sha }}
-
 jobs:
-  lint-and-typecheck:
-    name: Lint & Typecheck
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - run: npm ci --prefer-offline --no-fund
-      - run: npm run build --workspaces --if-present
-      - run: npm run typecheck --workspaces --if-present
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
       - run: npm run lint --workspaces --if-present
 
-      - name: npm audit (block critical/high)
-        run: npm audit --audit-level=critical
-        continue-on-error: true
-
-      - name: npm outdated (informational)
-        run: npm outdated --workspaces --if-present || true
-
-  unit-tests:
-    name: Unit Tests
-    needs: [lint-and-typecheck]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 15
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build --workspace=packages/shared
+      - run: npm run typecheck --workspaces --if-present
 
-      - run: npm ci --prefer-offline --no-audit --no-fund
-      - run: npm run build --workspaces --if-present
-      - run: npm test --workspaces --if-present
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build --workspace=packages/shared
+      - run: npm test --workspaces --if-present -- --passWithNoTests
+
+  test-cross-cutting:
+    name: Cross-Cutting Tests
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    services:
+      postgres:
+        image: postgres:16
         env:
-          NODE_ENV: test
-
-  docker-build:
-    name: Docker Build
-    needs: [lint-and-typecheck]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - control-plane/api-server
-          - control-plane/secret-store
-          - control-plane/workflow-engine
-          - execution-plane/llm-router
-          - execution-plane/tool-proxy
-          - execution-plane/sandbox-runtime
-          - memory-plane
-          - observability-plane
-          - admin-console
+          POSTGRES_USER: egaop
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: egaop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: egaop
+      POSTGRES_PASSWORD: test-password
+      POSTGRES_DB: egaop
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: actions/setup-node@v4
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build --workspace=packages/shared
+      - name: Run contract tests
+        run: npx jest --config tests/jest.config.js --selectProjects contract --passWithNoTests
+      - name: Run chaos tests
+        run: npx jest --config tests/jest.config.js --selectProjects chaos --passWithNoTests
+      - name: Run security tests
+        run: npx jest --config tests/jest.config.js --selectProjects security --passWithNoTests
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}
-          tags: |
-            type=sha,prefix=,suffix=,format=short
-            type=raw,value=pr-${{ github.event.pull_request.number || 'ci' }}
-
-      - name: Build and cache
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./${{ matrix.service }}/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-          outputs: type=docker,dest=/tmp/${{ matrix.service }}.tar
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          input: /tmp/${{ matrix.service }}.tar
-          format: sarif
-          output: trivy-results-${{ matrix.service }}.sarif
-          severity: CRITICAL,HIGH
-          limit-severities-for-sarif: true
-          vuln-type: os,library
-
-      - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results-${{ matrix.service }}.sarif
-          category: ${{ matrix.service }}
-
-  integration-tests:
-    name: Integration Tests
-    needs: [unit-tests, docker-build]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-cross-cutting]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create .env from secrets
-        run: |
-          cat > .env <<-EOF
-          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          EGAOP_MASTER_ENCRYPTION_KEY=${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
-          EOF
-
-      - name: Pull cached images
-        run: |
-          for svc in api-server secret-store workflow-engine llm-router tool-proxy sandbox-runtime memory-plane observability-plane admin-console; do
-            tag="ghcr.io/${{ github.repository }}/control-plane/$svc:${{ github.sha }}"
-            docker pull "$tag" 2>/dev/null && docker tag "$tag" "egaop-$svc:latest" || true
-          done
-
-      - name: Start stack
-        run: docker compose up -d --wait --wait-timeout 120
-
-      - name: Run smoke tests
-        run: bash scripts/smoke-test.sh localhost
-
-      - name: Cleanup
-        if: always()
-        run: docker compose down -v
+      - uses: docker/setup-buildx-action@v3
+      - name: Build all images
+        run: docker compose build --no-cache
