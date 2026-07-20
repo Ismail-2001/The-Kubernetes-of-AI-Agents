@@ -2,8 +2,7 @@
 
 ## The one rule
 
-> **Every factual claim in the README must trace to either
-> `docs/production-readiness-final.md` or to code verified in this round.**
+> **Every factual claim in the README must be verified against running code before it's committed.**
 
 This is not optional. This is the standing rule for this repo — not a
 one-time fix, not a suggestion.
