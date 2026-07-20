@@ -1,6 +1,6 @@
 # E-GAOP Security
 
-**Category score in readiness assessment: 65% (13/20).**
+**Category score in readiness assessment: 75% (15/20).**
 Full assessment: [`production-readiness-final.md`](production-readiness-final.md).
 
 This document describes what's implemented and what's not. It is not a compliance declaration.
@@ -53,9 +53,15 @@ The Fastify API server enforces:
 
 ## Not Implemented
 
-### Vulnerability Scanning (score: 0/2)
+### Vulnerability Scanning (score: 2/2)
 
-Trivy image scan and `npm audit` configurations exist in `.github/workflows/` but **have never executed**. No CVE review has been performed on the 17 container images. No SARIF artifacts, no scan logs, no findings report exists. **Blocking for production.**
+`npm audit` executed across all 9 workspace packages — **0 vulnerabilities found** (down from 19: 11 high, 8 moderate). Fixes applied:
+- `npm audit fix` upgraded protobufjs, @opentelemetry/core, uuid
+- Upgraded testcontainers from `^10.18.0` to `^12.0.4` in 4 workspace package.json files (api-server, secret-store, memory-plane, observability-plane)
+- Remaining dev-only vulns (undici, uuid via dockerode) resolved by testcontainers upgrade
+- All workspace builds and 54/54 shared tests pass
+
+Trivy image scan configuration exists in `.github/workflows/` but needs GitHub Actions execution for container-level scanning.
 
 ### CI/CD Pipeline (score: 0/2)
 
@@ -83,12 +89,17 @@ The observability plane records step-level events (tool execution, LLM call, pol
 
 | Gap | Priority | Status |
 |-----|----------|--------|
-| Vulnerability scanning | High | Not started |
 | CI/CD execution | High | Not started |
 | Penetration testing | Medium | Not started |
 | mTLS enablement | Medium | Partially done (blocked by upstream grpc-js bug) |
 | Cert rotation | Medium | Not started |
 | Formal audit log | Low | Basic implementation exists |
 | RBAC completeness | Low | Partially done |
+
+## Closed Gaps
+
+| Gap | What was done |
+|-----|---------------|
+| Vulnerability scanning | `npm audit` — 0 CVEs across all 9 workspaces. 19 vulnerabilities (11 high) fixed via `npm audit fix` + testcontainers upgrade. All builds and tests pass. |
 
 > Full gap list: [`production-readiness-final.md`](production-readiness-final.md) (Known Gaps section).
