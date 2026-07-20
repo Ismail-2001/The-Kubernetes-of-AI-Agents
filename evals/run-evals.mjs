@@ -180,28 +180,40 @@ async function scoreCase(caseDef, result) {
       errors.push(`expected no tool call, got ${toolCalls[0].toolName}`);
     }
   } else {
-    const matchedTool = toolCalls.find((tc) => tc.toolName === expected.tool_call.name);
+    // Match expected tools sequentially — consume from remainingToolCalls to
+    // handle multiple calls with the same tool name (e.g. database_query called 5 times)
+    const remainingToolCalls = [...toolCalls];
+
+    const matchedTool = remainingToolCalls.find((tc) => tc.toolName === expected.tool_call.name);
     if (!matchedTool) {
       errors.push(`expected tool ${expected.tool_call.name}, got ${toolCalls.map((t) => t.toolName).join(",") || "none"}`);
-    } else if (expected.tool_call.args_pattern && !matchArgs(matchedTool.args, expected.tool_call.args_pattern)) {
-      errors.push(`tool ${expected.tool_call.name} args did not match pattern`);
+    } else {
+      remainingToolCalls.splice(remainingToolCalls.indexOf(matchedTool), 1);
+      if (expected.tool_call.args_pattern && !matchArgs(matchedTool.args, expected.tool_call.args_pattern)) {
+        errors.push(`tool ${expected.tool_call.name} args did not match pattern`);
+      }
     }
 
     // Check tool_call_2 if specified
     if (expected.tool_call_2) {
-      const tool2 = toolCalls.find((tc) => tc.toolName === expected.tool_call_2.name);
+      const tool2 = remainingToolCalls.find((tc) => tc.toolName === expected.tool_call_2.name);
       if (!tool2) {
         errors.push(`expected second tool ${expected.tool_call_2.name}, not found`);
-      } else if (expected.tool_call_2.args_pattern && !matchArgs(tool2.args, expected.tool_call_2.args_pattern)) {
-        errors.push(`tool ${expected.tool_call_2.name} args did not match pattern`);
+      } else {
+        remainingToolCalls.splice(remainingToolCalls.indexOf(tool2), 1);
+        if (expected.tool_call_2.args_pattern && !matchArgs(tool2.args, expected.tool_call_2.args_pattern)) {
+          errors.push(`tool ${expected.tool_call_2.name} args did not match pattern`);
+        }
       }
     }
 
     // Check tool_call_3 if specified
     if (expected.tool_call_3) {
-      const tool3 = toolCalls.find((tc) => tc.toolName === expected.tool_call_3.name);
+      const tool3 = remainingToolCalls.find((tc) => tc.toolName === expected.tool_call_3.name);
       if (!tool3) {
         errors.push(`expected third tool ${expected.tool_call_3.name}, not found`);
+      } else {
+        remainingToolCalls.splice(remainingToolCalls.indexOf(tool3), 1);
       }
     }
   }
@@ -248,7 +260,7 @@ function saveResults(results, datasetVersion) {
   };
   report.task_success_rate = report.total_cases > 0 ? (report.passed / report.total_cases) : 0;
   const toolCases = results.filter((r) => r.expected_tool !== null);
-  const correctTool = results.filter((r) => r.tool_selection_correct).length;
+  const correctTool = toolCases.filter((r) => r.tool_selection_correct).length;
   report.tool_selection_accuracy = toolCases.length > 0 ? (correctTool / toolCases.length) : 1;
 
   fs.writeFileSync(path.join(RESULTS_DIR, filename), JSON.stringify(report, null, 2));

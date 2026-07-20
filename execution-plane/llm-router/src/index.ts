@@ -13,7 +13,7 @@ import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import { get_encoding } from "tiktoken";
 import OpenAI from "openai";
-import { RateLimiter, getServerCredentials } from "@e-gaop/shared";
+import { RateLimiter, getServerCredentials, createNamespaceServerInterceptor } from "@e-gaop/shared";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -195,7 +195,9 @@ async function callOpenAIWithFallback(
   throw new Error("All models in fallback chain exhausted");
 }
 
-const server = new grpc.Server();
+const server = new grpc.Server({
+  interceptors: [createNamespaceServerInterceptor()],
+});
 
 server.addService(llmService.service, {
   Generate: async (call: any, callback: any) => {

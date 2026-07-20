@@ -12,7 +12,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import Docker from "dockerode";
-import { getServerCredentials } from "@e-gaop/shared";
+import { getServerCredentials, createNamespaceServerInterceptor } from "@e-gaop/shared";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -50,7 +50,9 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 const egaopProto = grpc.loadPackageDefinition(packageDefinition) as any;
 const runtimeService = egaopProto.egaop.v1.RuntimeService;
 
-const server = new grpc.Server();
+const server = new grpc.Server({
+  interceptors: [createNamespaceServerInterceptor()],
+});
 
 server.addService(runtimeService.service, {
   CreateSandbox: async (call: any, callback: any) => {
