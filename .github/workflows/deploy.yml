@@ -30,10 +30,7 @@ jobs:
         id: check
         env:
           CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          CI_WORKFLOW: ${{ github.event.workflow_run.name }}
-          CI_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
-          echo "CI workflow '$CI_WORKFLOW' (run #$CI_RUN_ID) concluded: $CI_CONCLUSION"
           if [ "$CI_CONCLUSION" = "success" ]; then
             echo "ci_passed=true" >> "$GITHUB_OUTPUT"
           else
@@ -68,28 +65,45 @@ jobs:
             --docker "host=ssh://${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}"
           docker context use staging
 
-      - name: Write .env
+      - name: Write .env (non-secrets only)
         run: |
           cat > .env <<-EOF
           IMAGE_TAG=${{ env.IMAGE_TAG }}
           REGISTRY=${{ env.REGISTRY }}
           LOG_LEVEL=debug
           NODE_ENV=staging
+          POSTGRES_USER=egaop
+          POSTGRES_DB=egaop
           EOF
 
-      - name: Run database migrations
+      - name: Login to registry
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-          docker compose run --rm migrate up
+
+      - name: Run database migrations
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          EGAOP_MASTER_ENCRYPTION_KEY: ${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        run: docker compose run --rm migrate up
 
       - name: Pull images
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-          docker compose pull --quiet
+        run: docker compose pull --quiet
 
       - name: Deploy
-        run: |
-          docker compose up -d --wait --wait-timeout 120 --remove-orphans
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          EGAOP_MASTER_ENCRYPTION_KEY: ${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        run: docker compose up -d --wait --wait-timeout 120 --remove-orphans
 
       - name: Health check poll
         run: |
@@ -138,6 +152,15 @@ jobs:
 
       - name: Rollback on failure
         if: steps.smoke.outputs.passed == 'false' && vars.LAST_SUCCESSFUL_DEPLOY_TAG != ''
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          EGAOP_MASTER_ENCRYPTION_KEY: ${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
           echo "Smoke tests failed. Rolling back to ${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}..."
           export IMAGE_TAG="${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}"
@@ -146,10 +169,12 @@ jobs:
           REGISTRY=${{ env.REGISTRY }}
           LOG_LEVEL=debug
           NODE_ENV=staging
+          POSTGRES_USER=egaop
+          POSTGRES_DB=egaop
           EOF
           docker compose pull --quiet
           docker compose up -d --wait --wait-timeout 120 --remove-orphans
-          bash scripts/rollback.sh "${{ secrets.SLACK_WEBHOOK }}" "${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}"
+          bash scripts/rollback.sh "$SLACK_WEBHOOK" "${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}"
 
   #############################################################################
   # PROMOTE TO PRODUCTION (manual approval)
@@ -181,30 +206,41 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
-      - name: Write .env
+      - name: Write .env (non-secrets only)
         run: |
           cat > .env <<-EOF
           IMAGE_TAG=${{ env.IMAGE_TAG }}
           REGISTRY=${{ env.REGISTRY }}
           LOG_LEVEL=info
           NODE_ENV=production
-          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          EGAOP_MASTER_ENCRYPTION_KEY=${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
-          SLACK_ALERT_WEBHOOK=${{ secrets.SLACK_ALERT_WEBHOOK }}
+          POSTGRES_USER=egaop
+          POSTGRES_DB=egaop
           EOF
 
       - name: Run database migrations
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          EGAOP_MASTER_ENCRYPTION_KEY: ${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
         run: docker compose run --rm migrate up
 
       - name: Pull images
         run: docker compose pull --quiet
 
       - name: Deploy
-        run: |
-          docker compose up -d --wait --wait-timeout 180 --remove-orphans
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          EGAOP_MASTER_ENCRYPTION_KEY: ${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        run: docker compose up -d --wait --wait-timeout 180 --remove-orphans
 
       - name: Health check poll
         run: |
@@ -233,6 +269,6 @@ jobs:
         run: |
           if [ -n "$SLACK_WEBHOOK" ]; then
             curl -s -X POST -H "Content-Type: application/json" \
-              -d '{"text":"✅ Production deploy complete: `${{ env.IMAGE_TAG }}`"}' \
+              -d '{"text":"Production deploy complete: `'${{ env.IMAGE_TAG }}'`"}' \
               "$SLACK_WEBHOOK" > /dev/null 2>&1 || true
           fi

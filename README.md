@@ -222,6 +222,26 @@ migrations/
 
 Migrations run automatically when Docker Compose starts (via the `migrate` service, before api-server/secret-store/memory-plane). In CI/CD, migrations run as a pre-deploy step. In Kubernetes, the `kind-deploy.ps1` runs migrations as a Kubernetes job.
 
+### Secrets Management
+
+Secrets are **never written to disk**. In CI/CD, secrets are injected as environment variables directly into each `docker compose` step:
+
+```yaml
+# deploy.yml — secrets come from GitHub Secrets, never touch disk
+- name: Deploy
+  env:
+    POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+    JWT_SECRET: ${{ secrets.JWT_SECRET }}
+    EGAOP_MASTER_ENCRYPTION_KEY: ${{ secrets.EGAOP_MASTER_ENCRYPTION_KEY }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+    INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+    REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+  run: docker compose up -d
+```
+
+For local development, copy `.env.example` → `.env` (gitignored, never committed). Docker Compose resolves `${VAR}` from both `.env` file and shell environment variables.
+
 Backups run automatically every 6 hours via the `backup` Docker service (30-day retention).
 
 Full playbooks for each alert rule: [`docs/runbooks/`](docs/runbooks/).
@@ -238,7 +258,6 @@ These are known gaps, verified against the running codebase. Not hidden, not asp
 4. **Redis Sentinel not deployed** — Single Redis instance only. Code has conditional sentinel support but no sentinel containers are configured in `docker-compose.yml`.
 5. **Eval infra contamination** — ~2 of 19 eval cases fail due to OpenRouter/llm-router saturation, not agent defects. True agent quality may be ~94% excluding infra interference.
 6. **No penetration testing** — No injection testing, fuzzing, or red-team exercise performed.
-7. **Secrets written to disk** — Deploy pipeline writes secrets to `.env` file on the host. Should use Docker secrets or direct env injection.
 
 ---
 
