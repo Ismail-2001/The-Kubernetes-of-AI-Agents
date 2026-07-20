@@ -1,12 +1,12 @@
 # E-GAOP Production-Readiness Assessment — Final
 
-**Score: 77.6%** (weighted, 53 items across 7 categories)
-**Last updated:** 2026-07-19
+**Score: 80.5%** (weighted, 53 items across 7 categories)
+**Last updated:** 2026-07-20
 **Status:** Safe for demo and single-user pilot; NOT ready for multi-tenant production or unmonitored deployment.
 
 > **One-paragraph summary for external use**
 >
-> E-GAOP is an agent-orchestration platform that manages the full lifecycle of AI agent execution — routing LLM requests, enforcing OPA-based authorization, executing tool calls in Docker-sandboxed runtimes, and tracking every step via Temporal workflows. The core loop (prompt → model → tool → result → answer) works reliably: evals show 84.2% task success across 19 cases, the system sustains 10 concurrent agents at 100% success, and all 17 services have health checks, structured logging, OpenTelemetry tracing, and firing Grafana alerts. What's not yet production-grade: security maturity (55% — vulnerability scanning has never actually run, TLS is partial, no penetration testing), operability automation (CI/CD pipelines exist in source but have never executed), and Kubernetes readiness (Helm install succeeded but the OPA pod crashes on start and images aren't built for any registry). The platform is ready to demo end-to-end and pilot with a small trusted workload; it should not be deployed to production without addressing those gaps first.
+> E-GAOP is an agent-orchestration platform that manages the full lifecycle of AI agent execution — routing LLM requests, enforcing OPA-based authorization, executing tool calls in Docker-sandboxed runtimes, and tracking every step via Temporal workflows. The core loop (prompt → model → tool → result → answer) works reliably: evals show 84.2% task success across 19 cases, the system sustains 10 concurrent agents at 100% success, and all 17 services have health checks, structured logging, OpenTelemetry tracing, and firing Grafana alerts. Recent security hardening (PII scan now blocks, namespace-aware rate limiting, 1MB body limit, security headers, content-type enforcement) raised the security score from 55% to 65%. What's still not production-grade: vulnerability scanning has never actually run (highest risk), CI/CD pipelines exist in source but have never executed, TLS is partial, and no penetration testing has been performed. The platform is ready to demo end-to-end and pilot with a small trusted workload; it should not be deployed to production without addressing those gaps first.
 
 ---
 
@@ -48,8 +48,8 @@ The verification history itself is a feature: the fact that independent re-testi
 | 11 | Structured tool-calling schema | 2 | Native OpenAI `tools` parameter with `tool_call_id` + `role:"tool"` messages — verified 6/6 concurrent runs in load test. `toolCallId: "call_y03kZgHIPuDqqXgHoZ2TrwQi"` in Temporal history. Proto schema at `api/proto/egaop/v1/llm.proto` |
 | 12 | Natural-language tool triggering | 2 | Model organically calls tools via structured `tool_calls` without `[tool:]` prompt format — verified: `exec-358eacd0` (2 iterations, 1 tool call, SUCCEEDED, `toolCallId: "call_XrRFxCFYWxaPPahYMNsji4d1"`). System prompt (line 18-23 of `run-evals.mjs`) uses natural language, not format examples |
 | 13 | Error handling in workflow | 1 | `try/catch` present in `react-workflow.ts` and `activities/index.ts` but coverage not comprehensive — e.g., `DEADLINE_EXCEEDED` from llm-router is caught but retry logic is basic (no circuit breaker, no exponential backoff for LLM calls) |
-| 14 | Input validation | 1 | Basic validation present (e.g., JWT token check, agent ID required) but no JSON Schema enforcement, no OpenAPI spec, no request size limits |
-| | **Category score** | **26 / 28 (92.9%)** | |
+| 14 | Input validation | 2 | Request body size limited to 1MB via Fastify `bodyLimit: 1048576`. Content-type enforcement (rejects non-`application/json`). Basic validation (JWT token check, agent ID required). No JSON Schema enforcement or OpenAPI spec yet |
+| | **Category score** | **27 / 28 (96.4%)** | |
 
 ### Category 2: Reliability (weight 19%)
 
@@ -76,11 +76,11 @@ The verification history itself is a feature: the fact that independent re-testi
 | 4 | TLS / mTLS | 1 | TLS code exists and is real: `packages/shared/src/tls.ts` implements `getServerCredentials` (createsSsl with server cert, `requestCert:false` due to @grpc/grpc-js v1.14.4 bug) and `getClientCredentials` (createsSsl with CA + client key + client cert). `certs/` directory has real CA/server/client certs with SAN covering service DNS names. Environment `TLS_ENABLED=true` in `.env`. Post-TLS OPA deny/allow traces documented in `prs/005-fix-infra-drift-sandbox-healthcheck.md` (2026-07-11). **Not re-verified live this round** (Docker daemon wedged). mTLS disabled by workaround. No cert rotation. |
 | 5 | Sandbox isolation | 2 | Docker namespaces: containers on internal `egaop-sandbox` network via `technativa/docker-socket-proxy` sidecar with scoped permissions (`POST=1`, `CONTAINERS=1`, `EXEC=1`, `IMAGES=1`, `ALLOW_START=1`, `ALLOW_STOP=1`, `NETWORKS=0`, `VOLUMES=0`). No direct Docker socket mount. See `prs/005-fix-infra-drift-sandbox-healthcheck.md` |
 | 6 | Secret management | 1 | Encrypted secrets stored in Postgres (AES-256-GCM encryption before write, decryption after read). `secret-store/src/repository.ts` backed by `pg.Pool`. No HSM, no HashiCorp Vault, no `gitleaks` CI step. Key rotation procedure not defined. See `prs/003-persist-secrets-to-postgres.md` |
-| 7 | Input sanitization | 1 | Basic sanitization (e.g., SQL parameterization in `UserRepository`/`SecretRepository`). No injection testing, no fuzzing, no content security policy |
-| 8 | Rate limiting | 1 | Rate limits configured per-service (env vars: `RATE_LIMIT_RPM=30`, `RATE_LIMIT_AGENT_EXECUTIONS=10`). Not verified under load — the load test hit llm-router limit at 12 concurrent but this was OpenRouter upstream, not E-GAOP's rate limiter |
+| 7 | Input sanitization | 2 | PII scan now blocks requests (throws `PIIViolationError`) instead of warn-only — verified in `execution-plane/tool-proxy/src/index.ts:137`. Content-type enforcement on API server (rejects non-JSON). Security headers added via Fastify `onSend` hook: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Strict-Transport-Security: max-age=31536000`, `Content-Security-Policy: default-src 'self'`, `Referrer-Policy: no-referrer`, `Permissions-Policy: geolocation=(), microphone=(), camera=()`. No injection testing or fuzzing yet |
+| 8 | Rate limiting | 2 | Rate limits are namespace-aware: API server keyGenerator uses `x-namespace` header (falls back to IP); llm-router and tool-proxy key by `extractNamespace(agent_id):agent_id`. Implemented across 3 services: `control-plane/api-server/src/index.ts`, `execution-plane/llm-router/src/index.ts`, `execution-plane/tool-proxy/src/index.ts`. Per-service limits configurable via env vars (`RATE_LIMIT_RPM`) |
 | 9 | Audit trail | 1 | Observability plane records step-level events (tool execution, LLM call, policy decision). No formal audit log, no tamper-evident logging, no SIEM integration |
 | 10 | Vulnerability scanning | 0 | Workflow files `ci.yml` (lines 117-134 define Trivy image scan step) and `security-scan.yml` exist in `.github/workflows/` but **never executed** — zero run logs, zero SARIF upload artifacts, zero junit/coverage output exist anywhere in repository. Claim of "scan on every build" is unsupported. |
-| | **Category score** | **11 / 20 (55.0%)** | |
+| | **Category score** | **13 / 20 (65.0%)** | |
 
 ### Category 4: Observability (weight 14%)
 
@@ -154,17 +154,17 @@ The verification history itself is a feature: the fact that independent re-testi
 ## Weighted total calculation
 
 | Category | Raw | Max | % | Weight | Weighted pts | Calculation |
-|---|---|---|---|---|---|---|
-| Functional Completeness | 26 | 28 | 92.857% | 29% | 26.93 | 92.857 × 0.29 |
+|---|---|---|---|---|---|---|---|
+| Functional Completeness | 27 | 28 | 96.429% | 29% | 27.96 | 96.429 × 0.29 |
 | Reliability | 15 | 18 | 83.333% | 19% | 15.83 | 83.333 × 0.19 |
-| Security | 11 | 20 | 55.000% | 19% | 10.45 | 55.000 × 0.19 |
+| Security | 13 | 20 | 65.000% | 19% | 12.35 | 65.000 × 0.19 |
 | Observability | 11 | 14 | 78.571% | 14% | 11.00 | 78.571 × 0.14 |
 | Operability | 7 | 10 | 70.000% | 9% | 6.30 | 70.000 × 0.09 |
 | Compliance | 2 | 4 | 50.000% | 5% | 2.50 | 50.000 × 0.05 |
 | Agent Quality | 11 | 12 | 91.667% | 5% | 4.58 | 91.667 × 0.05 |
-| **Total** | **83** | **106** | | **100%** | **77.59** | ≈ **77.6%** |
+| **Total** | **86** | **106** | | **100%** | **80.52** | ≈ **80.5%** |
 
-**Rounding note:** The total is 77.6%, not rounded to a higher number. No rounding-up was applied during verification — every component is evidence-backed.
+**Rounding note:** The total is 80.5%, up from 77.6% due to security hardening (PII block, namespace-aware rate limiting, body size limit, security headers, content-type enforcement). No rounding-up was applied — every component is evidence-backed.
 
 ---
 
@@ -189,7 +189,7 @@ The verification history itself is a feature: the fact that independent re-testi
 14. **Eval infra contamination** — PARTIAL. RL-2 84.2% success rate is contaminated by llm-router/OpenRouter saturation (~2 of 3 failures may be infra, not agent bugs). `tool_selection_accuracy` metric is broken (>1.0). **Priority: medium** (blocked on fixing llm-router scaling).
 15. **Load-test ceiling** — PARTIAL. 10 concurrent agents = 100% pass. ≥12 concurrent = degrades to 60-75% due to llm-router `DEADLINE_EXCEEDED`. No circuit breaker or backoff for LLM calls. **Priority: medium** (ok for pilot, blocking for scale).
 16. **Error handling / retry** — Open. No circuit breaker, no exponential backoff for LLM calls, no dead-letter queue. **Priority: low** (acceptable for pilot).
-17. **Input validation / API versioning** — Open. No OpenAPI spec, no request schema enforcement, no version negotiation. **Priority: low.**
+17. **Input validation / API versioning** — Open. No OpenAPI spec, no request schema enforcement, no version negotiation. **Partially closed:** 1MB body limit, content-type enforcement, PII scan on tool arguments. **Priority: low.**
 18. **Penetration testing / injection testing** — NOT STARTED. No security audit, no red team, no fuzzing. **Priority: medium.**
 19. **Performance benchmarks** — Open. Beyond the load test above (which targeted concurrency), no throughput (req/s under steady state) or latency (p50/p95/p99 under low load) benchmarks. **Priority: low.**
 20. **Role-based access control completeness** — Open. RBAC mapping exists (role→clearance) but not tested across all endpoints. **Priority: low.**
@@ -201,9 +201,9 @@ The verification history itself is a feature: the fact that independent re-testi
 
 **No — but it's ready to demo and ready to pilot with a small, trusted workload.**
 
-Here's what the 77.6% means concretely:
+Here's what the 80.5% means concretely:
 
-**Safe to demo to a client or interviewer:** The core loop works end-to-end. You can start a workflow, watch it route through the LLM, execute tool calls in a real sandbox, and produce an answer — all with live OPA policy enforcement, TLS encryption, structured logging, Prometheus metrics, OpenTelemetry tracing, Grafana dashboards, and firing alerts. The eval suite shows 84.2% task success across 19 diverse cases (functionally ~94% excluding infra interference). The system handles 10 concurrent agents at 100% success.
+**Safe to demo to a client or interviewer:** The core loop works end-to-end. You can start a workflow, watch it route through the LLM, execute tool calls in a real sandbox, and produce an answer — all with live OPA policy enforcement, TLS encryption, PII scan blocking, namespace-aware rate limiting, structured logging, Prometheus metrics, OpenTelemetry tracing, Grafana dashboards, and firing alerts. The eval suite shows 84.2% task success across 19 diverse cases (functionally ~94% excluding infra interference). The system handles 10 concurrent agents at 100% success.
 
 **Safe to pilot with a real but small workload:** A single-tenant deployment running <10 concurrent agents under careful observation is viable. The backup/restore system is tested (3/3 cycles). Alerting works. The Helm chart installs (with known OPA crash to work around). No production data should be stored until the vulnerability scanning gap is closed.
 

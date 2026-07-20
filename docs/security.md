@@ -1,6 +1,6 @@
 # E-GAOP Security
 
-**Category score in readiness assessment: 55% (11/20).**
+**Category score in readiness assessment: 65% (13/20).**
 Full assessment: [`production-readiness-final.md`](production-readiness-final.md).
 
 This document describes what's implemented and what's not. It is not a compliance declaration.
@@ -34,6 +34,21 @@ Secrets are encrypted with AES-256-GCM before being written to PostgreSQL. Decry
 
 Role-to-clearance mapping is implemented: `platform_admin: 3, namespace_admin: 3, developer: 2, viewer: 1`. Not comprehensively tested across all API endpoints.
 
+### PII Scan — Blocks Requests (score: 2/2, part of Input Sanitization)
+
+The tool-proxy intercepts tool arguments before execution and scans for PII patterns (credit card numbers, SSNs, emails, API keys). If PII is detected, the request is **blocked** with a `PIIViolationError` (callback error), not just logged. Source: `execution-plane/tool-proxy/src/index.ts:137`.
+
+### Rate Limiting — Namespace-Aware (score: 2/2)
+
+Rate limits are scoped per-namespace, not per-IP. The API server extracts namespace from the `x-namespace` header (falls back to client IP). The llm-router and tool-proxy derive namespace from `agent_id` using `extractNamespace()`. Three services implement namespace-aware keying: `control-plane/api-server/src/index.ts`, `execution-plane/llm-router/src/index.ts`, `execution-plane/tool-proxy/src/index.ts`.
+
+### Security Headers & Body Size Limits (score: 2/2, part of Input Validation)
+
+The Fastify API server enforces:
+- `bodyLimit: 1048576` (1MB max request body)
+- Content-type enforcement (rejects non-`application/json`)
+- Security headers via `onSend` hook: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Strict-Transport-Security: max-age=31536000`, `Content-Security-Policy: default-src 'self'`, `Referrer-Policy: no-referrer`, `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+
 ---
 
 ## Not Implemented
@@ -54,17 +69,13 @@ TLS encryption is active (`TLS_ENABLED=true` in `.env`). The code at `packages/s
 - **No cert rotation**: Certs in `certs/` are static
 - **Not re-verified live** in the most recent validation round (Docker daemon was wedged)
 
-### Penetration Testing (score: 0/2)
+### Penetration Testing (score: 0/2, partially addressed by PII scan)
 
-No injection testing, fuzzing, or red-team exercise has been performed. No security audit by an external firm.
+No injection testing, fuzzing, or red-team exercise has been performed. No security audit by an external firm. The PII scan and content-type enforcement partially mitigate injection risk but do not replace formal security testing.
 
 ### Audit Trail (score: 1/2)
 
 The observability plane records step-level events (tool execution, LLM call, policy decision). However, there is no formal audit log format, no tamper-evident logging, and no SIEM integration.
-
-### Rate Limiting (score: 1/2)
-
-Rate limits are configured per-service via environment variables (`RATE_LIMIT_RPM=30`, `RATE_LIMIT_AGENT_EXECUTIONS=10`). Not verified under load — the load test that hit llm-router limits was constrained by OpenRouter upstream, not E-GAOP's rate limiter.
 
 ---
 
@@ -75,7 +86,7 @@ Rate limits are configured per-service via environment variables (`RATE_LIMIT_RP
 | Vulnerability scanning | High | Not started |
 | CI/CD execution | High | Not started |
 | Penetration testing | Medium | Not started |
-| mTLS enablement | Medium | Partially done |
+| mTLS enablement | Medium | Partially done (blocked by upstream grpc-js bug) |
 | Cert rotation | Medium | Not started |
 | Formal audit log | Low | Basic implementation exists |
 | RBAC completeness | Low | Partially done |

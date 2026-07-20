@@ -166,6 +166,17 @@ fastify.register(swaggerUi, {
   routePrefix: "/api/docs",
 });
 
+// Content-type enforcement for mutation requests
+fastify.addHook("preHandler", async (request, reply) => {
+  if (["POST", "PUT", "PATCH"].includes(request.method)) {
+    const ct = request.headers["content-type"];
+    if (!ct || !ct.includes("application/json")) {
+      reply.code(415);
+      throw new Error("Unsupported Media Type — Content-Type must be application/json");
+    }
+  }
+});
+
 // ── Auth routes (public) ──
 fastify.register(authRoutes);
 
