@@ -57,6 +57,9 @@ const PRICING: Record<string, { input: number; output: number }> = {
   "gpt-4o-mini": { input: 0.00015, output: 0.0006 },
   "claude-3-5-sonnet": { input: 0.003, output: 0.015 },
   "gpt-3.5-turbo": { input: 0.0005, output: 0.0015 },
+  "llama3-8b-8192": { input: 0, output: 0 },
+  "llama3-70b-8192": { input: 0.00059, output: 0.00079 },
+  "mixtral-8x7b-32768": { input: 0.00024, output: 0.00024 },
 };
 
 const FALLBACK_CHAIN = process.env.LLM_FALLBACK_CHAIN
@@ -149,6 +152,9 @@ const MODEL_TO_OPENAI = {
   "gpt-4o": process.env.OPENAI_BASE_URL?.includes("openrouter") ? "openai/gpt-4o" : "gpt-4o",
   "gpt-4o-mini": process.env.OPENAI_BASE_URL?.includes("openrouter") ? "openai/gpt-4o-mini" : "gpt-4o-mini",
   "gpt-3.5-turbo": process.env.OPENAI_BASE_URL?.includes("openrouter") ? "openai/gpt-3.5-turbo" : "gpt-3.5-turbo",
+  "llama3-8b-8192": "llama3-8b-8192",
+  "llama3-70b-8192": "llama3-70b-8192",
+  "mixtral-8x7b-32768": "mixtral-8x7b-32768",
 } as Record<string, string>;
 
 function countTokens(text: string): number {

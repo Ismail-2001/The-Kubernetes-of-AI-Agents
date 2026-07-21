@@ -56,8 +56,8 @@ describe("LLM Router", () => {
 
     it("should have input and output pricing", () => {
       for (const [, pricing] of Object.entries(PRICING)) {
-        expect(pricing.input).toBeGreaterThan(0);
-        expect(pricing.output).toBeGreaterThan(0);
+        expect(pricing.input).toBeGreaterThanOrEqual(0);
+        expect(pricing.output).toBeGreaterThanOrEqual(0);
       }
     });
   });
