@@ -27,7 +27,7 @@
     "@opentelemetry/sdk-trace-base": "^2.0.0",
     "@opentelemetry/sdk-trace-node": "^2.0.0",
     "pino": "^10.3.1",
-    "redis": "^4.7.0",
+    "redis": "^6.1.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
