@@ -160,11 +160,11 @@ jobs:
       - run: npm ci --prefer-offline --no-fund
       - run: npm run build --workspace=packages/shared
       - name: Run contract tests
-        run: npx jest --config tests/jest.config.js --selectProjects contract --passWithNoTests
+        run: npx jest --config tests/jest.config.js --selectProjects contract --passWithNoTests --forceExit
       - name: Run chaos tests
-        run: npx jest --config tests/jest.config.js --selectProjects chaos --passWithNoTests
+        run: npx jest --config tests/jest.config.js --selectProjects chaos --passWithNoTests --forceExit
       - name: Run security tests
-        run: npx jest --config tests/jest.config.js --selectProjects security --passWithNoTests
+        run: npx jest --config tests/jest.config.js --selectProjects security --passWithNoTests --forceExit
 
   #############################################################################
   # BUILD — Docker images (parallel matrix)
