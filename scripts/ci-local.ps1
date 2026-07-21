@@ -2,6 +2,7 @@ param(
     [switch]$SkipDocker,
     [switch]$SkipCrossCutting,
     [switch]$SkipHelm,
+    [switch]$RunIntegration,
     [switch]$SetupPreCommit
 )
 
@@ -113,33 +114,40 @@ Step -name "Unit tests (all workspaces)" -block {
     npm test --workspaces --if-present -- --passWithNoTests
 }
 
-# ─── Cross-cutting tests ────────────────────────────────────────────────
-if (-not $SkipCrossCutting) {
-    Step -name "Cross-cutting tests (contract, security)" -block {
+# --- Cross-cutting tests (integration - require running infrastructure) ---
+# Skipped by default. Run with -RunIntegration to include these tests.
+if ($RunIntegration) {
+    Step -name "Cross-cutting tests (contract, security, chaos)" -block {
         $config = "tests/jest.config.ts"
         if (Test-Path $config) {
             Write-Host "  Running contract tests..."
-            npx jest --config $config --selectProjects contract --passWithNoTests
+            npx jest --config $config --selectProjects contract --passWithNoTests --forceExit
+            if ($LASTEXITCODE -ne 0) { throw "Contract tests failed (exit $LASTEXITCODE)" }
             Write-Host "  Running security tests..."
-            npx jest --config $config --selectProjects security --passWithNoTests
+            npx jest --config $config --selectProjects security --passWithNoTests --forceExit
+            if ($LASTEXITCODE -ne 0) { throw "Security tests failed (exit $LASTEXITCODE)" }
             Write-Host "  Running chaos tests..."
-            npx jest --config $config --selectProjects chaos --passWithNoTests
+            npx jest --config $config --selectProjects chaos --passWithNoTests --forceExit
+            if ($LASTEXITCODE -ne 0) { throw "Chaos tests failed (exit $LASTEXITCODE)" }
         } else {
             $tsconfig = "tests/jest.config.js"
             if (Test-Path $tsconfig) {
                 Write-Host "  Running contract tests..."
-                npx jest --config $tsconfig --selectProjects contract --passWithNoTests
+                npx jest --config $tsconfig --selectProjects contract --passWithNoTests --forceExit
+                if ($LASTEXITCODE -ne 0) { throw "Contract tests failed (exit $LASTEXITCODE)" }
                 Write-Host "  Running security tests..."
-                npx jest --config $tsconfig --selectProjects security --passWithNoTests
+                npx jest --config $tsconfig --selectProjects security --passWithNoTests --forceExit
+                if ($LASTEXITCODE -ne 0) { throw "Security tests failed (exit $LASTEXITCODE)" }
                 Write-Host "  Running chaos tests..."
-                npx jest --config $tsconfig --selectProjects chaos --passWithNoTests
+                npx jest --config $tsconfig --selectProjects chaos --passWithNoTests --forceExit
+                if ($LASTEXITCODE -ne 0) { throw "Chaos tests failed (exit $LASTEXITCODE)" }
             } else {
                 Write-Host "  No cross-cutting test config found - skipping"
             }
         }
     }
 } else {
-    Write-Host "`n  [SKIPPED] Cross-cutting tests" -ForegroundColor DarkYellow
+    Write-Host "`n  [SKIPPED] Cross-cutting tests (integration - use -RunIntegration)" -ForegroundColor DarkYellow
 }
 
 # ─── Docker compose validation ───────────────────────────────────────────
