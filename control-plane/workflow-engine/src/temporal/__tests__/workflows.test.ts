@@ -331,7 +331,7 @@ describe("Temporal Workflows", () => {
         reason: "Looks good",
       });
 
-      const result = await handle.result();
+      const result = await handle.result<HITLResult>();
 
       expect(result.decision).toBe("approve");
       expect(result.approver).toBe("admin@example.com");
