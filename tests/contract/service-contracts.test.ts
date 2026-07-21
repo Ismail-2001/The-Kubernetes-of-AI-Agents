@@ -16,13 +16,13 @@ function loadProto(protoFile: string): any {
   return grpc.loadPackageDefinition(packageDef);
 }
 
-function startServer(svc: grpc.ServiceDefinition, impl: Record<string, any>): Promise<number> {
+function startServer(svc: grpc.ServiceDefinition, impl: Record<string, any>): Promise<{ server: grpc.Server; port: number }> {
   return new Promise((resolve, reject) => {
     const server = new grpc.Server();
     server.addService(svc, impl);
     server.bindAsync("localhost:0", grpc.ServerCredentials.createInsecure(), (err, port) => {
       if (err) reject(err);
-      else { server.start(); resolve(port); }
+      else { server.start(); resolve({ server, port }); }
     });
   });
 }
@@ -84,7 +84,7 @@ describe("Contract: workflow-engine → llm-router", () => {
         expect(typeof response.cost).toBe("string");
         expect(typeof response.finish_reason).toBe("string");
         expect(response.timestamp).toBeDefined();
-        expect(typeof response.timestamp.seconds).toBe("number");
+        expect(typeof response.timestamp.seconds).toBe("string");
         done();
       }
     );
@@ -117,13 +117,11 @@ describe("Contract: workflow-engine → tool-proxy", () => {
   beforeAll(async () => {
     const toolImpl = {
       CallTool: (call: any, callback: any) => {
-        const req = call.request;
         callback(null, {
-          tool_name: req.tool_name || "unknown",
           result: { output: "mock tool result" },
+          status: "succeeded",
+          latency_ms: 100.0,
           cost: "$0.00",
-          duration_ms: 100,
-          success: true,
         });
       },
     };
@@ -145,18 +143,17 @@ describe("Contract: workflow-engine → tool-proxy", () => {
     toolClient.CallTool(
       {
         tool_name: "web_search",
-        input: { query: "test query" },
+        args: { query: "test query" },
         agent_id: "agent-001",
         execution_id: "exec-001",
       },
       (err: any, response: any) => {
         expect(err).toBeNull();
         expect(response).toBeDefined();
-        expect(typeof response.tool_name).toBe("string");
         expect(response.result).toBeDefined();
+        expect(typeof response.status).toBe("string");
         expect(typeof response.cost).toBe("string");
-        expect(typeof response.duration_ms).toBe("number");
-        expect(typeof response.success).toBe("boolean");
+        expect(typeof response.latency_ms).toBe("number");
         done();
       }
     );

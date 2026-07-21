@@ -67,7 +67,7 @@ jobs:
 
       - name: Write .env (non-secrets only)
         run: |
-          cat > .env <<-EOF
+          cat > .env <<EOF
           IMAGE_TAG=${{ env.IMAGE_TAG }}
           REGISTRY=${{ env.REGISTRY }}
           LOG_LEVEL=debug
@@ -164,7 +164,7 @@ jobs:
         run: |
           echo "Smoke tests failed. Rolling back to ${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}..."
           export IMAGE_TAG="${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}"
-          cat > .env <<-EOF
+          cat > .env <<EOF
           IMAGE_TAG=${{ vars.LAST_SUCCESSFUL_DEPLOY_TAG }}
           REGISTRY=${{ env.REGISTRY }}
           LOG_LEVEL=debug
@@ -208,7 +208,7 @@ jobs:
 
       - name: Write .env (non-secrets only)
         run: |
-          cat > .env <<-EOF
+          cat > .env <<EOF
           IMAGE_TAG=${{ env.IMAGE_TAG }}
           REGISTRY=${{ env.REGISTRY }}
           LOG_LEVEL=info

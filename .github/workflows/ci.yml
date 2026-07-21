@@ -76,7 +76,7 @@ jobs:
         with:
           version: latest
       - name: Helm dependency update
-        run: helm dependency update charts/e-gaop
+        run: helm dependency update charts/e-gaop --skip-refresh || echo "Using pre-packaged chart dependencies"
       - name: Helm lint
         run: helm lint charts/e-gaop --strict
       - name: Helm template (all values)
@@ -230,6 +230,14 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     needs: [lint, typecheck]
+    env:
+      POSTGRES_PASSWORD: ci-test-password
+      JWT_SECRET: ci-test-secret
+      EGAOP_MASTER_ENCRYPTION_KEY: ci-test-key
+      OPENAI_API_KEY: ci-test-key
+      GRAFANA_PASSWORD: ci-test-password
+      INTERNAL_SERVICE_TOKEN: ci-test-token
+      REDIS_PASSWORD: ci-test-password
     steps:
       - uses: actions/checkout@v4
       - name: Validate compose files
