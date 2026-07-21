@@ -50,7 +50,7 @@ jobs:
     outputs:
       smoke_passed: ${{ steps.smoke.outputs.passed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up SSH
         if: ${{ secrets.STAGING_HOST != '' }}
@@ -189,7 +189,7 @@ jobs:
       name: production
       url: https://app.egaop.io
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9
