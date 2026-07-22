@@ -23,11 +23,19 @@
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "overrides": {
-    "@opentelemetry/sdk-node": "^0.221.0"
+    "@opentelemetry/propagator-jaeger": "^2.10.0"
   },
   "devDependencies": {
+    "@fastify/ajv-compiler": "^4.0.5",
+    "@fastify/error": "^4.0.0",
+    "@fastify/fast-json-stringify-compiler": "^5.0.0",
+    "@fastify/merge-json-schemas": "^0.2.0",
+    "@fastify/proxy-addr": "^5.0.0",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.7.13",
+    "@opentelemetry/api-logs": "^0.220.0",
+    "@opentelemetry/configuration": "^0.220.0",
+    "@pinojs/redact": "^0.4.0",
     "@types/jest": "^29.5.14",
     "@types/pg": "^8.20.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
@@ -40,5 +48,8 @@
     "testcontainers": "^12.0.4",
     "ts-jest": "^29.3.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@opentelemetry/sdk-trace-base": "^2.9.0"
   }
 }
