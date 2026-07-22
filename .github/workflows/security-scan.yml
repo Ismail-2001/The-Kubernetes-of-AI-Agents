@@ -106,7 +106,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy on source
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -169,7 +169,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           outputs: type=docker,dest=/tmp/${{ matrix.service }}.tar
       - name: Scan with Trivy
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           input: /tmp/${{ matrix.service }}.tar
           format: sarif
