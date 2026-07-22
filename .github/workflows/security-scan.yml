@@ -89,6 +89,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
       - run: npm ci --prefer-offline --no-fund
+      - name: Repair npm 11 hoisting (extraction bug workaround)
+        run: |
+          npm dedupe
+          for i in 1 2 3 4 5; do
+            npm ls --depth=0 > /dev/null 2>&1 && break
+            npm dedupe
+          done
       - name: High severity audit
         run: npm audit --audit-level=high
         continue-on-error: false

@@ -14,3 +14,6 @@
     '''validate-secrets\.ts$''',  # rejection list contains known-bad values
     '''secret-store/src/index\.ts$''',  # rejection check contains known-bad values
   ]
+  commits = [
+    "e59163523bfa7a779b220ed928726cadddf7e815",  # commit e591635 had dev key in docker-compose.yml, now documented in SECRETS.md
+  ]

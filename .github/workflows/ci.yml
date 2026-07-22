@@ -30,7 +30,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-      - run: npm ci --prefer-offline --no-fund && npm dedupe && npm dedupe
+      - run: npm ci --prefer-offline --no-fund
+      - name: Repair npm 11 hoisting (extraction bug workaround)
+        run: |
+          npm dedupe
+          for i in 1 2 3 4 5; do
+            npm ls --depth=0 > /dev/null 2>&1 && break
+            npm dedupe
+          done
       - run: npm audit --audit-level=critical
       - name: Check for .env.example drift
         run: |
@@ -49,7 +56,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-      - run: npm ci --prefer-offline --no-fund && npm dedupe
+      - run: npm ci --prefer-offline --no-fund
+      - name: Repair npm 11 hoisting (extraction bug workaround)
+        run: |
+          npm dedupe
+          for i in 1 2 3 4 5; do
+            npm ls --depth=0 > /dev/null 2>&1 && break
+            npm dedupe
+          done
       - run: npm run lint --workspaces --if-present
 
   typecheck:
@@ -62,7 +76,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-      - run: npm ci --prefer-offline --no-fund && npm dedupe
+      - run: npm ci --prefer-offline --no-fund
+      - name: Repair npm 11 hoisting (extraction bug workaround)
+        run: |
+          npm dedupe
+          for i in 1 2 3 4 5; do
+            npm ls --depth=0 > /dev/null 2>&1 && break
+            npm dedupe
+          done
       - run: npm run build --workspace=packages/shared
       - run: npm run typecheck --workspaces --if-present
 
@@ -102,7 +123,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-      - run: npm ci --prefer-offline --no-fund && npm dedupe
+      - run: npm ci --prefer-offline --no-fund
+      - name: Repair npm 11 hoisting (extraction bug workaround)
+        run: |
+          npm dedupe
+          for i in 1 2 3 4 5; do
+            npm ls --depth=0 > /dev/null 2>&1 && break
+            npm dedupe
+          done
       - run: npm run build --workspace=packages/shared
       - run: npm test --workspaces --if-present -- --passWithNoTests
       - name: Upload test results
@@ -157,7 +185,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-      - run: npm ci --prefer-offline --no-fund && npm dedupe
+      - run: npm ci --prefer-offline --no-fund
+      - name: Repair npm 11 hoisting (extraction bug workaround)
+        run: |
+          npm dedupe
+          for i in 1 2 3 4 5; do
+            npm ls --depth=0 > /dev/null 2>&1 && break
+            npm dedupe
+          done
       - run: npm run build --workspace=packages/shared
       - name: Run contract tests
         run: npx jest --config tests/jest.config.js --selectProjects contract --passWithNoTests --forceExit
