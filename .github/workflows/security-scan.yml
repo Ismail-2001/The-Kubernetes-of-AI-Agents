@@ -92,10 +92,12 @@ jobs:
       - name: Repair npm 11 hoisting (extraction bug workaround)
         run: |
           npm dedupe
-          for i in 1 2 3 4 5; do
-            npm ls --depth=0 > /dev/null 2>&1 && break
+          for i in $(seq 1 10); do
+            test -f node_modules/@grpc/proto-loader/build/src/index.js && break
             npm dedupe
           done
+          test -f node_modules/@grpc/proto-loader/build/src/index.js || \
+            echo "WARN: @grpc/proto-loader still incomplete after repair loop"
       - name: High severity audit
         run: npm audit --audit-level=high
         continue-on-error: false

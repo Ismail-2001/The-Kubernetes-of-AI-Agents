@@ -34,10 +34,17 @@ jobs:
       - name: Repair npm 11 hoisting (extraction bug workaround)
         run: |
           npm dedupe
-          for i in 1 2 3 4 5; do
-            npm ls --depth=0 > /dev/null 2>&1 && break
+          # npm 11 (Node 24) bug: npm ci creates package dirs but omits build/
+          # content for many @opentelemetry/* and @grpc/* transitive deps.
+          # Directly verify a known-cache-critical transitive dep and retry
+          # npm dedupe until it's fully extracted (up to 10 passes).
+          for i in $(seq 1 10); do
+            test -f node_modules/@grpc/proto-loader/build/src/index.js && break
             npm dedupe
           done
+          # Final verification (won't fail the step, but will surface in logs)
+          test -f node_modules/@grpc/proto-loader/build/src/index.js || \
+            echo "WARN: @grpc/proto-loader still incomplete after repair loop"
       - run: npm audit --audit-level=critical
       - name: Check for .env.example drift
         run: |
@@ -60,10 +67,17 @@ jobs:
       - name: Repair npm 11 hoisting (extraction bug workaround)
         run: |
           npm dedupe
-          for i in 1 2 3 4 5; do
-            npm ls --depth=0 > /dev/null 2>&1 && break
+          # npm 11 (Node 24) bug: npm ci creates package dirs but omits build/
+          # content for many @opentelemetry/* and @grpc/* transitive deps.
+          # Directly verify a known-cache-critical transitive dep and retry
+          # npm dedupe until it's fully extracted (up to 10 passes).
+          for i in $(seq 1 10); do
+            test -f node_modules/@grpc/proto-loader/build/src/index.js && break
             npm dedupe
           done
+          # Final verification (won't fail the step, but will surface in logs)
+          test -f node_modules/@grpc/proto-loader/build/src/index.js || \
+            echo "WARN: @grpc/proto-loader still incomplete after repair loop"
       - run: npm run lint --workspaces --if-present
 
   typecheck:
@@ -80,10 +94,17 @@ jobs:
       - name: Repair npm 11 hoisting (extraction bug workaround)
         run: |
           npm dedupe
-          for i in 1 2 3 4 5; do
-            npm ls --depth=0 > /dev/null 2>&1 && break
+          # npm 11 (Node 24) bug: npm ci creates package dirs but omits build/
+          # content for many @opentelemetry/* and @grpc/* transitive deps.
+          # Directly verify a known-cache-critical transitive dep and retry
+          # npm dedupe until it's fully extracted (up to 10 passes).
+          for i in $(seq 1 10); do
+            test -f node_modules/@grpc/proto-loader/build/src/index.js && break
             npm dedupe
           done
+          # Final verification (won't fail the step, but will surface in logs)
+          test -f node_modules/@grpc/proto-loader/build/src/index.js || \
+            echo "WARN: @grpc/proto-loader still incomplete after repair loop"
       - run: npm run build --workspace=packages/shared
       - run: npm run typecheck --workspaces --if-present
 
@@ -127,10 +148,17 @@ jobs:
       - name: Repair npm 11 hoisting (extraction bug workaround)
         run: |
           npm dedupe
-          for i in 1 2 3 4 5; do
-            npm ls --depth=0 > /dev/null 2>&1 && break
+          # npm 11 (Node 24) bug: npm ci creates package dirs but omits build/
+          # content for many @opentelemetry/* and @grpc/* transitive deps.
+          # Directly verify a known-cache-critical transitive dep and retry
+          # npm dedupe until it's fully extracted (up to 10 passes).
+          for i in $(seq 1 10); do
+            test -f node_modules/@grpc/proto-loader/build/src/index.js && break
             npm dedupe
           done
+          # Final verification (won't fail the step, but will surface in logs)
+          test -f node_modules/@grpc/proto-loader/build/src/index.js || \
+            echo "WARN: @grpc/proto-loader still incomplete after repair loop"
       - run: npm run build --workspace=packages/shared
       - run: npm test --workspaces --if-present -- --passWithNoTests
       - name: Upload test results
@@ -189,10 +217,17 @@ jobs:
       - name: Repair npm 11 hoisting (extraction bug workaround)
         run: |
           npm dedupe
-          for i in 1 2 3 4 5; do
-            npm ls --depth=0 > /dev/null 2>&1 && break
+          # npm 11 (Node 24) bug: npm ci creates package dirs but omits build/
+          # content for many @opentelemetry/* and @grpc/* transitive deps.
+          # Directly verify a known-cache-critical transitive dep and retry
+          # npm dedupe until it's fully extracted (up to 10 passes).
+          for i in $(seq 1 10); do
+            test -f node_modules/@grpc/proto-loader/build/src/index.js && break
             npm dedupe
           done
+          # Final verification (won't fail the step, but will surface in logs)
+          test -f node_modules/@grpc/proto-loader/build/src/index.js || \
+            echo "WARN: @grpc/proto-loader still incomplete after repair loop"
       - run: npm run build --workspace=packages/shared
       - name: Run contract tests
         run: npx jest --config tests/jest.config.js --selectProjects contract --passWithNoTests --forceExit
