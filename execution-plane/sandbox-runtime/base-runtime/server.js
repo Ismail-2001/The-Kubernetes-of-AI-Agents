@@ -1,8 +1,24 @@
 const http = require("http");
-const { exec } = require("child_process");
+const { execFile } = require("child_process");
 
 const PORT = 8080;
 const HOST = "0.0.0.0";
+
+const BLOCKED_PATTERNS = [
+  /[;&|`$(){}!<>]/,
+  /\b(rm\s+-rf|mkfs|dd\s+if=|:()\s*\{\s*:\|:&\s*\};)\b/,
+  /\b(curl|wget)\s+.*\|\s*(bash|sh|python|node)\b/,
+  /\bbase64\s+--decode\b/,
+];
+
+function isCommandSafe(command) {
+  if (typeof command !== "string" || command.length === 0) return false;
+  if (command.length > 4096) return false;
+  for (const pattern of BLOCKED_PATTERNS) {
+    if (pattern.test(command)) return false;
+  }
+  return true;
+}
 
 const server = http.createServer((req, res) => {
   if (req.url === "/healthz" && req.method === "GET") {
@@ -16,13 +32,19 @@ const server = http.createServer((req, res) => {
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
       try {
-        const { command } = JSON.parse(body);
+        const parsed = JSON.parse(body);
+        const command = parsed && parsed.command;
         if (!command) {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "command is required" }));
           return;
         }
-        exec(command, { timeout: 30000, shell: "/bin/sh" }, (err, stdout, stderr) => {
+        if (!isCommandSafe(command)) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "command rejected by security policy" }));
+          return;
+        }
+        execFile("/bin/sh", ["-c", command], { timeout: 30000 }, (err, stdout, stderr) => {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({

@@ -74,24 +74,34 @@ const TOOL_REGISTRY: Record<string, ToolConfig> = {
 
 const SANDBOX_TOOLS = new Set(["code_interpreter", "file_read", "file_write", "database_query"]);
 
+const SAFE_PATH_RE = /^[a-zA-Z0-9_\/\.\-]+$/;
+
 function buildSandboxCommand(toolName: string, args: any): string {
   switch (toolName) {
     case "code_interpreter": {
       const code = args?.code || args?.script || "";
-      return code ? `python3 -c ${JSON.stringify(code)}` : "echo 'no code provided'";
+      if (!code) return "echo 'no code provided'";
+      const encoded = Buffer.from(code).toString("base64");
+      const tmpFile = `/tmp/agent_code_${Date.now()}.py`;
+      return `echo '${encoded}' | base64 --decode > ${tmpFile} && python3 ${tmpFile}; rm -f ${tmpFile}`;
     }
     case "file_read": {
       const p = args?.path || "";
-      return p ? `cat ${JSON.stringify(p)}` : "echo 'no path provided'";
+      if (!p) return "echo 'no path provided'";
+      if (!SAFE_PATH_RE.test(p)) return "echo 'invalid path characters'";
+      return `cat '${p}'`;
     }
     case "file_write": {
       const p = args?.path || "";
       const c = args?.content || "";
-      return p ? `printf ${JSON.stringify(c)} > ${JSON.stringify(p)}` : "echo 'no path provided'";
+      if (!p) return "echo 'no path provided'";
+      if (!SAFE_PATH_RE.test(p)) return "echo 'invalid path characters'";
+      return `cat > '${p}'`;
     }
     case "database_query": {
       const q = args?.query || "";
-      return q ? `sqlite3 /tmp/data.db ${JSON.stringify(q)}` : "echo 'no query provided'";
+      if (!q) return "echo 'no query provided'";
+      return `sqlite3 /tmp/data.db '${q.replace(/'/g, "''")}'`;
     }
     default:
       return `echo 'unsupported sandbox tool: ${toolName}'`;

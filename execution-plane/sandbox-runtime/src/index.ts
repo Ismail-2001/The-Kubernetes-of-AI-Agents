@@ -36,6 +36,17 @@ const logger = pino({
 
 const docker = new Docker();
 
+const BLOCKED_CMD_RE = /[;&|`$(){}!<>]/;
+const DANGEROUS_CMD_RE = /\b(rm\s+-rf|mkfs|dd\s+if=|:()\s*\{\s*:\|:&\s*\};)\b/;
+
+function isInitCommandSafe(cmd: string): boolean {
+  if (typeof cmd !== "string" || cmd.length === 0) return false;
+  if (cmd.length > 4096) return false;
+  if (BLOCKED_CMD_RE.test(cmd)) return false;
+  if (DANGEROUS_CMD_RE.test(cmd)) return false;
+  return true;
+}
+
 const PROTO_PATH = path.resolve(__dirname, "../../../api/proto/egaop/v1/runtime.proto");
 
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
@@ -113,6 +124,11 @@ server.addService(runtimeService.service, {
       const initOutputs: string[] = [];
       if (init_commands && init_commands.length > 0) {
         for (const cmd of init_commands) {
+          if (!isInitCommandSafe(cmd)) {
+            initOutputs.push(`BLOCKED: command rejected by security policy`);
+            logger.warn({ command: cmd }, "Init command blocked by security policy");
+            continue;
+          }
           try {
             const execInstance = await container.exec({
               Cmd: ["sh", "-c", cmd],
