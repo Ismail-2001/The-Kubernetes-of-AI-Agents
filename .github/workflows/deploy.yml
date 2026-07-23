@@ -49,17 +49,19 @@ jobs:
     environment: staging
     outputs:
       smoke_passed: ${{ steps.smoke.outputs.passed }}
+    env:
+      HAS_STAGING_HOST: ${{ secrets.STAGING_HOST }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up SSH
-        if: ${{ secrets.STAGING_HOST != '' }}
-        uses: webfactory/ssh-agent@v0.9
+        if: env.HAS_STAGING_HOST != ''
+        uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
 
       - name: Configure Docker context
-        if: ${{ secrets.STAGING_HOST != '' }}
+        if: env.HAS_STAGING_HOST != ''
         run: |
           docker context create staging \
             --docker "host=ssh://${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}"
@@ -192,7 +194,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9
+        uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
 
