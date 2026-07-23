@@ -230,11 +230,11 @@ jobs:
             echo "WARN: @grpc/proto-loader still incomplete after repair loop"
       - run: npm run build --workspace=packages/shared
       - name: Run contract tests
-        run: npx jest --config tests/jest.config.js --selectProjects contract --passWithNoTests --forceExit
+        run: npx jest --config "${{ github.workspace }}/tests/jest.config.js" --selectProjects contract --passWithNoTests --forceExit
       - name: Run chaos tests
-        run: npx jest --config tests/jest.config.js --selectProjects chaos --passWithNoTests --forceExit
+        run: npx jest --config "${{ github.workspace }}/tests/jest.config.js" --selectProjects chaos --passWithNoTests --forceExit
       - name: Run security tests
-        run: npx jest --config tests/jest.config.js --selectProjects security --passWithNoTests --forceExit
+        run: npx jest --config "${{ github.workspace }}/tests/jest.config.js" --selectProjects security --passWithNoTests --forceExit
 
   #############################################################################
   # BUILD — Docker images (parallel matrix)
