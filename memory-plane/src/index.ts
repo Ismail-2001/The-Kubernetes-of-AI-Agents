@@ -76,6 +76,14 @@ const server = new grpc.Server({
   interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor()],
 });
 
+const SAFE_KEY_RE = /^[a-zA-Z0-9_\-\.]+$/;
+
+function sanitizeKeyComponent(value: string): string {
+  if (typeof value !== "string") return "unknown";
+  const sanitized = value.replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+  return sanitized.substring(0, 128) || "unknown";
+}
+
 server.addService(memoryService.service, {
   Read: async (call: any, callback: any) => {
     const { agent_id, namespace, memory_type, key } = call.request;
@@ -83,13 +91,18 @@ server.addService(memoryService.service, {
     logger.info({ agent_id, namespace, memory_type, key }, "Memory read request");
 
     try {
+      const safeNs = sanitizeKeyComponent(namespace);
+      const safeAgent = sanitizeKeyComponent(agent_id);
+      const safeType = sanitizeKeyComponent(memory_type);
+      const safeKey = sanitizeKeyComponent(key);
+
       let data: any = null;
 
       if (memory_type === "working") {
-        const raw = await redis.get(`egaop:${namespace}:${agent_id}:working:${key}`);
+        const raw = await redis.get(`egaop:${safeNs}:${safeAgent}:working:${safeKey}`);
         if (raw) data = JSON.parse(raw);
       } else {
-        const raw = await redis.get(`egaop:${namespace}:${agent_id}:${memory_type}:${key}`);
+        const raw = await redis.get(`egaop:${safeNs}:${safeAgent}:${safeType}:${safeKey}`);
         if (raw) data = JSON.parse(raw);
       }
 
@@ -106,7 +119,12 @@ server.addService(memoryService.service, {
     logger.info({ agent_id, namespace, memory_type, key }, "Memory write request");
 
     try {
-      const redisKey = `egaop:${namespace}:${agent_id}:${memory_type}:${key}`;
+      const safeNs = sanitizeKeyComponent(namespace);
+      const safeAgent = sanitizeKeyComponent(agent_id);
+      const safeType = sanitizeKeyComponent(memory_type);
+      const safeKey = sanitizeKeyComponent(key);
+
+      const redisKey = `egaop:${safeNs}:${safeAgent}:${safeType}:${safeKey}`;
       const serialized = JSON.stringify(data);
       const ttl = ttl_seconds || (memory_type === "working" ? 300 : 86400);
 
@@ -122,7 +140,12 @@ server.addService(memoryService.service, {
   Delete: async (call: any, callback: any) => {
     const { agent_id, namespace, memory_type, key } = call.request;
     try {
-      const redisKey = `egaop:${namespace}:${agent_id}:${memory_type}:${key}`;
+      const safeNs = sanitizeKeyComponent(namespace);
+      const safeAgent = sanitizeKeyComponent(agent_id);
+      const safeType = sanitizeKeyComponent(memory_type);
+      const safeKey = sanitizeKeyComponent(key);
+
+      const redisKey = `egaop:${safeNs}:${safeAgent}:${safeType}:${safeKey}`;
       await redis.del(redisKey);
       callback(null, { status: "success" });
     } catch (err: any) {
@@ -133,7 +156,11 @@ server.addService(memoryService.service, {
   List: async (call: any, callback: any) => {
     const { agent_id, namespace, memory_type } = call.request;
     try {
-      const pattern = `egaop:${namespace}:${agent_id}:${memory_type}:*`;
+      const safeNs = sanitizeKeyComponent(namespace);
+      const safeAgent = sanitizeKeyComponent(agent_id);
+      const safeType = sanitizeKeyComponent(memory_type);
+
+      const pattern = `egaop:${safeNs}:${safeAgent}:${safeType}:*`;
       const entries: any[] = [];
       const stream = redis.scanStream({ match: pattern, count: 100 });
       for await (const keys of stream) {

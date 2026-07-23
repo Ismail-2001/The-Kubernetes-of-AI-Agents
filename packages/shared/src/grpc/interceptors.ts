@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Interceptor, InterceptingCall, InterceptorOptions, NextCall, Metadata, Requester, InterceptingListener, StatusObject, status as GrpcStatus } from "@grpc/grpc-js";
 import type { ServerInterceptor, ServerInterceptingCallInterface, ServerMethodDefinition } from "@grpc/grpc-js";
 import { ServerInterceptingCall } from "@grpc/grpc-js";
@@ -108,15 +109,28 @@ export function createServiceTokenServerInterceptor(): ServerInterceptor {
       start: (callback: any) => {
         const wrappedListener = {
           onReceiveMetadata: (metadata: Metadata, passthrough: (m: Metadata) => void) => {
-            // Skip validation if no token is configured (dev mode)
             if (!expectedToken) {
-              passthrough(metadata);
+              process.stdout.write(JSON.stringify({
+                level: "error",
+                msg: "SERVICE_TOKEN_MISSING",
+                method: methodPath,
+                timestamp: new Date().toISOString(),
+              }) + "\n");
+              call.sendStatus({
+                code: 16,
+                details: "Service token not configured",
+                metadata: new (metadata.constructor as new () => Metadata)(),
+              });
               return;
             }
 
             const providedToken = (metadata.get("x-service-token")[0] as string) ?? "";
 
-            if (providedToken !== expectedToken) {
+            const a = Buffer.from(expectedToken);
+            const b = Buffer.from(providedToken);
+            const valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+
+            if (!valid) {
               process.stdout.write(JSON.stringify({
                 level: "warn",
                 msg: "SERVICE_TOKEN_REJECTED",
@@ -125,7 +139,7 @@ export function createServiceTokenServerInterceptor(): ServerInterceptor {
               }) + "\n");
 
               call.sendStatus({
-                code: 16, // UNAUTHENTICATED
+                code: 16,
                 details: "Invalid or missing service token",
                 metadata: new (metadata.constructor as new () => Metadata)(),
               });

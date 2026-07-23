@@ -75,6 +75,13 @@ const TOOL_REGISTRY: Record<string, ToolConfig> = {
 const SANDBOX_TOOLS = new Set(["code_interpreter", "file_read", "file_write", "database_query"]);
 
 const SAFE_PATH_RE = /^[a-zA-Z0-9_\/\.\-]+$/;
+const BLOCKED_SQL_RE = /\b(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|EXEC|EXECUTE|PRAGMA|ATTACH|DETACH|VACUUM|REINDEX|REPLACE|LOAD|SELECT\s+.*\s+FROM\s+.*\s+INTO)\b/i;
+
+function isPrivateIP(ip: string): boolean {
+  if (/^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|0\.|localhost|::1|169\.254\.)/.test(ip)) return true;
+  if (/^\[/.test(ip)) return true;
+  return false;
+}
 
 function buildSandboxCommand(toolName: string, args: any): string {
   switch (toolName) {
@@ -88,19 +95,20 @@ function buildSandboxCommand(toolName: string, args: any): string {
     case "file_read": {
       const p = args?.path || "";
       if (!p) return "echo 'no path provided'";
-      if (!SAFE_PATH_RE.test(p)) return "echo 'invalid path characters'";
+      if (!SAFE_PATH_RE.test(p) || p.includes("..")) return "echo 'invalid path'";
       return `cat '${p}'`;
     }
     case "file_write": {
       const p = args?.path || "";
       const c = args?.content || "";
       if (!p) return "echo 'no path provided'";
-      if (!SAFE_PATH_RE.test(p)) return "echo 'invalid path characters'";
+      if (!SAFE_PATH_RE.test(p) || p.includes("..")) return "echo 'invalid path'";
       return `cat > '${p}'`;
     }
     case "database_query": {
       const q = args?.query || "";
       if (!q) return "echo 'no query provided'";
+      if (BLOCKED_SQL_RE.test(q)) return "echo 'forbidden SQL operation'";
       return `sqlite3 /tmp/data.db '${q.replace(/'/g, "''")}'`;
     }
     default:
@@ -163,6 +171,14 @@ server.addService(toolService.service, {
             latency_ms: Date.now() - startTime,
           });
         }
+        if (isPrivateIP(sandbox_ip)) {
+          logger.warn({ sandbox_ip }, "SSRF blocked: private/internal IP");
+          return callback(null, {
+            status: "failed",
+            error_message: "Sandbox IP resolves to a private network address",
+            latency_ms: Date.now() - startTime,
+          });
+        }
         url = `http://${sandbox_ip}:8080/exec`;
         logger.info({ tool_name, sandbox_ip, url }, "Sandbox-routed tool: constructed URL");
       }
@@ -203,7 +219,7 @@ server.addService(toolService.service, {
       logger.error({ tool_name, err: err.message }, "Tool call failed");
       callback(null, {
         status: "failed",
-        error_message: `Tool execution error: ${err.message}`,
+        error_message: `Tool execution failed: ${tool_name}`,
         latency_ms: latency,
       });
     }

@@ -2,7 +2,6 @@ name: Backup
 
 on:
   schedule:
-    # Daily at 02:00 UTC
     - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
@@ -10,6 +9,10 @@ on:
         description: 'Include Prometheus data (larger archive)'
         type: boolean
         default: false
+
+permissions:
+  contents: read
+  actions: read
 
 env:
   BACKUP_RETENTION_DAYS: 30

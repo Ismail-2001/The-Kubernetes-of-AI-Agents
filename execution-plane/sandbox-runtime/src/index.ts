@@ -38,6 +38,7 @@ const docker = new Docker();
 
 const BLOCKED_CMD_RE = /[;&|`$(){}!<>]/;
 const DANGEROUS_CMD_RE = /\b(rm\s+-rf|mkfs|dd\s+if=|:()\s*\{\s*:\|:&\s*\};)\b/;
+const ALLOWED_IMAGES = /^(egaop-[\w\-]+|ghcr\.io\/ismael-2001\/the-kubernetes-of-ai-agents\/[\w\-]+):[\w\.\-]+$/;
 
 function isInitCommandSafe(cmd: string): boolean {
   if (typeof cmd !== "string" || cmd.length === 0) return false;
@@ -90,8 +91,18 @@ server.addService(runtimeService.service, {
          logger.warn("Standard isolation (Level 1) used. Security boundary limited to Docker namespace.");
       }
 
+      const containerImage = image || "egaop-base-runtime:latest";
+      if (!ALLOWED_IMAGES.test(containerImage)) {
+        logger.warn({ image: containerImage }, "Rejected unapproved container image");
+        callback({
+          code: grpc.status.INVALID_ARGUMENT,
+          message: "Image not in allowlist"
+        });
+        return;
+      }
+
       const container = await docker.createContainer({
-         Image: image || "egaop-base-runtime:latest",
+         Image: containerImage,
          name: `egaop-agent-${execution_id}`,
          Cmd: ["node", "/workspace/server.js"],
          Env: Object.entries(env_vars || {}).map(([k, v]) => `${k}=${v}`),
@@ -161,7 +172,7 @@ server.addService(runtimeService.service, {
       logger.error(err, "Failed to create agent sandbox");
       callback({
         code: grpc.status.INTERNAL,
-        message: `Sandbox Creation Failed: ${err.message}`
+        message: "Sandbox creation failed"
       });
     }
   },

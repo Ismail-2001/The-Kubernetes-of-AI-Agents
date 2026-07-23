@@ -4,14 +4,22 @@ import future.keywords.in
 
 default allow = false
 
-allow if {
-  input.tool_name != "stripe.charges.create"
-  input.tool_name != "stripe.refunds.create"
-}
-
+# Stripe charges: allow only under 10k cents
 allow if {
   input.tool_name == "stripe.charges.create"
   input.args.amount <= 10000
+}
+
+# Admin deletion: only allowed with restricted clearance
+allow if {
+  input.tool_name == "admin.user.delete"
+  input.agent_metadata.labels["security-clearance"] == "restricted"
+}
+
+# All other non-denied tools: allow by default
+allow if {
+  not startswith(input.tool_name, "stripe.")
+  not startswith(input.tool_name, "admin.")
 }
 
 requires_approval if {

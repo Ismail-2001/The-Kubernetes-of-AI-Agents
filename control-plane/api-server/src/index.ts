@@ -128,10 +128,8 @@ fastify.register(rateLimit, {
   max: Number(process.env.RATE_LIMIT_MAX) || 100,
   timeWindow: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
   keyGenerator: (request) => {
-    // Use x-namespace header if present, fall back to IP
-    const ns = request.headers["x-namespace"];
-    if (ns && typeof ns === "string" && ns.length > 0) return `ns:${ns}`;
-    return request.ip ?? request.socket.remoteAddress ?? "unknown";
+    const ip = request.ip ?? request.socket.remoteAddress ?? "unknown";
+    return `ip:${ip}`;
   },
   addHeadersOnExceeding: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true },
   addHeaders: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true, "retry-after": true },
@@ -348,7 +346,7 @@ fastify.post("/api/agents/:id/run", async (request, reply) => {
         executionId,
         namespace,
         resourceNamespace: body?.resourceNamespace ?? namespace,
-        callerRole: body?.callerRole ?? "namespace_admin",
+        callerRole: "namespace_admin",
         model: configuredModel,
         systemPrompt: body?.input?.systemPrompt as string | undefined,
         initialMessages: body?.input?.prompt
@@ -375,7 +373,7 @@ fastify.post("/api/agents/:id/run", async (request, reply) => {
     const errMsg = err instanceof Error ? err.message : String(err);
     logger.error({ err: errMsg, agentId: id }, "Failed to start workflow");
     reply.code(500);
-    return { error: { message: `Failed to start workflow: ${errMsg}`, code: "INTERNAL" } };
+    return { error: { message: "Failed to start workflow", code: "INTERNAL" } };
   }
 });
 
@@ -403,7 +401,7 @@ fastify.get("/api/executions/:id", async (request, reply) => {
       return { error: { message: `Execution not found: ${id}`, code: "NOT_FOUND" } };
     }
     reply.code(500);
-    return { error: { message: `Failed to get execution: ${errMsg}`, code: "INTERNAL" } };
+    return { error: { message: "Failed to get execution", code: "INTERNAL" } };
   }
 });
 
@@ -454,7 +452,7 @@ fastify.get("/api/executions/:id/history", async (request, reply) => {
       return { error: { message: `Execution not found: ${id}`, code: "NOT_FOUND" } };
     }
     reply.code(500);
-    return { error: { message: `Failed to get execution history: ${errMsg}`, code: "INTERNAL" } };
+    return { error: { message: "Failed to get execution history", code: "INTERNAL" } };
   }
 });
 
@@ -635,7 +633,7 @@ fastify.get("/api/traces/:traceId", async (request, reply) => {
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     reply.code(500);
-    return { error: { message: `Failed to get trace: ${errMsg}`, code: "INTERNAL" } };
+    return { error: { message: "Failed to get trace", code: "INTERNAL" } };
   }
 });
 
