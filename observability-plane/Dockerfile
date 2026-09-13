@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -16,7 +16,7 @@ COPY observability-plane/src/ ./observability-plane/src/
 RUN npm run build -w observability-plane
 
 # Stage 2: Production
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 RUN addgroup --system --gid 1001 egaop && adduser --system --uid 1001 egaop
 COPY --from=builder /app/observability-plane/dist ./dist
