@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:22-slim AS builder
+FROM node:26-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -17,7 +17,7 @@ COPY control-plane/workflow-engine/src/ ./control-plane/workflow-engine/src/
 RUN npm run build -w control-plane/workflow-engine
 
 # Stage 2: Production
-FROM node:22-slim AS runner
+FROM node:26-slim AS runner
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1001 egaop && useradd --uid 1001 --gid 1001 --shell /bin/false egaop
