@@ -9,7 +9,7 @@
 	docker-build docker-up docker-down docker-logs docker-ps docker-restart \
 	db-shell db-backup db-restore db-status \
 	monitoring grafana prometheus \
-	secrets-init secrets-status \
+	secrets-init secrets-status secrets-rotate secrets-rotate-dry secrets-verify \
 	health status help
 
 # ─── Development ───────────────────────────────────────────────
@@ -119,6 +119,15 @@ secrets-status:
 	@test -f packages/api-server/.env && echo "api-server .env exists" || echo "api-server .env is MISSING"
 	@test -f packages/web-dashboard/.env && echo "web-dashboard .env exists" || echo "web-dashboard .env is MISSING"
 
+secrets-rotate:
+	./scripts/rotate-secrets.sh
+
+secrets-rotate-dry:
+	./scripts/rotate-secrets.sh --dry-run
+
+secrets-verify:
+	./scripts/verify-secrets.sh
+
 # ─── Utilities ────────────────────────────────────────────────
 
 health:
@@ -175,8 +184,11 @@ help:
 	@echo "  prometheus       Open Prometheus in browser"
 	@echo ""
 	@echo "Secrets:"
-	@echo "  secrets-init     Generate secrets for local dev"
-	@echo "  secrets-status   Check if secrets files exist"
+	@echo "  secrets-init         Generate secrets for local dev"
+	@echo "  secrets-status       Check if secrets files exist"
+	@echo "  secrets-rotate       Rotate all secrets (interactive)"
+	@echo "  secrets-rotate-dry   Preview secret rotation without executing"
+	@echo "  secrets-verify       Verify all secrets are valid"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  health           Curl all health endpoints"

@@ -92,5 +92,6 @@ All notable changes to E-GAOP are documented here. Format follows [Keep a Change
 
 - 297 tests passing across 10 workspaces; contract, chaos, and security test projects.
 
-[Unreleased]: https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents/releases/tag/v1.0.0
