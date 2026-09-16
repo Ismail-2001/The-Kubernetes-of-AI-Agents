@@ -109,3 +109,22 @@ export type {
 } from "./slo/types.js";
 export { BURN_RATE_WINDOWS, DEFAULT_SLO_DEFINITIONS } from "./slo/types.js";
 export type { SLISample } from "./slo/index.js";
+export {
+  validate,
+  PaginationQuerySchema,
+  NamespaceQuerySchema,
+  IdParamSchema,
+  NameParamSchema,
+  LoginSchema,
+  RegisterSchema,
+  ChangePasswordSchema,
+  RefreshTokenSchema,
+  CreateAgentSchema,
+  UpdateAgentSchema,
+  RunAgentSchema,
+  RollbackAgentSchema,
+  AgentListQuerySchema,
+  TraceListQuerySchema,
+  SLOQuerySchema,
+} from "./validation/index.js";
+export type { ValidationProblem } from "./validation/index.js";

@@ -161,6 +161,12 @@ const CACHE_TTL: Record<string, string> = {
   "/api/auth/me": "private, no-cache, max-age=10",
 };
 
+// ── API Versioning: /api/v1/ → /api/ rewrite ────────────────────────────────
+// Fastify v5 resolves routes before onRequest hooks, so URL rewriting in
+// onRequest cannot remap routes. Instead, we maintain /api/ as the canonical
+// base path and document /api/v1/ as the public versioned alias. The response
+// envelope carries apiVersion: "v1" for clients that need it.
+
 // ── Global onRequest hook: CORS, security headers, request ID, and caching ──
 // Uses onRequest (not onSend) to avoid Fastify v5 response lifecycle conflicts.
 // Headers set here are included in ALL responses — preflight, API, error, etc.
@@ -304,10 +310,21 @@ function apiResponse<T>(data: T) {
   return { data, meta: { apiVersion: API_VERSION, traceId: crypto.randomUUID(), timestamp: new Date().toISOString() } };
 }
 
-function paginate<T>(items: T[], page: number, limit: number) {
-  const start = (page - 1) * limit;
-  const paged = items.slice(start, start + limit);
-  return { items: paged, total: items.length, page, limit, hasNext: start + limit < items.length };
+function paginate<T>(items: T[], page: number, limit: number, maxLimit = 100) {
+  const safePage = Math.max(1, Math.floor(page) || 1);
+  const safeLimit = Math.min(Math.max(1, Math.floor(limit) || 20), maxLimit);
+  const start = (safePage - 1) * safeLimit;
+  const paged = items.slice(start, start + safeLimit);
+  const totalPages = Math.ceil(items.length / safeLimit);
+  return {
+    items: paged,
+    total: items.length,
+    page: safePage,
+    limit: safeLimit,
+    totalPages,
+    hasNext: start + safeLimit < items.length,
+    hasPrevious: safePage > 1,
+  };
 }
 
 // ── Agents REST ──

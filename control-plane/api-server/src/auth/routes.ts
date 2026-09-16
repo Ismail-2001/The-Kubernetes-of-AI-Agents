@@ -2,13 +2,32 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import crypto from "crypto";
 import pino from "pino";
 import Redis from "ioredis";
-import { hashPassword, comparePassword, signJWT, verifyJWT, createAuditEntry, type JWTClaims } from "@e-gaop/shared";
+import { hashPassword, comparePassword, signJWT, verifyJWT, createAuditEntry, toProblemDetails, type JWTClaims } from "@e-gaop/shared";
 import {
   getUserRepository,
   ensureAdminUser,
 } from "./repository";
 
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
+
+// ── RFC 7807 error helper for auth routes ───────────────────────────────────
+
+function sendProblem(
+  reply: FastifyReply,
+  code: string,
+  detail: string,
+  instance: string,
+  traceId: string,
+  extra?: Record<string, unknown>,
+): void {
+  const problem = toProblemDetails(code, detail, instance, traceId, extra);
+  const statusMap: Record<string, number> = {
+    UNAUTHORIZED: 401, INVALID_CREDENTIALS: 401, FORBIDDEN: 403,
+    NOT_FOUND: 404, CONFLICT: 409, VALIDATION_ERROR: 400,
+    RATE_LIMITED: 429, INTERNAL: 500, ACCOUNT_LOCKED: 429,
+  };
+  reply.status(statusMap[code] ?? 500).send(problem);
+}
 
 const _jwtSecret = process.env.JWT_SECRET;
 if (!_jwtSecret || _jwtSecret.length < 32) {
@@ -215,18 +234,21 @@ export async function authenticate(
   }
 
   if (!token) {
-    reply.code(401).send({ error: { message: "Missing or invalid authorization header", code: "UNAUTHORIZED" } });
+    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    sendProblem(reply, "UNAUTHORIZED", "Missing or invalid authorization header", request.url, traceId);
     return;
   }
 
   const claims = verifyJWT(token, JWT_SECRET);
   if (!claims) {
-    reply.code(401).send({ error: { message: "Invalid or expired token", code: "UNAUTHORIZED" } });
+    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    sendProblem(reply, "UNAUTHORIZED", "Invalid or expired token", request.url, traceId);
     return;
   }
 
   if (await isTokenRevoked(token)) {
-    reply.code(401).send({ error: { message: "Token has been revoked", code: "UNAUTHORIZED" } });
+    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    sendProblem(reply, "UNAUTHORIZED", "Token has been revoked", request.url, traceId);
     return;
   }
 
@@ -259,9 +281,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     },
   }, async (request, reply) => {
     const body = request.body as { name?: string; email?: string; password?: string };
+    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
 
     if (!body?.email || !body?.password || !body?.name) {
-      reply.code(400).send({ error: { message: "Name, email, and password are required", code: "VALIDATION_ERROR" } });
+      sendProblem(reply, "VALIDATION_ERROR", "Name, email, and password are required", request.url, traceId);
       return;
     }
 
@@ -270,19 +293,19 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Validate password strength
     if (password.length < 12) {
-      reply.code(400).send({ error: { message: "Password must be at least 12 characters", code: "VALIDATION_ERROR" } });
+      sendProblem(reply, "VALIDATION_ERROR", "Password must be at least 12 characters", request.url, traceId);
       return;
     }
 
     if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
-      reply.code(400).send({ error: { message: "Password must contain uppercase, lowercase, and numbers", code: "VALIDATION_ERROR" } });
+      sendProblem(reply, "VALIDATION_ERROR", "Password must contain uppercase, lowercase, and numbers", request.url, traceId);
       return;
     }
 
     // Check if user already exists
     const existing = await repo.findByEmail(email);
     if (existing) {
-      reply.code(409).send({ error: { message: "An account with this email already exists", code: "CONFLICT" } });
+      sendProblem(reply, "CONFLICT", "An account with this email already exists", request.url, traceId);
       return;
     }
 
@@ -344,9 +367,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     },
   }, async (request, reply) => {
     const body = request.body as { email?: string; password?: string };
+    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
 
     if (!body?.email || !body?.password) {
-      reply.code(400).send({ error: { message: "Email and password are required", code: "VALIDATION_ERROR" } });
+      sendProblem(reply, "VALIDATION_ERROR", "Email and password are required", request.url, traceId);
       return;
     }
 
@@ -365,7 +389,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           { ipAddress: request.ip, userAgent: request.headers["user-agent"] },
         );
       } catch { /* audit failure is non-fatal */ }
-      reply.code(401).send({ error: { message: "Invalid email or password", code: "INVALID_CREDENTIALS" } });
+      sendProblem(reply, "INVALID_CREDENTIALS", "Invalid email or password", request.url, traceId);
       return;
     }
 
@@ -381,19 +405,16 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         );
       } catch { /* audit failure is non-fatal */ }
       // Return same 401 as invalid credentials to prevent account enumeration
-      reply.code(401).send({ error: { message: "Invalid email or password", code: "INVALID_CREDENTIALS" } });
+      sendProblem(reply, "INVALID_CREDENTIALS", "Invalid email or password", request.url, traceId);
       return;
     }
 
     // Check lockout
     const lockStatus = await repo.isLocked(email);
     if (lockStatus.locked) {
-      reply.code(429).send({
-        error: {
-          message: `Account is locked. Try again in ${lockStatus.remainingMinutes} minute${lockStatus.remainingMinutes > 1 ? "s" : ""}`,
-          code: "ACCOUNT_LOCKED",
-        },
-      });
+      sendProblem(reply, "ACCOUNT_LOCKED",
+        `Account is locked. Try again in ${lockStatus.remainingMinutes} minute${lockStatus.remainingMinutes > 1 ? "s" : ""}`,
+        request.url, traceId);
       return;
     }
 
@@ -413,7 +434,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         );
       } catch { /* audit failure is non-fatal */ }
 
-      reply.code(401).send({ error: { message: "Invalid email or password", code: "INVALID_CREDENTIALS" } });
+      sendProblem(reply, "INVALID_CREDENTIALS", "Invalid email or password", request.url, traceId);
       return;
     }
 
@@ -476,31 +497,32 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const claims = (request as any).user as JWTClaims;
     const body = request.body as { current_password?: string; new_password?: string };
+    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
 
     if (!body?.current_password || !body?.new_password) {
-      reply.code(400).send({ error: { message: "Current and new passwords are required", code: "VALIDATION_ERROR" } });
+      sendProblem(reply, "VALIDATION_ERROR", "Current and new passwords are required", request.url, traceId);
       return;
     }
 
     const user = await repo.findById(claims.sub);
     if (!user) {
-      reply.code(404).send({ error: { message: "User not found", code: "NOT_FOUND" } });
+      sendProblem(reply, "NOT_FOUND", "User not found", request.url, traceId);
       return;
     }
 
     const valid = await comparePassword(body.current_password, user.password_hash);
     if (!valid) {
-      reply.code(401).send({ error: { message: "Current password is incorrect", code: "INVALID_CREDENTIALS" } });
+      sendProblem(reply, "INVALID_CREDENTIALS", "Current password is incorrect", request.url, traceId);
       return;
     }
 
     const newPassword = body.new_password;
     if (newPassword.length < 12) {
-      reply.code(400).send({ error: { message: "Password must be at least 12 characters", code: "VALIDATION_ERROR" } });
+      sendProblem(reply, "VALIDATION_ERROR", "Password must be at least 12 characters", request.url, traceId);
       return;
     }
     if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      reply.code(400).send({ error: { message: "Password must contain uppercase, lowercase, and numbers", code: "VALIDATION_ERROR" } });
+      sendProblem(reply, "VALIDATION_ERROR", "Password must contain uppercase, lowercase, and numbers", request.url, traceId);
       return;
     }
 
@@ -580,19 +602,22 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       ?? null;
 
     if (!refreshToken) {
-      reply.code(401).send({ error: { message: "Missing refresh token", code: "UNAUTHORIZED" } });
+      const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+      sendProblem(reply, "UNAUTHORIZED", "Missing refresh token", request.url, traceId);
       return;
     }
 
     const stored = await verifyRefreshToken(refreshToken);
     if (!stored) {
-      reply.code(401).send({ error: { message: "Invalid or expired refresh token", code: "UNAUTHORIZED" } });
+      const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+      sendProblem(reply, "UNAUTHORIZED", "Invalid or expired refresh token", request.url, traceId);
       return;
     }
 
     const user = await repo.findById(stored.userId);
     if (!user || !user.is_active) {
-      reply.code(401).send({ error: { message: "Account not found or disabled", code: "UNAUTHORIZED" } });
+      const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+      sendProblem(reply, "UNAUTHORIZED", "Account not found or disabled", request.url, traceId);
       return;
     }
 

@@ -12,6 +12,10 @@ info:
     All endpoints except `/api/auth/login`, `/api/auth/register`, and `/health`
     require a JWT Bearer token in the `Authorization` header.
 
+    ## Error Format
+    All error responses follow RFC 7807 Problem Details format (`ProblemDetails` schema).
+    Every response includes an `X-Request-ID` header for distributed tracing.
+
     ## Rate Limiting
     API requests are rate-limited per IP (100 req/min default) or per user
     when authenticated (120 req/min for tool-proxy).
@@ -332,26 +336,98 @@ components:
               type: number
             limit:
               type: number
+            totalPages:
+              type: number
             hasNext:
+              type: boolean
+            hasPrevious:
               type: boolean
         meta:
           type: object
           properties:
+            apiVersion:
+              type: string
+              example: "v1"
             traceId:
               type: string
             timestamp:
               type: string
 
-    Error:
+    ProblemDetails:
       type: object
+      description: RFC 7807 Problem Details error response
+      required: [type, title, status, detail, instance]
       properties:
-        error:
+        type:
+          type: string
+          format: uri
+          description: URI reference identifying the problem type
+          example: "urn:e-gaop:error:NOT_FOUND"
+        title:
+          type: string
+          description: Short human-readable summary
+          example: "Not Found"
+        status:
+          type: integer
+          description: HTTP status code
+          example: 404
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence
+          example: "Agent not found: agent-123"
+        instance:
+          type: string
+          format: uri
+          description: URI reference identifying the specific occurrence
+          example: "/api/agents/agent-123"
+        traceId:
+          type: string
+          format: uuid
+          description: Correlation ID for distributed tracing
+        code:
+          type: string
+          description: Application-specific error code
+          example: "NOT_FOUND"
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          description: Opaque refresh token from login response
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+
+    SLOSnapshot:
+      type: object
+      description: SLO compliance snapshot for a time window
+      properties:
+        windowMinutes:
+          type: number
+        targets:
           type: object
-          properties:
-            message:
-              type: string
-            code:
-              type: string
+          additionalProperties:
+            type: object
+            properties:
+              type:
+                type: string
+              target:
+                type: number
+              actual:
+                type: number
+              compliant:
+                type: boolean
 
     WebSocketEvent:
       type: object
@@ -448,6 +524,49 @@ paths:
         "409":
           description: Email already exists
 
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: User profile
+        "401":
+          description: Unauthorized
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: New access token issued
+        "401":
+          description: Invalid or expired refresh token
+
+  /api/auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change user password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed
+        "401":
+          description: Current password incorrect
+
   /api/agents:
     get:
       tags: [Agents]
@@ -539,6 +658,49 @@ paths:
       responses:
         "200":
           description: Agent details
+        "404":
+          description: Agent not found
+    put:
+      tags: [Agents]
+      summary: Update agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                namespace:
+                  type: string
+                  default: default
+                spec:
+                  type: object
+                  properties:
+                    model:
+                      type: string
+                    systemPrompt:
+                      type: string
+                    tools:
+                      type: array
+                      items:
+                        type: string
+                labels:
+                  type: object
+                  additionalProperties:
+                    type: string
+                annotations:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        "200":
+          description: Agent updated
         "404":
           description: Agent not found
     delete:
@@ -768,9 +930,91 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Namespace"
+                $ref: "#/components/schemas/PaginatedResponse"
+    post:
+      tags: [Namespaces]
+      summary: Create namespace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                displayName:
+                  type: string
+                tier:
+                  type: string
+                  enum: [sandbox, production, enterprise]
+                  default: sandbox
+                quotas:
+                  type: object
+                  properties:
+                    maxAgents:
+                      type: number
+                    concurrentExecutions:
+                      type: number
+                    toolCallsPerMinute:
+                      type: number
+      responses:
+        "201":
+          description: Namespace created
+        "409":
+          description: Namespace already exists
+
+  /api/namespaces/{name}:
+    put:
+      tags: [Namespaces]
+      summary: Update namespace
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                tier:
+                  type: string
+                  enum: [sandbox, production, enterprise]
+                quotas:
+                  type: object
+                  properties:
+                    maxAgents:
+                      type: number
+                    concurrentExecutions:
+                      type: number
+                    toolCallsPerMinute:
+                      type: number
+      responses:
+        "200":
+          description: Namespace updated
+        "404":
+          description: Namespace not found
+    delete:
+      tags: [Namespaces]
+      summary: Delete namespace
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Namespace deleted
+        "404":
+          description: Namespace not found
 
   /api/metrics:
     get:
@@ -783,6 +1027,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Metrics"
+
+  /api/slos:
+    get:
+      tags: [Metrics]
+      summary: Get SLO/SLI compliance snapshot
+      parameters:
+        - name: window
+          in: query
+          schema:
+            type: integer
+            description: Time window in minutes
+            default: 30
+      responses:
+        "200":
+          description: SLO compliance snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SLOSnapshot"
 
   /api/events:
     get:
