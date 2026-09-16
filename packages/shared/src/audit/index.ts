@@ -147,46 +147,59 @@ export function createAuditEntry(
     process.stdout.write(logEntry + "\n");
   }
 
-  // Persist to PostgreSQL (fire-and-forget)
+  // Persist to PostgreSQL (fire-and-forget with retry)
   if (process.env.NODE_ENV !== "test") {
-    persistToPostgres(entry).catch(() => {});
+    persistWithRetry(entry, 3).catch(() => {});
   }
 
   return entry;
 }
 
-// ── PostgreSQL persistence ──────────────────────────────────────────────────
-// Runs in background — failures are logged but never block the caller.
+// ── PostgreSQL persistence with exponential backoff ──────────────────────────
+
+async function persistWithRetry(entry: AuditEntry, maxRetries: number): Promise<void> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await persistToPostgres(entry);
+      return; // success
+    } catch (err: unknown) {
+      if (attempt === maxRetries) {
+        // All retries exhausted — log and give up
+        const message = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: "error",
+            message: `Audit entry ${entry.eventId} failed after ${maxRetries + 1} attempts: ${message}`,
+          }) + "\n",
+        );
+        return;
+      }
+      // Exponential backoff: 100ms, 200ms, 400ms
+      const delay = Math.min(100 * Math.pow(2, attempt), 4000);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
 
 async function persistToPostgres(entry: AuditEntry): Promise<void> {
-  try {
-    const pool = await getPool();
-    await pool.query(
-      `INSERT INTO audit_entries (event_id, event_type, severity, actor, target, action, context, integrity, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       ON CONFLICT (event_id) DO NOTHING`,
-      [
-        entry.eventId,
-        entry.eventType,
-        entry.severity,
-        JSON.stringify(entry.actor),
-        entry.target ? JSON.stringify(entry.target) : null,
-        JSON.stringify(entry.action),
-        JSON.stringify(entry.context),
-        JSON.stringify(entry.integrity),
-        entry.timestamp,
-      ],
-    );
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: "error",
-        message: `Failed to persist audit entry ${entry.eventId} to PostgreSQL: ${message}`,
-      }) + "\n",
-    );
-  }
+  const pool = await getPool();
+  await pool.query(
+    `INSERT INTO audit_entries (event_id, event_type, severity, actor, target, action, context, integrity, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (event_id) DO NOTHING`,
+    [
+      entry.eventId,
+      entry.eventType,
+      entry.severity,
+      JSON.stringify(entry.actor),
+      entry.target ? JSON.stringify(entry.target) : null,
+      JSON.stringify(entry.action),
+      JSON.stringify(entry.context),
+      JSON.stringify(entry.integrity),
+      entry.timestamp,
+    ],
+  );
 }
 
 export function getAuditChain(chainId: string): AuditEntry[] {

@@ -33,6 +33,8 @@ export {
   FatalConfigError,
   grpcStatusFromError,
   toStructuredLog,
+  toProblemDetails,
+  type ProblemDetails,
 } from "./errors/index.js";
 export {
   initTracing,

@@ -1,5 +1,81 @@
 import { status as grpcStatus } from "@grpc/grpc-js";
 
+// ── RFC 7807 Problem Details ────────────────────────────────────────────────
+// https://www.rfc-editor.org/rfc/rfc7807
+
+export interface ProblemDetails {
+  type: string;
+  title: string;
+  status: number;
+  detail: string;
+  instance: string;
+  traceId: string;
+  [key: string]: unknown;
+}
+
+const ERROR_TYPE_MAP: Record<string, string> = {
+  UNAUTHORIZED: "https://api.egaop.io/errors/unauthorized",
+  INVALID_CREDENTIALS: "https://api.egaop.io/errors/invalid-credentials",
+  NOT_FOUND: "https://api.egaop.io/errors/not-found",
+  CONFLICT: "https://api.egaop.io/errors/conflict",
+  VALIDATION_ERROR: "https://api.egaop.io/errors/validation",
+  FORBIDDEN: "https://api.egaop.io/errors/forbidden",
+  RATE_LIMITED: "https://api.egaop.io/errors/rate-limited",
+  INTERNAL: "https://api.egaop.io/errors/internal",
+  POLICY_DENIED: "https://api.egaop.io/errors/policy-denied",
+  TIMEOUT: "https://api.egaop.io/errors/timeout",
+  QUOTA_EXCEEDED: "https://api.egaop.io/errors/quota-exceeded",
+  ACCOUNT_LOCKED: "https://api.egaop.io/errors/account-locked",
+};
+
+const ERROR_TITLE_MAP: Record<string, string> = {
+  UNAUTHORIZED: "Unauthorized",
+  INVALID_CREDENTIALS: "Invalid Credentials",
+  NOT_FOUND: "Not Found",
+  CONFLICT: "Conflict",
+  VALIDATION_ERROR: "Validation Error",
+  FORBIDDEN: "Forbidden",
+  RATE_LIMITED: "Rate Limited",
+  INTERNAL: "Internal Server Error",
+  POLICY_DENIED: "Policy Denied",
+  TIMEOUT: "Request Timeout",
+  QUOTA_EXCEEDED: "Quota Exceeded",
+  ACCOUNT_LOCKED: "Account Locked",
+};
+
+const ERROR_STATUS_MAP: Record<string, number> = {
+  UNAUTHORIZED: 401,
+  INVALID_CREDENTIALS: 401,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  VALIDATION_ERROR: 400,
+  FORBIDDEN: 403,
+  RATE_LIMITED: 429,
+  INTERNAL: 500,
+  POLICY_DENIED: 403,
+  TIMEOUT: 504,
+  QUOTA_EXCEEDED: 429,
+  ACCOUNT_LOCKED: 429,
+};
+
+export function toProblemDetails(
+  code: string,
+  detail: string,
+  instance: string,
+  traceId: string,
+  extra?: Record<string, unknown>,
+): ProblemDetails {
+  return {
+    type: ERROR_TYPE_MAP[code] ?? "https://api.egaop.io/errors/internal",
+    title: ERROR_TITLE_MAP[code] ?? "Internal Server Error",
+    status: ERROR_STATUS_MAP[code] ?? 500,
+    detail,
+    instance,
+    traceId,
+    ...extra,
+  };
+}
+
 export class AgentError extends Error {
   public readonly code: string;
   public readonly namespace: string;

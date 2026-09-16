@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, SLOTracker, DEFAULT_SLO_DEFINITIONS } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, SLOTracker, DEFAULT_SLO_DEFINITIONS, toProblemDetails } from "@e-gaop/shared";
 
 initTracing("api-server");
 loadSecretsIntoEnv();
@@ -161,10 +161,14 @@ const CACHE_TTL: Record<string, string> = {
   "/api/auth/me": "private, no-cache, max-age=10",
 };
 
-// ── Global onRequest hook: CORS, security headers, and caching ──────────────
+// ── Global onRequest hook: CORS, security headers, request ID, and caching ──
 // Uses onRequest (not onSend) to avoid Fastify v5 response lifecycle conflicts.
 // Headers set here are included in ALL responses — preflight, API, error, etc.
 fastify.addHook("onRequest", async (request, reply) => {
+  // X-Request-ID: use client-provided ID or generate new one
+  const requestId = (request.headers["x-request-id"] as string) || crypto.randomUUID();
+  reply.header("X-Request-ID", requestId);
+
   // CORS: set Allow-Origin on every response for non-preflight requests.
   // Preflight OPTIONS handler also sets these; redundant but harmless.
   const origin = request.headers.origin;
@@ -184,6 +188,18 @@ fastify.addHook("onRequest", async (request, reply) => {
     reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
 
+  // Rate limit headers (in-memory counter per IP)
+  const rateLimitMax = Number(process.env.RATE_LIMIT_MAX) || 100;
+  const clientIp = request.ip ?? request.socket?.remoteAddress ?? "unknown";
+  const now = Date.now();
+  const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const rateLimitKey = `${clientIp}:${windowStart}`;
+  const currentCount = rateLimitStore.get(rateLimitKey) ?? 0;
+  reply.header("X-RateLimit-Limit", String(rateLimitMax));
+  reply.header("X-RateLimit-Remaining", String(Math.max(0, rateLimitMax - currentCount - 1)));
+  reply.header("X-RateLimit-Reset", String(Math.ceil((windowStart + windowMs) / 1000)));
+
   // Cache-Control for GET responses
   if (request.method === "GET") {
     const cacheKey = Object.keys(CACHE_TTL).find((k) => request.url.startsWith(k));
@@ -193,15 +209,55 @@ fastify.addHook("onRequest", async (request, reply) => {
   }
 });
 
-// Content-type enforcement for mutation requests
+// ── In-memory rate limit counter (resets on restart) ────────────────────────
+const rateLimitStore = new Map<string, number>();
+const RATE_LIMIT_CLEANUP_INTERVAL = 60_000;
+setInterval(() => {
+  const cutoff = Date.now() - 120_000;
+  for (const [key, _count] of rateLimitStore) {
+    const windowStart = parseInt(key.split(":").pop() ?? "0", 10);
+    if (windowStart < cutoff) rateLimitStore.delete(key);
+  }
+}, RATE_LIMIT_CLEANUP_INTERVAL).unref();
+
+// Content-type enforcement for mutation requests (RFC 7807 format)
 fastify.addHook("preHandler", async (request, reply) => {
   if (["POST", "PUT", "PATCH"].includes(request.method)) {
     const ct = request.headers["content-type"];
     if (!ct || !ct.includes("application/json")) {
-      reply.code(415);
-      throw new Error("Unsupported Media Type — Content-Type must be application/json");
+      const traceId = reply.getHeader("X-Request-ID") as string || crypto.randomUUID();
+      reply.code(415).send(toProblemDetails(
+        "VALIDATION_ERROR",
+        "Content-Type must be application/json",
+        request.url,
+        traceId,
+      ));
+      return;
     }
   }
+});
+
+// ── Global RFC 7807 error handler ────────────────────────────────────────────
+fastify.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
+  const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+  const statusCode = error.statusCode ?? 500;
+
+  // Map known error codes to RFC 7807
+  let code = "INTERNAL";
+  if (statusCode === 401) code = error.message.includes("Invalid credentials") ? "INVALID_CREDENTIALS" : "UNAUTHORIZED";
+  else if (statusCode === 403) code = "FORBIDDEN";
+  else if (statusCode === 404) code = "NOT_FOUND";
+  else if (statusCode === 409) code = "CONFLICT";
+  else if (statusCode === 429) code = "RATE_LIMITED";
+
+  const problem = toProblemDetails(code, error.message, request.url, traceId);
+
+  // Log server errors
+  if (statusCode >= 500) {
+    request.log.error({ err: error, traceId }, "Unhandled server error");
+  }
+
+  reply.status(statusCode).send(problem);
 });
 
 // ── Auth routes (public) ──
