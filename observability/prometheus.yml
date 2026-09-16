@@ -28,3 +28,25 @@ scrape_configs:
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
+
+  - job_name: "blackbox-http"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://api-server:3001/healthz
+          - http://api-server:15051/healthz
+          - http://llm-router:15053/healthz
+          - http://tool-proxy:15052/healthz
+          - http://memory-plane:15055/healthz
+          - http://observability-plane:15056/healthz
+          - http://secret-store:15057/healthz
+          - http://workflow-engine:15058/healthz
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

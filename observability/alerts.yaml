@@ -114,3 +114,21 @@ groups:
         annotations:
           summary: "Service is DOWN"
           description: "One or more E-GAOP services are unreachable."
+
+      - alert: SyntheticProbeDown
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Synthetic probe failed for {{ $labels.instance }}"
+          description: "Blackbox exporter probe has been failing for more than 2 minutes."
+
+      - alert: SyntheticProbeSlow
+        expr: probe_duration_seconds{job="blackbox-http"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Synthetic probe slow for {{ $labels.instance }}"
+          description: "Probe duration exceeds 5 seconds."
