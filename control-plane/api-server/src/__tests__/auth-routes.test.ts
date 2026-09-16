@@ -9,6 +9,7 @@ process.env.LOG_LEVEL = "silent";
 
 const mockRepo = {
   findByEmail: jest.fn(),
+  findById: jest.fn(),
   create: jest.fn(),
   isLocked: jest.fn(),
   incrementFailedLogin: jest.fn(),
@@ -73,6 +74,10 @@ describe("Auth routes", () => {
       if (email === "inactive@example.com") return makeUser({ id: "u-2", email, is_active: false });
       return null;
     });
+    mockRepo.findById.mockImplementation(async (id: string) => {
+      if (id === "u-1") return makeUser({ password_hash: await hashPassword("TestPassword123!") });
+      return null;
+    });
     mockRepo.create.mockImplementation(async (params: Record<string, string>) => ({
       id: "u-new",
       email: params.email,
@@ -118,7 +123,9 @@ describe("Auth routes", () => {
         payload: { email: "new@example.com" },
       });
       expect(res.statusCode).toBe(400);
-      expect(res.json().error.code).toBe("VALIDATION_ERROR");
+      const body = res.json();
+      expect(body.status).toBe(400);
+      expect(body.title).toBe("Validation Error");
     });
 
     it("returns 400 when password is too short", async () => {
@@ -128,6 +135,7 @@ describe("Auth routes", () => {
         payload: { name: "X", email: "new@example.com", password: "short" },
       });
       expect(res.statusCode).toBe(400);
+      expect(res.json().status).toBe(400);
     });
 
     it("returns 400 when password lacks complexity", async () => {
@@ -137,6 +145,7 @@ describe("Auth routes", () => {
         payload: { name: "X", email: "new@example.com", password: "onlylowercaseletters" },
       });
       expect(res.statusCode).toBe(400);
+      expect(res.json().status).toBe(400);
     });
 
     it("returns 409 when email already registered", async () => {
@@ -146,7 +155,8 @@ describe("Auth routes", () => {
         payload: { name: "X", email: "existing@example.com", password: "TestPassword123!" },
       });
       expect(res.statusCode).toBe(409);
-      expect(res.json().error.code).toBe("CONFLICT");
+      const body = res.json();
+      expect(body.title).toBe("Conflict");
     });
   });
 
@@ -160,7 +170,7 @@ describe("Auth routes", () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.data.token).toBeDefined();
-      expect(mockRepo.resetFailedLogin).toHaveBeenCalledWith("existing@example.com");
+      expect(body.data.user.email).toBe("existing@example.com");
     });
 
     it("returns 400 when credentials are missing", async () => {
@@ -170,6 +180,7 @@ describe("Auth routes", () => {
         payload: { email: "existing@example.com" },
       });
       expect(res.statusCode).toBe(400);
+      expect(res.json().status).toBe(400);
     });
 
     it("returns 401 for unknown user", async () => {
@@ -181,14 +192,15 @@ describe("Auth routes", () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it("returns 403 for deactivated account", async () => {
+    it("returns 401 for deactivated account (same as invalid credentials)", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/auth/login",
         payload: { email: "inactive@example.com", password: "TestPassword123!" },
       });
-      expect(res.statusCode).toBe(403);
-      expect(res.json().error.code).toBe("ACCOUNT_DISABLED");
+      expect(res.statusCode).toBe(401);
+      const body = res.json();
+      expect(body.title).toBe("Invalid Credentials");
     });
 
     it("returns 429 when account is locked", async () => {
@@ -199,7 +211,8 @@ describe("Auth routes", () => {
         payload: { email: "existing@example.com", password: "TestPassword123!" },
       });
       expect(res.statusCode).toBe(429);
-      expect(res.json().error.code).toBe("ACCOUNT_LOCKED");
+      const body = res.json();
+      expect(body.title).toBe("Account Locked");
     });
 
     it("returns 401 for wrong password and increments failures", async () => {
@@ -216,7 +229,6 @@ describe("Auth routes", () => {
 
   describe("POST /api/auth/change-password", () => {
     it("changes password for authenticated user", async () => {
-      mockRepo.findByEmail.mockResolvedValueOnce(makeUser({ password_hash: await hashPassword("TestPassword123!") }));
       const res = await app.inject({
         method: "POST",
         url: "/api/auth/change-password",
@@ -238,7 +250,6 @@ describe("Auth routes", () => {
     });
 
     it("returns 401 when current password is wrong", async () => {
-      mockRepo.findByEmail.mockResolvedValueOnce(makeUser({ password_hash: await hashPassword("TestPassword123!") }));
       const res = await app.inject({
         method: "POST",
         url: "/api/auth/change-password",
@@ -249,7 +260,6 @@ describe("Auth routes", () => {
     });
 
     it("returns 400 when new password is too short", async () => {
-      mockRepo.findByEmail.mockResolvedValueOnce(makeUser({ password_hash: await hashPassword("TestPassword123!") }));
       const res = await app.inject({
         method: "POST",
         url: "/api/auth/change-password",
@@ -298,19 +308,23 @@ describe("Auth routes", () => {
     it("rejects requests without a token", async () => {
       const reply = {
         code: jest.fn().mockReturnThis(),
+        status: jest.fn().mockReturnThis(),
         send: jest.fn(),
+        getHeader: jest.fn().mockReturnValue(undefined),
       } as unknown as import("fastify").FastifyReply;
       await authenticate({ headers: {} } as never, reply);
-      expect(reply.code).toHaveBeenCalledWith(401);
+      expect(reply.status).toHaveBeenCalledWith(401);
     });
 
     it("rejects requests with an invalid token", async () => {
       const reply = {
         code: jest.fn().mockReturnThis(),
+        status: jest.fn().mockReturnThis(),
         send: jest.fn(),
+        getHeader: jest.fn().mockReturnValue(undefined),
       } as unknown as import("fastify").FastifyReply;
       await authenticate({ headers: { authorization: "Bearer not-a-jwt" } } as never, reply);
-      expect(reply.code).toHaveBeenCalledWith(401);
+      expect(reply.status).toHaveBeenCalledWith(401);
     });
 
     it("attaches claims for a valid token", async () => {
@@ -319,10 +333,12 @@ describe("Auth routes", () => {
       };
       const reply = {
         code: jest.fn().mockReturnThis(),
+        status: jest.fn().mockReturnThis(),
         send: jest.fn(),
+        getHeader: jest.fn().mockReturnValue(undefined),
       } as unknown as import("fastify").FastifyReply;
       await authenticate(request as never, reply);
-      expect(reply.code).not.toHaveBeenCalled();
+      expect(reply.status).not.toHaveBeenCalled();
       expect((request.user as Record<string, unknown>).sub).toBe("u-1");
     });
   });

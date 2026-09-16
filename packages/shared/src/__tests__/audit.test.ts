@@ -213,7 +213,8 @@ describe("Audit Module", () => {
       { type: "service", id: "vault" },
       { name: "ReadSecret", result: "allowed" },
     );
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to persist"));
+    // Wait for fire-and-forget retry (3 retries with exponential backoff ~ 700ms total)
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("failed after"));
   });
 });

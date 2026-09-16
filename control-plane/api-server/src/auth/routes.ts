@@ -12,6 +12,14 @@ const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 
 // ── RFC 7807 error helper for auth routes ───────────────────────────────────
 
+function getTraceId(reply: FastifyReply): string {
+  try {
+    return (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
 function sendProblem(
   reply: FastifyReply,
   code: string,
@@ -200,7 +208,8 @@ function setCookie(reply: FastifyReply, name: string, value: string, opts: { max
   if (opts.httpOnly) parts.push("HttpOnly");
   if (opts.secure) parts.push("Secure");
   if (opts.sameSite) parts.push(`SameSite=${opts.sameSite.charAt(0).toUpperCase() + opts.sameSite.slice(1)}`);
-  const existing = reply.getHeader("Set-Cookie");
+  let existing: string | string[] | undefined;
+  try { existing = reply.getHeader("Set-Cookie") as string | string[] | undefined; } catch { /* test context */ }
   if (Array.isArray(existing)) {
     reply.header("Set-Cookie", [...existing, parts.join("; ")]);
   } else if (typeof existing === "string") {
@@ -234,20 +243,20 @@ export async function authenticate(
   }
 
   if (!token) {
-    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    const traceId = getTraceId(reply);
     sendProblem(reply, "UNAUTHORIZED", "Missing or invalid authorization header", request.url, traceId);
     return;
   }
 
   const claims = verifyJWT(token, JWT_SECRET);
   if (!claims) {
-    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    const traceId = getTraceId(reply);
     sendProblem(reply, "UNAUTHORIZED", "Invalid or expired token", request.url, traceId);
     return;
   }
 
   if (await isTokenRevoked(token)) {
-    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    const traceId = getTraceId(reply);
     sendProblem(reply, "UNAUTHORIZED", "Token has been revoked", request.url, traceId);
     return;
   }
@@ -281,7 +290,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     },
   }, async (request, reply) => {
     const body = request.body as { name?: string; email?: string; password?: string };
-    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    const traceId = getTraceId(reply);
 
     if (!body?.email || !body?.password || !body?.name) {
       sendProblem(reply, "VALIDATION_ERROR", "Name, email, and password are required", request.url, traceId);
@@ -367,7 +376,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     },
   }, async (request, reply) => {
     const body = request.body as { email?: string; password?: string };
-    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    const traceId = getTraceId(reply);
 
     if (!body?.email || !body?.password) {
       sendProblem(reply, "VALIDATION_ERROR", "Email and password are required", request.url, traceId);
@@ -497,7 +506,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const claims = (request as any).user as JWTClaims;
     const body = request.body as { current_password?: string; new_password?: string };
-    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    const traceId = getTraceId(reply);
 
     if (!body?.current_password || !body?.new_password) {
       sendProblem(reply, "VALIDATION_ERROR", "Current and new passwords are required", request.url, traceId);
@@ -602,21 +611,21 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       ?? null;
 
     if (!refreshToken) {
-      const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+      const traceId = getTraceId(reply);
       sendProblem(reply, "UNAUTHORIZED", "Missing refresh token", request.url, traceId);
       return;
     }
 
     const stored = await verifyRefreshToken(refreshToken);
     if (!stored) {
-      const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+      const traceId = getTraceId(reply);
       sendProblem(reply, "UNAUTHORIZED", "Invalid or expired refresh token", request.url, traceId);
       return;
     }
 
     const user = await repo.findById(stored.userId);
     if (!user || !user.is_active) {
-      const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+      const traceId = getTraceId(reply);
       sendProblem(reply, "UNAUTHORIZED", "Account not found or disabled", request.url, traceId);
       return;
     }

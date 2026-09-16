@@ -290,6 +290,60 @@ fastify.get("/api/health", async () => {
   }
 });
 
+// ── OpenAPI spec endpoint (public) ──
+fastify.get("/api/openapi.json", async (_request, reply) => {
+  reply.header("Content-Type", "application/json");
+  reply.header("Cache-Control", "public, max-age=3600");
+  const fs = await import("fs");
+  const path = await import("path");
+  const specPath = path.resolve(__dirname, "../../../api/openapi.yaml");
+  try {
+    const yaml = await import("yaml");
+    const content = fs.readFileSync(specPath, "utf-8");
+    return yaml.parse(content);
+  } catch {
+    // Fallback: read raw YAML
+    const content = fs.readFileSync(specPath, "utf-8");
+    return { openapi: "3.0.3", info: { title: "E-GAOP API", version: "1.0.0" }, raw: content };
+  }
+});
+
+// ── Response compression (onSend hook) ──
+fastify.addHook("onSend", async (_request, reply, payload) => {
+  const acceptEncoding = _request.headers["accept-encoding"];
+  if (!acceptEncoding || !acceptEncoding.includes("gzip")) return payload;
+
+  const contentType = String(reply.getHeader("content-type") || "");
+  if (typeof payload === "string" && payload.length > 1024 && (contentType.includes("json") || contentType.includes("text"))) {
+    const { gzip } = await import("zlib");
+    const compressed = await new Promise<Buffer>((resolve, reject) => {
+      gzip(Buffer.from(payload), (err, result) => err ? reject(err) : resolve(result));
+    });
+    reply.header("Content-Encoding", "gzip");
+    reply.header("Content-Length", compressed.length);
+    return compressed;
+  }
+  return payload;
+});
+
+// ── ETag support for GET responses ──
+fastify.addHook("onSend", async (request, reply, payload) => {
+  if (request.method !== "GET") return payload;
+  const contentType = String(reply.getHeader("content-type") || "");
+  if (!contentType.includes("json")) return payload;
+
+  const { createHash } = await import("crypto");
+  const etag = `"${createHash("sha256").update(typeof payload === "string" ? payload : JSON.stringify(payload)).digest("hex").slice(0, 16)}"`;
+  reply.header("ETag", etag);
+
+  const ifNoneMatch = request.headers["if-none-match"];
+  if (ifNoneMatch === etag) {
+    reply.code(304).send("");
+    return "";
+  }
+  return payload;
+});
+
 // ── Protected routes (require JWT) ──
 fastify.addHook("preHandler", async (request, reply) => {
   // Skip auth for public routes

@@ -1,5 +1,4 @@
 import { NamespaceRepository } from "../namespaces/repository";
-import type { Namespace } from "@e-gaop/shared";
 
 const mockPool = {
   query: jest.fn(),
