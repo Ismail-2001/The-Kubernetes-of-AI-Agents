@@ -6,6 +6,13 @@ if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }
 
+// Ensure notification/policy tables exist
+if (process.env.NODE_ENV !== "test") {
+  import("./ensure-tables.js").then(m => m.ensureTables()).catch(err => {
+    console.error("[WARN] Failed to ensure tables:", err.message);
+  });
+}
+
 import crypto from "crypto";
 import path from "path";
 import http from "http";
@@ -1304,6 +1311,304 @@ fastify.get("/api/namespaces/health", async () => {
     const errMsg = err instanceof Error ? err.message : String(err);
     logger.warn({ err: errMsg }, "Failed to query namespace health");
     return apiResponse([]);
+  }
+});
+
+// ── Notification Channels CRUD ──
+
+fastify.get("/api/notification-channels", async (request) => {
+  const q = request.query as Record<string, string>;
+  const page = parseInt(q.page ?? "1", 10);
+  const limit = Math.min(parseInt(q.limit ?? "50", 10), 100);
+  const offset = (Math.max(1, page) - 1) * limit;
+
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const countResult = await pool.query(`SELECT COUNT(*) FROM notification_channels`);
+    const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+    const result = await pool.query(
+      `SELECT id, name, type, config, active, created_at, updated_at FROM notification_channels ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      [limit, offset],
+    );
+    return apiResponse(paginate(result.rows.map(r => ({
+      id: r.id, name: r.name, type: r.type, config: r.config,
+      active: r.active, createdAt: r.created_at, updatedAt: r.updated_at,
+    })), page, limit, total));
+  } catch (err: unknown) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to list notification channels");
+    return apiResponse(paginate([], page, limit, 0));
+  }
+});
+
+fastify.post("/api/notification-channels", async (request, reply) => {
+  const body = request.body as { name?: string; type?: string; config?: Record<string, unknown> };
+  if (!body?.name || !body?.type) {
+    reply.code(400);
+    return toProblemDetails("VALIDATION_ERROR", "name and type are required", "/api/notification-channels", crypto.randomUUID());
+  }
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const id = crypto.randomUUID();
+    await pool.query(
+      `INSERT INTO notification_channels (id, name, type, config) VALUES ($1, $2, $3, $4)`,
+      [id, body.name, body.type, JSON.stringify(body.config ?? {})],
+    );
+    reply.code(201);
+    return apiResponse({ id, name: body.name, type: body.type, config: body.config ?? {}, active: true, createdAt: new Date().toISOString() });
+  } catch (err: unknown) {
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to create channel", "/api/notification-channels", crypto.randomUUID());
+  }
+});
+
+fastify.put("/api/notification-channels/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const body = request.body as { name?: string; type?: string; config?: Record<string, unknown>; active?: boolean };
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const result = await pool.query(
+      `UPDATE notification_channels SET name = COALESCE($1, name), type = COALESCE($2, type), config = COALESCE($3, config), active = COALESCE($4, active), updated_at = NOW() WHERE id = $5 RETURNING id, name, type, config, active, created_at, updated_at`,
+      [body?.name ?? null, body?.type ?? null, body?.config ? JSON.stringify(body.config) : null, body?.active ?? null, id],
+    );
+    if (result.rows.length === 0) { reply.code(404); return toProblemDetails("NOT_FOUND", "Channel not found", `/api/notification-channels/${id}`, crypto.randomUUID()); }
+    const r = result.rows[0];
+    return apiResponse({ id: r.id, name: r.name, type: r.type, config: r.config, active: r.active, createdAt: r.created_at, updatedAt: r.updated_at });
+  } catch (err: unknown) {
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to update channel", `/api/notification-channels/${id}`, crypto.randomUUID());
+  }
+});
+
+fastify.delete("/api/notification-channels/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const result = await pool.query(`DELETE FROM notification_channels WHERE id = $1`, [id]);
+    if (result.rowCount === 0) { reply.code(404); return toProblemDetails("NOT_FOUND", "Channel not found", `/api/notification-channels/${id}`, crypto.randomUUID()); }
+    return apiResponse(null);
+  } catch (err: unknown) {
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to delete channel", `/api/notification-channels/${id}`, crypto.randomUUID());
+  }
+});
+
+// ── Notification Rules CRUD ──
+
+fastify.get("/api/notification-rules", async (request) => {
+  const q = request.query as Record<string, string>;
+  const page = parseInt(q.page ?? "1", 10);
+  const limit = Math.min(parseInt(q.limit ?? "50", 10), 100);
+  const offset = (Math.max(1, page) - 1) * limit;
+
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const countResult = await pool.query(`SELECT COUNT(*) FROM notification_rules`);
+    const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+    const result = await pool.query(
+      `SELECT r.id, r.name, r.description, r.condition, r.channel_id, r.enabled, r.created_at, r.updated_at, c.name as channel_name, c.type as channel_type
+       FROM notification_rules r LEFT JOIN notification_channels c ON r.channel_id = c.id
+       ORDER BY r.created_at DESC LIMIT $1 OFFSET $2`,
+      [limit, offset],
+    );
+    return apiResponse(paginate(result.rows.map(r => ({
+      id: r.id, name: r.name, description: r.description, condition: r.condition,
+      channelId: r.channel_id, channelName: r.channel_name, channelType: r.channel_type,
+      enabled: r.enabled, createdAt: r.created_at, updatedAt: r.updated_at,
+    })), page, limit, total));
+  } catch (err: unknown) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to list notification rules");
+    return apiResponse(paginate([], page, limit, 0));
+  }
+});
+
+fastify.post("/api/notification-rules", async (request, reply) => {
+  const body = request.body as { name?: string; description?: string; condition?: Record<string, unknown>; channelId?: string };
+  if (!body?.name || !body?.channelId) {
+    reply.code(400);
+    return toProblemDetails("VALIDATION_ERROR", "name and channelId are required", "/api/notification-rules", crypto.randomUUID());
+  }
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const id = crypto.randomUUID();
+    await pool.query(
+      `INSERT INTO notification_rules (id, name, description, condition, channel_id) VALUES ($1, $2, $3, $4, $5)`,
+      [id, body.name, body.description ?? "", JSON.stringify(body.condition ?? {}), body.channelId],
+    );
+    reply.code(201);
+    return apiResponse({ id, name: body.name, description: body.description ?? "", condition: body.condition ?? {}, channelId: body.channelId, enabled: true, createdAt: new Date().toISOString() });
+  } catch (err: unknown) {
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to create rule", "/api/notification-rules", crypto.randomUUID());
+  }
+});
+
+fastify.put("/api/notification-rules/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const body = request.body as { name?: string; description?: string; condition?: Record<string, unknown>; channelId?: string; enabled?: boolean };
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const result = await pool.query(
+      `UPDATE notification_rules SET name = COALESCE($1, name), description = COALESCE($2, description), condition = COALESCE($3, condition), channel_id = COALESCE($4, channel_id), enabled = COALESCE($5, enabled), updated_at = NOW() WHERE id = $6 RETURNING *`,
+      [body?.name ?? null, body?.description ?? null, body?.condition ? JSON.stringify(body.condition) : null, body?.channelId ?? null, body?.enabled ?? null, id],
+    );
+    if (result.rows.length === 0) { reply.code(404); return toProblemDetails("NOT_FOUND", "Rule not found", `/api/notification-rules/${id}`, crypto.randomUUID()); }
+    return apiResponse(result.rows[0]);
+  } catch (err: unknown) {
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to update rule", `/api/notification-rules/${id}`, crypto.randomUUID());
+  }
+});
+
+fastify.delete("/api/notification-rules/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const result = await pool.query(`DELETE FROM notification_rules WHERE id = $1`, [id]);
+    if (result.rowCount === 0) { reply.code(404); return toProblemDetails("NOT_FOUND", "Rule not found", `/api/notification-rules/${id}`, crypto.randomUUID()); }
+    return apiResponse(null);
+  } catch (err: unknown) {
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to delete rule", `/api/notification-rules/${id}`, crypto.randomUUID());
+  }
+});
+
+// ── Policies CRUD ──
+
+fastify.get("/api/policies", async (request) => {
+  const q = request.query as Record<string, string>;
+  const page = parseInt(q.page ?? "1", 10);
+  const limit = Math.min(parseInt(q.limit ?? "50", 10), 100);
+  const offset = (Math.max(1, page) - 1) * limit;
+
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const where: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+    if (q.status) { where.push(`status = $${idx++}`); params.push(q.status); }
+    if (q.type) { where.push(`type = $${idx++}`); params.push(q.type); }
+    if (q.search) { where.push(`(name ILIKE $${idx} OR description ILIKE $${idx})`); params.push(`%${q.search}%`); idx++; }
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+    const countResult = await pool.query(`SELECT COUNT(*) FROM policies ${whereClause}`, params);
+    const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+    const result = await pool.query(
+      `SELECT id, name, description, type, config, status, version, created_by, created_at, updated_at FROM policies ${whereClause} ORDER BY updated_at DESC LIMIT $${idx++} OFFSET $${idx++}`,
+      [...params, limit, offset],
+    );
+    return apiResponse(paginate(result.rows.map(r => ({
+      id: r.id, name: r.name, description: r.description, type: r.type,
+      config: r.config, status: r.status, version: r.version, createdBy: r.created_by,
+      createdAt: r.created_at, updatedAt: r.updated_at,
+    })), page, limit, total));
+  } catch (err: unknown) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to list policies");
+    return apiResponse(paginate([], page, limit, 0));
+  }
+});
+
+fastify.post("/api/policies", async (request, reply) => {
+  const body = request.body as { name?: string; description?: string; type?: string; config?: Record<string, unknown> };
+  if (!body?.name || !body?.type) {
+    reply.code(400);
+    return toProblemDetails("VALIDATION_ERROR", "name and type are required", "/api/policies", crypto.randomUUID());
+  }
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const id = crypto.randomUUID();
+    await pool.query(
+      `INSERT INTO policies (id, name, description, type, config, created_by) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, body.name, body.description ?? "", body.type, JSON.stringify(body.config ?? {}), (request as any).user?.id ?? "system"],
+    );
+    reply.code(201);
+    return apiResponse({ id, name: body.name, description: body.description ?? "", type: body.type, config: body.config ?? {}, status: "draft", version: 1, createdAt: new Date().toISOString() });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("unique") || msg.includes("duplicate")) {
+      reply.code(409);
+      return toProblemDetails("CONFLICT", "Policy with this name already exists", "/api/policies", crypto.randomUUID());
+    }
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to create policy", "/api/policies", crypto.randomUUID());
+  }
+});
+
+fastify.put("/api/policies/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const body = request.body as { name?: string; description?: string; type?: string; config?: Record<string, unknown>; status?: string };
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const result = await pool.query(
+      `UPDATE policies SET name = COALESCE($1, name), description = COALESCE($2, description), type = COALESCE($3, type), config = COALESCE($4, config), status = COALESCE($5, status), version = version + 1, updated_at = NOW() WHERE id = $6 RETURNING id, name, description, type, config, status, version, created_by, created_at, updated_at`,
+      [body?.name ?? null, body?.description ?? null, body?.type ?? null, body?.config ? JSON.stringify(body.config) : null, body?.status ?? null, id],
+    );
+    if (result.rows.length === 0) { reply.code(404); return toProblemDetails("NOT_FOUND", "Policy not found", `/api/policies/${id}`, crypto.randomUUID()); }
+    const r = result.rows[0];
+    return apiResponse({ id: r.id, name: r.name, description: r.description, type: r.type, config: r.config, status: r.status, version: r.version, createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at });
+  } catch (err: unknown) {
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to update policy", `/api/policies/${id}`, crypto.randomUUID());
+  }
+});
+
+fastify.delete("/api/policies/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const result = await pool.query(`DELETE FROM policies WHERE id = $1`, [id]);
+    if (result.rowCount === 0) { reply.code(404); return toProblemDetails("NOT_FOUND", "Policy not found", `/api/policies/${id}`, crypto.randomUUID()); }
+    return apiResponse(null);
+  } catch (err: unknown) {
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to delete policy", `/api/policies/${id}`, crypto.randomUUID());
+  }
+});
+
+// ── Time-series: executions per hour for last 24h (Dashboard chart) ──
+
+fastify.get("/api/metrics/timeseries", async () => {
+  try {
+    const client = await getTemporalClient();
+    const now = Date.now();
+    const hours: Array<{ hour: string; count: number }> = [];
+
+    for (let i = 23; i >= 0; i--) {
+      const hourStart = new Date(now - (i + 1) * 3600000);
+      const hourEnd = new Date(now - i * 3600000);
+      const label = hourStart.toISOString().slice(11, 13) + ":00";
+
+      let count = 0;
+      try {
+        const iterable = client.workflow.list({
+          query: `WorkflowType = "reactWorkflow" AND StartTime >= ${Math.floor(hourStart.getTime() / 1000)} AND StartTime < ${Math.floor(hourEnd.getTime() / 1000)}`,
+          pageSize: 1,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for await (const _ of iterable) { count++; }
+      } catch { /* query may not support time filters */ }
+
+      hours.push({ hour: label, count });
+    }
+
+    return apiResponse(hours);
+  } catch {
+    // Fallback: return empty timeseries
+    return apiResponse(Array.from({ length: 24 }, (_, i) => ({
+      hour: `${String(i).padStart(2, "0")}:00`,
+      count: 0,
+    })));
   }
 });
 
