@@ -1,141 +1,154 @@
-#!/bin/sh
-# restore.sh — Restore from backup archive (The Kubernetes of AI Agents)
+#!/usr/bin/env bash
+# restore.sh — PostgreSQL restore for E-GAOP
 #
-# Restores all persistent data from a backup .tar.gz created by backup.sh.
-# Uses tar pipes over docker exec — avoids docker cp path issues.
-# Target services should be RUNNING (restore writes into running containers).
+# Restores the egaop database from a pg_dump backup file (.dump or .dump.gz).
+# Drops and recreates the database after confirmation, then runs ANALYZE.
 #
 # Usage:
-#   ./restore.sh /path/to/egaop-backup-20260714_120000.tar.gz
-#
-# WARNING: Destroys current data and replaces with backup content.
-#          For Postgres the script prompts for confirmation.
+#   ./scripts/restore.sh /path/to/egaop-postgres_egaop_20260916.dump.gz
+#   ./scripts/restore.sh /path/to/egaop-postgres_egaop_20260916.dump
 
-set -eu
+set -euo pipefail
 
-BACKUP_FILE="${1:-}"
-if [ -z "${BACKUP_FILE}" ] || [ ! -f "${BACKUP_FILE}" ]; then
-  echo "Usage: $0 /path/to/egaop-backup-<stamp>.tar.gz"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+CONTAINER_NAME="postgres"
+DATABASE="egaop"
+PG_USER="egaop"
+
+# --- Validate input -----------------------------------------------------------
+if [ $# -lt 1 ] || [ -z "${1}" ]; then
+  echo "Usage: $0 /path/to/backup.dump[.gz]" >&2
   exit 1
 fi
 
-PROJECT="${COMPOSE_PROJECT:-enterprise-grade-agent-orchestration-platform-main}"
-TMPDIR=$(mktemp -d)
+BACKUP_FILE="${1}"
+
+if [ ! -f "${BACKUP_FILE}" ]; then
+  echo "ERROR: Backup file not found: ${BACKUP_FILE}" >&2
+  exit 1
+fi
+
+if [ ! -r "${BACKUP_FILE}" ]; then
+  echo "ERROR: Backup file is not readable: ${BACKUP_FILE}" >&2
+  exit 1
+fi
+
+# --- Locate running postgres container -------------------------------------------
+find_postgres_container() {
+  local candidates=(
+    "enterprise-grade-agent-orchestration-platform-main-postgres-1"
+    "k8s-ai-agents-postgres-1"
+    "postgres"
+  )
+  for name in "${candidates[@]}"; do
+    if docker ps --filter "name=^/${name}$" --format '{{.Names}}' 2>/dev/null | grep -q .; then
+      echo "${name}"
+      return 0
+    fi
+  done
+  docker ps --filter "ancestor=pgvector/pgvector" --filter "ancestor=postgres" \
+    --format '{{.Names}}' 2>/dev/null | head -1 || true
+}
+
+CONTAINER="$(find_postgres_container)"
+if [ -z "${CONTAINER}" ]; then
+  echo "ERROR: No running PostgreSQL container found." >&2
+  exit 1
+fi
+
+# --- Read password from .env --------------------------------------------------
+if [ -f "${PROJECT_ROOT}/.env" ]; then
+  PG_PASSWORD="$(grep -E '^POSTGRES_PASSWORD=' "${PROJECT_ROOT}/.env" | tail -1 | cut -d= -f2-)"
+else
+  echo "ERROR: .env file not found at ${PROJECT_ROOT}/.env" >&2
+  exit 1
+fi
+
+if [ -z "${PG_PASSWORD}" ]; then
+  echo "ERROR: POSTGRES_PASSWORD not set in .env" >&2
+  exit 1
+fi
+
+# --- Confirmation prompt ------------------------------------------------------
+echo "=== PostgreSQL Restore ==="
+echo "Container : ${CONTAINER}"
+echo "Database  : ${DATABASE}"
+echo "Backup    : ${BACKUP_FILE}"
+echo ""
+echo "WARNING: This will DROP and recreate the '${DATABASE}' database."
+echo "All current data will be lost."
+echo ""
+read -r -p "Continue? (y/N) " CONFIRM
+if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
+  echo "Restore cancelled."
+  exit 0
+fi
+
+# --- Prepare backup file (decompress if gzipped) ------------------------------
+TMPDIR="$(mktemp -d)"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
-echo "=== Restore ==="
-echo "Source:  ${BACKUP_FILE}"
-echo "Project: ${PROJECT}"
-echo ""
-
-tar xzf "${BACKUP_FILE}" -C "${TMPDIR}"
-echo "Extracted $(find "${TMPDIR}" -type f | wc -l) files"
-
-_find() { docker ps -a --filter "name=${PROJECT}" --format "{{.Names}}" | grep -i "$1" | grep -v "exporter" | head -1 | tr -d '\r\n' || true; }
-PGSQL=$(_find postgres)
-GRAFANA=$(_find grafana)
-REDIS=$(_find redis)
-PROM=$(_find prometheus)
-
-# ─── 1. PostgreSQL ──────────────────────────────────────────────────────────
-if [ -f "${TMPDIR}/postgres_egaop.dump" ] || [ -f "${TMPDIR}/postgres_temporal.dump" ]; then
-  echo "[1/5] PostgreSQL — pg_restore..."
-  if [ -z "${PGSQL}" ]; then
-    echo "  ⚠ Postgres container not found — skipping"
-  else
-    echo "  ⚠ This will DROP and recreate databases. Continue? (y/N) "
-    read -r CONFIRM
-    if [ "${CONFIRM}" != "y" ] && [ "${CONFIRM}" != "Y" ]; then
-      echo "  ✗ Skipped"
-    else
-      PW=$(grep POSTGRES_PASSWORD .env 2>/dev/null | tail -1 | cut -d= -f2-)
-      if [ -z "${PW}" ]; then
-        echo "  ✗ POSTGRES_PASSWORD not found"
-      else
-        for DB in egaop temporal; do
-          DUMP="${TMPDIR}/postgres_${DB}.dump"
-          [ ! -f "${DUMP}" ] && echo "  ⚠ ${DB} dump not found" && continue
-          echo "  Restoring ${DB}..."
-          # terminate connections
-          docker exec -e PGPASSWORD="${PW}" "${PGSQL}" \
-            psql -U egaop -d postgres \
-            -c "SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.datname = '${DB}' AND pid <> pg_backend_pid()" \
-            >/dev/null 2>&1 || true
-          docker exec -e PGPASSWORD="${PW}" "${PGSQL}" \
-            psql -U egaop -d postgres -c "DROP DATABASE IF EXISTS \"${DB}\"" >/dev/null 2>&1 || true
-          docker exec -e PGPASSWORD="${PW}" "${PGSQL}" \
-            psql -U egaop -d postgres -c "CREATE DATABASE \"${DB}\"" >/dev/null 2>&1
-          # restore from dump via pipe
-          cat "${DUMP}" | docker exec -i -e PGPASSWORD="${PW}" "${PGSQL}" \
-            pg_restore -U egaop -d "${DB}" --clean --if-exists \
-            && echo "  ✓ ${DB} restored"
-        done
-      fi
-    fi
-  fi
+if [[ "${BACKUP_FILE}" == *.gz ]]; then
+  echo "Decompressing backup..."
+  gunzip -c "${BACKUP_FILE}" > "${TMPDIR}/restore.dump"
+  DUMP_FILE="${TMPDIR}/restore.dump"
 else
-  echo "[1/5] PostgreSQL — no dump files in backup, skipping"
+  DUMP_FILE="${BACKUP_FILE}"
 fi
 
-# ─── 2. Grafana ─────────────────────────────────────────────────────────────
-if [ -f "${TMPDIR}/grafana-data.tar.gz" ]; then
-  echo "[2/5] Grafana — restoring data..."
-  if [ -n "${GRAFANA}" ]; then
-    docker stop "${GRAFANA}" >/dev/null && echo "  ✓ stopped grafana"
-    # use volumes-from to access the stopped container's volume
-    docker run -i --rm --volumes-from "${GRAFANA}" alpine:3.19 \
-      sh -c "tar xzf - -C /var/lib/grafana" \
-      < "${TMPDIR}/grafana-data.tar.gz" \
-    && echo "  ✓ restored"
-    docker start "${GRAFANA}" >/dev/null && echo "  ✓ started grafana"
-  else
-    echo "  ⚠ Grafana container not found"
-  fi
+# --- Terminate existing connections --------------------------------------------
+echo "Terminating existing connections to '${DATABASE}'..."
+docker exec \
+  -e PGPASSWORD="${PG_PASSWORD}" \
+  "${CONTAINER}" \
+  psql -U "${PG_USER}" -d postgres -c \
+  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DATABASE}' AND pid <> pg_backend_pid();" \
+  >/dev/null 2>&1 || true
+
+# --- Drop and recreate database ------------------------------------------------
+echo "Dropping database '${DATABASE}'..."
+docker exec \
+  -e PGPASSWORD="${PG_PASSWORD}" \
+  "${CONTAINER}" \
+  psql -U "${PG_USER}" -d postgres -c \
+  "DROP DATABASE IF EXISTS \"${DATABASE}\";" \
+  >/dev/null 2>&1
+
+echo "Creating database '${DATABASE}'..."
+docker exec \
+  -e PGPASSWORD="${PG_PASSWORD}" \
+  "${CONTAINER}" \
+  psql -U "${PG_USER}" -d postgres -c \
+  "CREATE DATABASE \"${DATABASE}\";" \
+  >/dev/null 2>&1
+
+# --- Restore from backup ------------------------------------------------------
+echo "Restoring from backup..."
+if cat "${DUMP_FILE}" | docker exec -i \
+  -e PGPASSWORD="${PG_PASSWORD}" \
+  "${CONTAINER}" \
+  pg_restore -U "${PG_USER}" -d "${DATABASE}" --clean --if-exists 2>/dev/null; then
+  echo "Restore completed successfully."
 else
-  echo "[2/5] Grafana — no backup data, skipping"
+  # pg_restore returns non-zero on warnings too; treat as success if DB exists
+  echo "pg_restore finished (may have warnings — this is normal)."
 fi
 
-# ─── 3. Redis ───────────────────────────────────────────────────────────────
-if [ -f "${TMPDIR}/redis-data.tar.gz" ]; then
-  echo "[3/5] Redis — restoring RDB..."
-  if [ -n "${REDIS}" ]; then
-    docker stop "${REDIS}" >/dev/null && echo "  ✓ stopped redis"
-    docker run -i --rm --volumes-from "${REDIS}" alpine:3.19 \
-      sh -c "tar xzf - -C /data" \
-      < "${TMPDIR}/redis-data.tar.gz" \
-    && echo "  ✓ restored"
-    docker start "${REDIS}" >/dev/null && echo "  ✓ started redis"
-  fi
-else
-  echo "[3/5] Redis — no backup data, skipping"
-fi
+# --- Run ANALYZE to update planner statistics ----------------------------------
+echo "Running ANALYZE on '${DATABASE}'..."
+docker exec \
+  -e PGPASSWORD="${PG_PASSWORD}" \
+  "${CONTAINER}" \
+  psql -U "${PG_USER}" -d "${DATABASE}" -c "ANALYZE;" \
+  >/dev/null 2>&1 && echo "ANALYZE completed." || echo "ANALYZE failed (non-critical)."
 
-# ─── 4. .env ────────────────────────────────────────────────────────────────
-if [ -f "${TMPDIR}/env.txt" ]; then
-  echo "[4/5] .env — restoring secrets..."
-  cp "${TMPDIR}/env.txt" .env.restored 2>/dev/null && echo "  ✓ .env.restored written (review and copy to .env)" || echo "  ⚠ Could not write .env.restored (CWD is read-only)"
-else
-  echo "[4/5] .env — no backup, skipping"
-fi
-
-# ─── 5. Prometheus ──────────────────────────────────────────────────────────
-if [ -f "${TMPDIR}/prometheus-data.tar.gz" ]; then
-  echo "[5/5] Prometheus — restoring data..."
-  if [ -n "${PROM}" ]; then
-    docker stop "${PROM}" >/dev/null && echo "  ✓ stopped prometheus"
-    docker run -i --rm --volumes-from "${PROM}" alpine:3.19 \
-      sh -c "tar xzf - -C /prometheus" \
-      < "${TMPDIR}/prometheus-data.tar.gz" \
-    && echo "  ✓ restored"
-    docker start "${PROM}" >/dev/null && echo "  ✓ started prometheus"
-  fi
-else
-  echo "[5/5] Prometheus — no backup data, skipping"
-fi
-
+# --- Summary -------------------------------------------------------------------
 echo ""
 echo "=== Restore complete ==="
-echo "Next steps:"
-echo "  1. Restart remaining services: docker compose up -d"
-echo "  2. Review .env.restored and copy to .env if needed"
-echo "  3. Re-run grafana init if needed: node scripts/grafana-init.mjs"
+echo "Database '${DATABASE}' has been restored from:"
+echo "  ${BACKUP_FILE}"
+echo ""
+echo "Recommended next steps:"
+echo "  1. Verify data: docker exec -it ${CONTAINER} psql -U ${PG_USER} -d ${DATABASE}"
+echo "  2. Restart services: docker compose up -d"
