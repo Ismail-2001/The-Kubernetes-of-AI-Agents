@@ -123,6 +123,22 @@ export {
   type WebhookConfig,
 } from "./webhook/index.js";
 export {
+  getExecutionPatterns,
+  getModelDistribution,
+  getNamespaceActivity,
+  getUsageSummary,
+  getTopAgents,
+  getCostTrend,
+  getPeakHours,
+  ensureLLMUsageTable,
+} from "./analytics/index.js";
+export type {
+  ExecutionPattern,
+  ModelDistribution,
+  NamespaceActivity,
+  UsageSummary,
+} from "./analytics/index.js";
+export {
   validate,
   PaginationQuerySchema,
   NamespaceQuerySchema,

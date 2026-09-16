@@ -63,7 +63,26 @@ export async function ensureTables(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS llm_usage (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      model VARCHAR(255) NOT NULL,
+      namespace VARCHAR(255) NOT NULL,
+      agent_id VARCHAR(255) NOT NULL,
+      execution_id VARCHAR(255),
+      prompt_tokens INT NOT NULL DEFAULT 0,
+      completion_tokens INT NOT NULL DEFAULT 0,
+      total_tokens INT NOT NULL DEFAULT 0,
+      cost_usd NUMERIC(12,8) NOT NULL DEFAULT 0,
+      latency_ms INT NOT NULL DEFAULT 0,
+      success BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_usage_created_at ON llm_usage (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage (model, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_llm_usage_namespace ON llm_usage (namespace, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_llm_usage_agent ON llm_usage (agent_id, created_at DESC);
   `);
 
-  logger.info("Notification and policy tables ensured");
+  logger.info("Notification, policy, and analytics tables ensured");
 }

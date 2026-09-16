@@ -1666,6 +1666,70 @@ fastify.get("/api/metrics/timeseries", async () => {
   }
 });
 
+// ── Usage Analytics REST ──
+
+fastify.get("/api/analytics/summary", { preHandler: [authenticate] }, async (_request, reply) => {
+  try {
+    const { getUsageSummary } = await import("@e-gaop/shared");
+    const summary = await getUsageSummary();
+    return apiResponse(summary);
+  } catch (err: unknown) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to get analytics summary");
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to fetch analytics summary", "/api/analytics/summary", crypto.randomUUID());
+  }
+});
+
+fastify.get("/api/analytics/patterns", { preHandler: [authenticate] }, async (request, reply) => {
+  try {
+    const { getExecutionPatterns } = await import("@e-gaop/shared");
+    const days = parseInt((request.query as Record<string, string>).days ?? "7", 10);
+    const patterns = await getExecutionPatterns(days);
+    return apiResponse(patterns);
+  } catch (err: unknown) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to get execution patterns");
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to fetch execution patterns", "/api/analytics/patterns", crypto.randomUUID());
+  }
+});
+
+fastify.get("/api/analytics/models", { preHandler: [authenticate] }, async (_request, reply) => {
+  try {
+    const { getModelDistribution } = await import("@e-gaop/shared");
+    const models = await getModelDistribution();
+    return apiResponse(models);
+  } catch (err: unknown) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to get model distribution");
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to fetch model distribution", "/api/analytics/models", crypto.randomUUID());
+  }
+});
+
+fastify.get("/api/analytics/cost-trend", { preHandler: [authenticate] }, async (request, reply) => {
+  try {
+    const { getCostTrend } = await import("@e-gaop/shared");
+    const days = parseInt((request.query as Record<string, string>).days ?? "30", 10);
+    const trend = await getCostTrend(days);
+    return apiResponse(trend);
+  } catch (err: unknown) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to get cost trend");
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to fetch cost trend", "/api/analytics/cost-trend", crypto.randomUUID());
+  }
+});
+
+fastify.get("/api/analytics/peak-hours", { preHandler: [authenticate] }, async (_request, reply) => {
+  try {
+    const { getPeakHours } = await import("@e-gaop/shared");
+    const peakHours = await getPeakHours();
+    return apiResponse(peakHours);
+  } catch (err: unknown) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to get peak hours");
+    reply.code(500);
+    return toProblemDetails("INTERNAL", "Failed to fetch peak hours", "/api/analytics/peak-hours", crypto.randomUUID());
+  }
+});
+
 // ── WebSocket Event Streaming ──
 
 const MAX_EXECUTION_SUBSCRIBERS = 500; // max concurrent execution stream subscriptions

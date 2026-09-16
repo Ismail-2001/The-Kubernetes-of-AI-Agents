@@ -1,4 +1,5 @@
 import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv, LLM400Error, LLMAuthError, LLMRateLimitError } from "@e-gaop/shared";
+import { recordLLMCost } from "@e-gaop/shared/src/metrics/cost-metrics.js";
 
 initTracing("llm-router");
 loadSecretsIntoEnv();
@@ -929,6 +930,15 @@ server.addService(llmService.service, {
       const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, result.model);
       const latency = Date.now() - startTime;
 
+      recordLLMCost({
+        model: result.model,
+        namespace: extractNamespace(agent_id),
+        agentId: agent_id,
+        promptTokens: usage.prompt_tokens,
+        completionTokens: usage.completion_tokens,
+        costUsd: parseFloat(cost.replace("$", "")),
+      });
+
       logger.info({
         agent_id,
         model: result.model,
@@ -1107,6 +1117,16 @@ server.addService(llmService.service, {
         clearTimeout(timer);
 
         const cost = calculateCost(finalUsage.prompt_tokens, finalUsage.completion_tokens, finalModel);
+
+        recordLLMCost({
+          model: finalModel,
+          namespace: extractNamespace(agent_id),
+          agentId: agent_id,
+          promptTokens: finalUsage.prompt_tokens,
+          completionTokens: finalUsage.completion_tokens,
+          costUsd: parseFloat(cost.replace("$", "")),
+        });
+
         logger.info({
           agent_id,
           model: finalModel,

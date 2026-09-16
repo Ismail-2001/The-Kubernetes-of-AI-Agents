@@ -128,6 +128,38 @@ export function getStandardMeters(serviceName: string): StandardMeters {
   return standardMeters;
 }
 
+let _budgetMeter: Meter | null = null;
+let _budgetGauge: ReturnType<Meter["createGauge"]> | null = null;
+let _budgetCounter: ReturnType<Meter["createCounter"]> | null = null;
+function getBudgetMeter(): Meter {
+  if (!_budgetMeter) _budgetMeter = getMeter("egaop-budget");
+  return _budgetMeter;
+}
+
+export const namespaceBudgetUsage = {
+  set(value: number, attrs?: Record<string, string | number>) {
+    if (!_budgetGauge) {
+      _budgetGauge = getBudgetMeter().createGauge("egaop_namespace_budget_usage_percent", {
+        description: "Namespace budget utilization percentage",
+        unit: "%",
+      });
+    }
+    _budgetGauge.record(value, attrs);
+  },
+};
+
+export const namespaceBudgetExhausted = {
+  add(value: number, attrs?: Record<string, string | number>) {
+    if (!_budgetCounter) {
+      _budgetCounter = getBudgetMeter().createCounter("egaop_namespace_budget_exhausted_total", {
+        description: "Number of requests rejected due to budget exhaustion",
+        unit: "{requests}",
+      });
+    }
+    _budgetCounter.add(value, attrs);
+  },
+};
+
 export async function shutdownMetrics(): Promise<void> {
   if (meterProvider) {
     await meterProvider.shutdown();
