@@ -1,0 +1,22 @@
+{
+  "name": "@e-gaop/sdk",
+  "version": "1.0.0",
+  "description": "Auto-generated TypeScript SDK for E-GAOP API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "generate": "npm run generate:openapi && npm run generate:proto",
+    "generate:openapi": "openapi-typescript api/openapi.yaml -o sdk/src/openapi.d.ts",
+    "generate:proto": "protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=sdk/src/proto --ts_proto_opt=outputTypeCodec=true api/proto/egaop/v1/*.proto",
+    "build": "tsc",
+    "prepublishOnly": "npm run generate && npm run build"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.0.0",
+    "protobuf-ts": "^2.29.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -28,6 +28,29 @@ export async function ensureTables(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS webhook_deliveries (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
+      url TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed', 'retrying')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 5,
+      next_retry_at TIMESTAMPTZ,
+      last_error TEXT,
+      response_code INTEGER,
+      response_time_ms INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      delivered_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status
+      ON webhook_deliveries (status, next_retry_at)
+      WHERE status IN ('pending', 'retrying');
+
+    CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_channel
+      ON webhook_deliveries (channel_id, status);
+
     CREATE TABLE IF NOT EXISTS policies (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,

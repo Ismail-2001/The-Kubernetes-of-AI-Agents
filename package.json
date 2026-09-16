@@ -21,7 +21,10 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "prepare": "husky"
+    "prepare": "husky",
+    "sdk:generate": "cd sdk && npm run generate",
+    "sdk:build": "cd sdk && npm run build",
+    "proto:generate": "protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=sdk/src/proto --ts_proto_opt=outputTypeCodec=true api/proto/egaop/v1/*.proto"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

@@ -110,6 +110,19 @@ export type {
 export { BURN_RATE_WINDOWS, DEFAULT_SLO_DEFINITIONS } from "./slo/types.js";
 export type { SLISample } from "./slo/index.js";
 export {
+  signWebhookPayload,
+  verifyWebhookSignature,
+  deliverWebhook,
+  deliverWithRetry,
+  batchDeliver,
+  storeDelivery,
+  getDeliveryStats,
+  getDeadLetters,
+  type WebhookPayload,
+  type WebhookDelivery,
+  type WebhookConfig,
+} from "./webhook/index.js";
+export {
   validate,
   PaginationQuerySchema,
   NamespaceQuerySchema,
