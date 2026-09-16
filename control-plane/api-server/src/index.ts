@@ -310,19 +310,20 @@ function apiResponse<T>(data: T) {
   return { data, meta: { apiVersion: API_VERSION, traceId: crypto.randomUUID(), timestamp: new Date().toISOString() } };
 }
 
-function paginate<T>(items: T[], page: number, limit: number, maxLimit = 100) {
+function paginate<T>(items: T[], page: number, limit: number, maxLimit = 100, totalOverride?: number) {
   const safePage = Math.max(1, Math.floor(page) || 1);
   const safeLimit = Math.min(Math.max(1, Math.floor(limit) || 20), maxLimit);
   const start = (safePage - 1) * safeLimit;
   const paged = items.slice(start, start + safeLimit);
-  const totalPages = Math.ceil(items.length / safeLimit);
+  const total = totalOverride ?? items.length;
+  const totalPages = Math.ceil(total / safeLimit);
   return {
     items: paged,
-    total: items.length,
+    total,
     page: safePage,
     limit: safeLimit,
     totalPages,
-    hasNext: start + safeLimit < items.length,
+    hasNext: start + safeLimit < total,
     hasPrevious: safePage > 1,
   };
 }
@@ -1127,6 +1128,183 @@ fastify.get("/api/slos", async (request) => {
   const windowMinutes = Number((request.query as Record<string, string>).window) || 30;
   const snapshot = sloTracker.snapshot(windowMinutes);
   return apiResponse(snapshot);
+});
+
+// ── Audit Log REST ──
+
+fastify.get("/api/audit-log", async (request) => {
+  const q = request.query as Record<string, string>;
+  const page = parseInt(q.page ?? "1", 10);
+  const limit = Math.min(parseInt(q.limit ?? "50", 10), 100);
+  const offset = (Math.max(1, page) - 1) * limit;
+
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+
+    const where: string[] = [];
+    const params: unknown[] = [];
+    let paramIdx = 1;
+
+    if (q.event_type) {
+      where.push(`event_type = $${paramIdx++}`);
+      params.push(q.event_type);
+    }
+    if (q.severity) {
+      where.push(`severity = $${paramIdx++}`);
+      params.push(q.severity);
+    }
+    if (q.actor_id) {
+      where.push(`actor->>'id' ILIKE $${paramIdx++}`);
+      params.push(`%${q.actor_id}%`);
+    }
+    if (q.search) {
+      where.push(`(event_type ILIKE $${paramIdx} OR actor->>'id' ILIKE $${paramIdx} OR action->>'name' ILIKE $${paramIdx})`);
+      params.push(`%${q.search}%`);
+      paramIdx++;
+    }
+
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+    const countResult = await pool.query(`SELECT COUNT(*) FROM audit_entries ${whereClause}`, params);
+    const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+
+    const result = await pool.query(
+      `SELECT event_id, event_type, severity, actor, target, action, context, created_at
+       FROM audit_entries ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      [...params, limit, offset],
+    );
+
+    const entries = result.rows.map((row) => ({
+      id: row.event_id,
+      eventType: row.event_type,
+      severity: row.severity,
+      actor: row.actor,
+      target: row.target,
+      action: row.action,
+      context: row.context,
+      createdAt: row.created_at,
+    }));
+
+    return apiResponse(paginate(entries, page, limit, total));
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.warn({ err: errMsg }, "Failed to query audit log");
+    return apiResponse(paginate([], page, limit, 0));
+  }
+});
+
+// ── Users REST (admin) ──
+
+fastify.get("/api/users", async (request) => {
+  const q = request.query as Record<string, string>;
+  const page = parseInt(q.page ?? "1", 10);
+  const limit = Math.min(parseInt(q.limit ?? "50", 10), 100);
+  const offset = (Math.max(1, page) - 1) * limit;
+
+  try {
+    const { Pool } = await import("pg");
+    const pool = new Pool({
+      host: process.env.POSTGRES_HOST ?? "postgres",
+      port: parseInt(process.env.POSTGRES_PORT ?? "5432", 10),
+      database: process.env.POSTGRES_DB ?? "egaop",
+      user: process.env.POSTGRES_USER ?? "egaop",
+      password: process.env.POSTGRES_PASSWORD ?? "",
+      max: 5,
+      connectionTimeoutMillis: 5000,
+    });
+
+    const where: string[] = ["deleted_at IS NULL"];
+    const params: unknown[] = [];
+    let paramIdx = 1;
+
+    if (q.role) {
+      where.push(`role = $${paramIdx++}`);
+      params.push(q.role);
+    }
+    if (q.search) {
+      where.push(`(name ILIKE $${paramIdx} OR email ILIKE $${paramIdx})`);
+      params.push(`%${q.search}%`);
+      paramIdx++;
+    }
+
+    const whereClause = `WHERE ${where.join(" AND ")}`;
+
+    const countResult = await pool.query(`SELECT COUNT(*) FROM users ${whereClause}`, params);
+    const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+
+    const result = await pool.query(
+      `SELECT id, email, name, role, namespace_access, is_active, last_login_at, created_at
+       FROM users ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      [...params, limit, offset],
+    );
+
+    await pool.end();
+
+    const users = result.rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      namespaceAccess: typeof row.namespace_access === "string"
+        ? JSON.parse(row.namespace_access)
+        : row.namespace_access,
+      isActive: row.is_active,
+      lastLoginAt: row.last_login_at,
+      createdAt: row.created_at,
+    }));
+
+    return apiResponse(paginate(users, page, limit, total));
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.warn({ err: errMsg }, "Failed to query users");
+    return apiResponse(paginate([], page, limit, 0));
+  }
+});
+
+// ── Namespace Health ──
+
+fastify.get("/api/namespaces/health", async () => {
+  try {
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+
+    const nsResult = await pool.query(
+      `SELECT slug, display_name, tier, quotas, suspended_at FROM namespaces WHERE deleted_at IS NULL`
+    );
+
+    const health = await Promise.all(nsResult.rows.map(async (ns) => {
+      const agentCount = await pool.query(
+        `SELECT COUNT(*) FROM agents WHERE namespace = $1 AND deleted_at IS NULL`,
+        [ns.slug],
+      );
+      const quotas = typeof ns.quotas === "string" ? JSON.parse(ns.quotas) : (ns.quotas ?? {});
+      const maxAgents = quotas.max_agents ?? 10;
+      const currentAgents = parseInt(agentCount.rows[0]?.count ?? "0", 10);
+      const pct = maxAgents > 0 ? Math.round((currentAgents / maxAgents) * 100) : 0;
+
+      return {
+        name: ns.slug,
+        displayName: ns.display_name ?? ns.slug,
+        tier: (ns.tier ?? "sandbox").replace("NAMESPACE_TIER_", "").toLowerCase(),
+        agentCount: currentAgents,
+        maxAgents,
+        quotaPct: pct,
+        status: ns.suspended_at ? "inactive" : "active",
+        healthColor: pct > 80 ? "warn" : pct > 50 ? "accent" : "ok",
+      };
+    }));
+
+    return apiResponse(health);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.warn({ err: errMsg }, "Failed to query namespace health");
+    return apiResponse([]);
+  }
 });
 
 // ── WebSocket Event Streaming ──

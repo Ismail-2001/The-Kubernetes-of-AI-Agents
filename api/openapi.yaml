@@ -455,6 +455,10 @@ tags:
     description: Execution traces and replay
   - name: Metrics
     description: Platform metrics and monitoring
+  - name: Audit
+    description: Audit log for compliance and security
+  - name: Users
+    description: User management and RBAC
   - name: Health
     description: Service health checks
   - name: Streaming
@@ -1046,6 +1050,87 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SLOSnapshot"
+
+  /api/audit-log:
+    get:
+      tags: [Audit]
+      summary: List audit log entries
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: event_type
+          in: query
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [info, warn, error, critical]
+        - name: actor_id
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse"
+
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List platform users
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: role
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse"
+
+  /api/namespaces/health:
+    get:
+      tags: [Namespaces]
+      summary: Get namespace health and quota usage
+      responses:
+        "200":
+          description: Namespace health data
 
   /api/events:
     get:
