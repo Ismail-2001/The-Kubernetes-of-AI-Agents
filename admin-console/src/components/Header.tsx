@@ -11,6 +11,7 @@ interface User {
 
 export default function Header() {
   const [user, setUser] = useState<User | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -18,7 +19,8 @@ export default function Header() {
       .then((data) => {
         if (data?.data) setUser(data.data);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, []);
 
   async function handleLogout() {
@@ -47,8 +49,8 @@ export default function Header() {
         <div className="w-px h-6 bg-white/10 mx-2" />
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <p className="text-xs font-bold text-text-primary">{user?.name ?? "Loading..."}</p>
-            <p className="text-[10px] text-text-secondary">{user?.role ?? ""}</p>
+            <p className="text-xs font-bold text-text-primary">{user?.name ?? (loaded ? "Admin" : "")}</p>
+            <p className="text-[10px] text-text-secondary">{user?.role ?? (loaded ? "admin" : "")}</p>
           </div>
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-secondary/20 to-accent/20 border border-white/10 flex items-center justify-center p-2 overflow-hidden">
             <span className="text-sm font-bold text-brand-primary">{initials}</span>

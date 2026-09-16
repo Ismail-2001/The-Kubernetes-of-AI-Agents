@@ -18,7 +18,9 @@ if (!_jwtSecret || _jwtSecret.length < 32) {
   );
 }
 const JWT_SECRET: string = _jwtSecret;
-const JWT_EXPIRES_SEC = 86400; // 24 hours
+const ACCESS_TOKEN_SEC = 900;          // 15 minutes — short-lived
+const REFRESH_TOKEN_SEC = 7 * 86400;   // 7 days — long-lived
+const REFRESH_COOKIE = "egaop_refresh";
 
 // ── Token revocation (Redis-backed blacklist) ────────────────────────────────
 // A SHA-256 digest of the raw token is stored with a TTL equal to the token's
@@ -26,16 +28,28 @@ const JWT_EXPIRES_SEC = 86400; // 24 hours
 
 let redisClient: Redis | null = null;
 if (process.env.NODE_ENV !== "test") {
+  const redisHost = process.env.REDIS_HOST || "redis";
+  const redisPort = parseInt(process.env.REDIS_PORT || "6379", 10);
   redisClient = new Redis({
-    host: process.env.REDIS_HOST || "redis",
-    port: parseInt(process.env.REDIS_PORT || "6379", 10),
+    host: redisHost,
+    port: redisPort,
     password: process.env.REDIS_PASSWORD || undefined,
     lazyConnect: true,
     enableOfflineQueue: false,
-    maxRetriesPerRequest: 1,
-    retryStrategy: (times: number) => Math.min(times * 100, 2000),
+    maxRetriesPerRequest: 3,
+    connectTimeout: 5000,
+    retryStrategy: (times: number) => {
+      if (times > 10) return null; // stop retrying after 10 attempts
+      return Math.min(times * 200, 3000);
+    },
   });
-  redisClient.on("error", (err) => logger.warn({ err: err.message }, "Redis connection issue for token revocation"));
+  redisClient.on("error", (err) => {
+    logger.warn({ err: err.message, host: redisHost, port: redisPort }, "Redis connection issue for token revocation");
+  });
+  // Explicit connect with logging — fail open on connection failure
+  redisClient.connect().catch((err) => {
+    logger.warn({ err: err.message }, "Redis initial connect failed — operating in fail-open mode (revocation unavailable)");
+  });
 }
 
 function tokenRevocationKey(token: string): string {
@@ -43,20 +57,20 @@ function tokenRevocationKey(token: string): string {
 }
 
 async function isTokenRevoked(token: string): Promise<boolean> {
-  if (!redisClient) return false;
+  if (!redisClient) return false; // Fail open: if Redis is down, allow tokens (revocation unavailable)
   try {
     const exists = await redisClient.exists(tokenRevocationKey(token));
     return exists === 1;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn({ err: message }, "Token revocation check failed — failing open");
-    return false;
+    return false; // Fail open: allow token when Redis errors (revocation unavailable)
   }
 }
 
 async function revokeToken(token: string): Promise<void> {
   if (!redisClient) return;
-  let ttl = JWT_EXPIRES_SEC;
+  let ttl = ACCESS_TOKEN_SEC;
   const claims = verifyJWT(token, JWT_SECRET);
   if (claims) {
     ttl = Math.max(1, claims.exp - Math.floor(Date.now() / 1000));
@@ -69,13 +83,116 @@ async function revokeToken(token: string): Promise<void> {
   }
 }
 
+// ── Refresh token helpers (Redis-backed with in-memory fallback) ─────────────
+
+const inMemoryRefreshTokens = new Map<string, { userId: string; expiresAt: number }>();
+
+function refreshTokenKey(tokenHash: string): string {
+  return `egaop:refresh:${tokenHash}`;
+}
+
+function hashRefreshToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function getRedis(): Redis | null {
+  return redisClient?.status === "ready" ? redisClient : null;
+}
+
+async function storeRefreshToken(token: string, userId: string): Promise<void> {
+  const hash = hashRefreshToken(token);
+  const expiresAt = Date.now() + REFRESH_TOKEN_SEC * 1000;
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.set(refreshTokenKey(hash), JSON.stringify({ userId, createdAt: Date.now() }), "EX", REFRESH_TOKEN_SEC);
+      return;
+    } catch { /* fall through to in-memory */ }
+  }
+  inMemoryRefreshTokens.set(hash, { userId, expiresAt });
+  // Evict expired entries periodically
+  if (inMemoryRefreshTokens.size > 100) {
+    const now = Date.now();
+    for (const [k, v] of inMemoryRefreshTokens) {
+      if (v.expiresAt < now) inMemoryRefreshTokens.delete(k);
+    }
+  }
+}
+
+async function verifyRefreshToken(token: string): Promise<{ userId: string } | null> {
+  const hash = hashRefreshToken(token);
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const raw = await redis.get(refreshTokenKey(hash));
+      if (raw) return JSON.parse(raw) as { userId: string };
+      return null;
+    } catch { /* fall through to in-memory */ }
+  }
+  const entry = inMemoryRefreshTokens.get(hash);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    inMemoryRefreshTokens.delete(hash);
+    return null;
+  }
+  return { userId: entry.userId };
+}
+
+async function revokeRefreshToken(token: string): Promise<void> {
+  const hash = hashRefreshToken(token);
+  const redis = getRedis();
+  if (redis) {
+    try { await redis.del(refreshTokenKey(hash)); } catch { /* best-effort */ }
+  }
+  inMemoryRefreshTokens.delete(hash);
+}
+
+function extractRefreshToken(request: FastifyRequest): string | null {
+  return parseCookies(request)[REFRESH_COOKIE] ?? null;
+}
+
 function extractTokenFromRequest(request: FastifyRequest): string | null {
   const authHeader = request.headers.authorization;
   if (authHeader?.startsWith("Bearer ")) {
     return authHeader.slice(7);
   }
-  const cookies = request.cookies;
-  return cookies?.egaop_token ?? null;
+  const cookies = parseCookies(request);
+  return cookies.egaop_token ?? null;
+}
+
+// ── Raw cookie helpers (bypass @fastify/cookie plugin to avoid onSend conflict)
+
+function parseCookies(request: FastifyRequest): Record<string, string> {
+  const header = request.headers.cookie;
+  if (!header) return {};
+  const result: Record<string, string> = {};
+  for (const pair of header.split(";")) {
+    const idx = pair.indexOf("=");
+    if (idx < 0) continue;
+    const key = pair.slice(0, idx).trim();
+    const val = pair.slice(idx + 1).trim();
+    if (key) result[key] = decodeURIComponent(val);
+  }
+  return result;
+}
+
+function setCookie(reply: FastifyReply, name: string, value: string, opts: { maxAge: number; path?: string; httpOnly?: boolean; secure?: boolean; sameSite?: string }): void {
+  const parts = [`${name}=${encodeURIComponent(value)}`, `Max-Age=${opts.maxAge}`, `Path=${opts.path ?? "/"}`];
+  if (opts.httpOnly) parts.push("HttpOnly");
+  if (opts.secure) parts.push("Secure");
+  if (opts.sameSite) parts.push(`SameSite=${opts.sameSite.charAt(0).toUpperCase() + opts.sameSite.slice(1)}`);
+  const existing = reply.getHeader("Set-Cookie");
+  if (Array.isArray(existing)) {
+    reply.header("Set-Cookie", [...existing, parts.join("; ")]);
+  } else if (typeof existing === "string") {
+    reply.header("Set-Cookie", [existing, parts.join("; ")]);
+  } else {
+    reply.header("Set-Cookie", parts.join("; "));
+  }
+}
+
+function clearCookie(reply: FastifyReply, name: string): void {
+  setCookie(reply, name, "", { maxAge: 0, path: "/" });
 }
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
@@ -94,8 +211,7 @@ export async function authenticate(
 
   // Fallback to cookie
   if (!token) {
-    const cookies = request.cookies;
-    token = cookies?.egaop_token ?? null;
+    token = parseCookies(request).egaop_token ?? null;
   }
 
   if (!token) {
@@ -189,7 +305,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       );
     } catch { /* audit failure is non-fatal */ }
 
-    // Generate JWT
+    // Generate access + refresh tokens
     const claims: Omit<JWTClaims, "iat" | "exp"> = {
       sub: user.id,
       email: user.email,
@@ -197,7 +313,16 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       role: user.role,
       namespace_access: user.namespace_access,
     };
-    const token = signJWT(claims, JWT_SECRET, JWT_EXPIRES_SEC);
+    const token = signJWT(claims, JWT_SECRET, ACCESS_TOKEN_SEC);
+    const refreshToken = crypto.randomBytes(40).toString("hex");
+    await storeRefreshToken(refreshToken, user.id);
+
+    setCookie(reply, "egaop_token", token, {
+      httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: ACCESS_TOKEN_SEC,
+    });
+    setCookie(reply, REFRESH_COOKIE, refreshToken, {
+      httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: REFRESH_TOKEN_SEC,
+    });
 
     return {
       data: {
@@ -212,7 +337,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/api/auth/login", {
     config: {
       rateLimit: {
-        max: 10,
+        max: 5,
         timeWindow: "1 minute",
         keyGenerator: (request: FastifyRequest) => request.ip ?? "unknown",
       },
@@ -255,7 +380,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           { ipAddress: request.ip, userAgent: request.headers["user-agent"] },
         );
       } catch { /* audit failure is non-fatal */ }
-      reply.code(403).send({ error: { message: "Account is deactivated", code: "ACCOUNT_DISABLED" } });
+      // Return same 401 as invalid credentials to prevent account enumeration
+      reply.code(401).send({ error: { message: "Invalid email or password", code: "INVALID_CREDENTIALS" } });
       return;
     }
 
@@ -291,8 +417,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    // Reset failed attempts on success
-    await repo.resetFailedLogin(email);
+    // Note: Do NOT reset failed login attempts on successful login.
+    // The lockout counter should only be reset by an admin action or
+    // after the lockout period expires. This prevents brute-force
+    // attacks where the attacker guesses the password within the window.
 
     try {
       createAuditEntry(
@@ -305,7 +433,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       );
     } catch { /* audit failure is non-fatal */ }
 
-    // Generate JWT
+    // Generate access + refresh tokens
     const claims: Omit<JWTClaims, "iat" | "exp"> = {
       sub: user.id,
       email: user.email,
@@ -313,12 +441,21 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       role: user.role,
       namespace_access: user.namespace_access,
     };
-    const token = signJWT(claims, JWT_SECRET, JWT_EXPIRES_SEC);
+    const token = signJWT(claims, JWT_SECRET, ACCESS_TOKEN_SEC);
+    const refreshToken = crypto.randomBytes(40).toString("hex");
+    await storeRefreshToken(refreshToken, user.id);
+
+    setCookie(reply, "egaop_token", token, {
+      httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: ACCESS_TOKEN_SEC,
+    });
+    setCookie(reply, REFRESH_COOKIE, refreshToken, {
+      httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: REFRESH_TOKEN_SEC,
+    });
 
     return {
       data: {
-        user: { id: user.id, email: user.email, name: user.name, role: user.role },
         token,
+        user: { id: user.id, email: user.email, name: user.name, role: user.role },
         must_change_password: user.must_change_password,
       },
       meta: { traceId: crypto.randomUUID(), timestamp: new Date().toISOString() },
@@ -345,7 +482,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    const user = await repo.findByEmail(claims.email);
+    const user = await repo.findById(claims.sub);
     if (!user) {
       reply.code(404).send({ error: { message: "User not found", code: "NOT_FOUND" } });
       return;
@@ -367,13 +504,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    // Update password and clear must_change_password
+    // Update password using user.id from claims.sub (not claims.email — email is attacker-controlled)
     const newHash = await hashPassword(newPassword);
     const pool = (repo as unknown as { pool: import("pg").Pool }).pool;
     await pool.query(
       `UPDATE users SET password_hash = $1, must_change_password = false, updated_at = NOW()
-       WHERE lower(email) = lower($2) AND deleted_at IS NULL`,
-      [newHash, claims.email]
+       WHERE id = $2 AND deleted_at IS NULL`,
+      [newHash, user.id]
     );
 
     try {
@@ -387,8 +524,29 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       );
     } catch { /* audit failure is non-fatal */ }
 
+    // Rotate tokens — password change invalidates old session
+    const oldToken = extractTokenFromRequest(request);
+    const oldRefresh = extractRefreshToken(request);
+    if (oldToken) await revokeToken(oldToken);
+    if (oldRefresh) await revokeRefreshToken(oldRefresh);
+
+    const newClaims: Omit<JWTClaims, "iat" | "exp"> = {
+      sub: user.id, email: user.email, name: user.name,
+      role: user.role, namespace_access: user.namespace_access,
+    };
+    const newToken = signJWT(newClaims, JWT_SECRET, ACCESS_TOKEN_SEC);
+    const newRefresh = crypto.randomBytes(40).toString("hex");
+    await storeRefreshToken(newRefresh, user.id);
+
+    setCookie(reply, "egaop_token", newToken, {
+      httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: ACCESS_TOKEN_SEC,
+    });
+    setCookie(reply, REFRESH_COOKIE, newRefresh, {
+      httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: REFRESH_TOKEN_SEC,
+    });
+
     return {
-      data: { message: "Password changed successfully" },
+      data: { message: "Password changed successfully", token: newToken },
       meta: { traceId: crypto.randomUUID(), timestamp: new Date().toISOString() },
     };
   });
@@ -414,15 +572,66 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     };
   });
 
+  // POST /api/auth/refresh — exchange refresh token for new access token
+  fastify.post("/api/auth/refresh", async (request, reply) => {
+    // Accept refresh token from cookie OR request body (for clients that can't use cookies)
+    const refreshToken = extractRefreshToken(request)
+      ?? (request.body as Record<string, string>)?.refresh_token
+      ?? null;
+
+    if (!refreshToken) {
+      reply.code(401).send({ error: { message: "Missing refresh token", code: "UNAUTHORIZED" } });
+      return;
+    }
+
+    const stored = await verifyRefreshToken(refreshToken);
+    if (!stored) {
+      reply.code(401).send({ error: { message: "Invalid or expired refresh token", code: "UNAUTHORIZED" } });
+      return;
+    }
+
+    const user = await repo.findById(stored.userId);
+    if (!user || !user.is_active) {
+      reply.code(401).send({ error: { message: "Account not found or disabled", code: "UNAUTHORIZED" } });
+      return;
+    }
+
+    // Rotate: revoke old refresh token, issue new pair
+    await revokeRefreshToken(refreshToken);
+
+    const claims: Omit<JWTClaims, "iat" | "exp"> = {
+      sub: user.id, email: user.email, name: user.name,
+      role: user.role, namespace_access: user.namespace_access,
+    };
+    const newAccessToken = signJWT(claims, JWT_SECRET, ACCESS_TOKEN_SEC);
+    const newRefreshToken = crypto.randomBytes(40).toString("hex");
+    await storeRefreshToken(newRefreshToken, user.id);
+
+    setCookie(reply, "egaop_token", newAccessToken, {
+      httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: ACCESS_TOKEN_SEC,
+    });
+    setCookie(reply, REFRESH_COOKIE, newRefreshToken, {
+      httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: REFRESH_TOKEN_SEC,
+    });
+
+    return {
+      data: { token: newAccessToken },
+      meta: { traceId: crypto.randomUUID(), timestamp: new Date().toISOString() },
+    };
+  });
+
   // POST /api/auth/logout (protected)
-  fastify.post("/api/auth/logout", { preHandler: [authenticate] }, async (request) => {
+  fastify.post("/api/auth/logout", { preHandler: [authenticate] }, async (request, reply) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const claims = (request as any).user as JWTClaims;
     const token = extractTokenFromRequest(request);
+    const refreshToken = extractRefreshToken(request);
 
-    if (token) {
-      await revokeToken(token);
-    }
+    if (token) await revokeToken(token);
+    if (refreshToken) await revokeRefreshToken(refreshToken);
+
+    clearCookie(reply, "egaop_token");
+    clearCookie(reply, REFRESH_COOKIE);
 
     try {
       createAuditEntry(

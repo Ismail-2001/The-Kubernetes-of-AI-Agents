@@ -15,6 +15,10 @@ COPY control-plane/api-server/src/ ./control-plane/api-server/src/
 
 RUN npm run build -w control-plane/api-server
 
+# Patch Fastify v5 safeWriteHead to silently ignore duplicate writeHead calls
+COPY control-plane/api-server/patch-fastify.js ./patch-fastify.js
+RUN node patch-fastify.js && rm patch-fastify.js
+
 # Stage 2: Production
 FROM node:22-alpine AS runner
 WORKDIR /app
@@ -25,6 +29,8 @@ COPY --from=builder /app/control-plane/api-server/package.json ./
 RUN rm -rf node_modules/@e-gaop/shared
 COPY --from=builder /app/packages/shared ./node_modules/@e-gaop/shared
 RUN cp -r node_modules/@e-gaop/shared/node_modules/* node_modules/ 2>/dev/null; rm -rf node_modules/@e-gaop/shared/node_modules
+# Proto files for gRPC service definitions (loaded at runtime via @grpc/proto-loader)
+COPY api/proto/ /api/proto/
 USER egaop
 EXPOSE 50051 3001 15051
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

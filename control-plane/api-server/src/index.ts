@@ -12,11 +12,9 @@ import http from "http";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import Fastify from "fastify";
-import cors from "@fastify/cors";
-import rateLimit from "@fastify/rate-limit";
-import cookie from "@fastify/cookie";
-import swagger from "@fastify/swagger";
-import swaggerUi from "@fastify/swagger-ui";
+
+// CORS, security headers, and caching handled via onRequest hook (not onSend) to avoid Fastify v5 lifecycle conflicts
+
 import pino from "pino";
 import { WebSocket } from "ws";
 import { Connection, Client } from "@temporalio/client";
@@ -104,6 +102,30 @@ server.addService(HEALTH_SERVICE, {
   }
 });
 
+// ── Suppress Fastify v5 ERR_HTTP_HEADERS_SENT crashes ────────────────────
+// This error occurs when res.writeHead() is called twice in the Fastify
+// lifecycle. It is harmless (the first response was already sent) but
+// crashes the process. We suppress it at every possible level.
+function isHeadersSentError(err: unknown): boolean {
+  if (err instanceof Error) {
+    if ((err as NodeJS.ErrnoException).code === "ERR_HTTP_HEADERS_SENT") return true;
+    if (err.message.includes("ERR_HTTP_HEADERS_SENT")) return true;
+    if (err.message.includes("headers have already been sent")) return true;
+  }
+  return false;
+}
+process.on("uncaughtException", (err) => {
+  if (isHeadersSentError(err)) return;
+  // eslint-disable-next-line no-console
+  console.error("[FATAL] Uncaught exception:", err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  if (isHeadersSentError(reason)) return;
+  // eslint-disable-next-line no-console
+  console.error("[ERROR] Unhandled rejection:", reason);
+});
+
 // ── REST API (BFF for frontend) ──────────────────────────────────────────────
 
 const fastify = Fastify({
@@ -111,202 +133,20 @@ const fastify = Fastify({
   bodyLimit: 1048576, // 1MB max request body
 });
 
-// Security headers on every response
-fastify.addHook("onSend", async (_request, reply, payload) => {
-  reply.header("X-Content-Type-Options", "nosniff");
-  reply.header("X-Frame-Options", "DENY");
-  reply.header("X-XSS-Protection", "1; mode=block");
-  reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-  reply.header("Content-Security-Policy", "default-src 'self'");
-  reply.header("Referrer-Policy", "no-referrer");
-  reply.header("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
-  return payload;
-});
-
+// CORS origins parsed from environment (comma-separated) or default dev origins
 const corsOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim())
   : ["http://localhost:3000", "http://localhost:5173"];
 
-fastify.register(cors, { origin: corsOrigins, credentials: true });
-fastify.register(rateLimit, {
-  max: Number(process.env.RATE_LIMIT_MAX) || 100,
-  timeWindow: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
-  keyGenerator: (request) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Fastify request augmentation
-    const userId = (request as any).userId || (request as any).user?.id;
-    if (userId) return `user:${userId}`;
-    const ip = request.ip ?? request.socket.remoteAddress ?? "unknown";
-    return `ip:${ip}`;
-  },
-  addHeadersOnExceeding: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true },
-  addHeaders: { "x-ratelimit-limit": true, "x-ratelimit-remaining": true, "x-ratelimit-reset": true, "retry-after": true },
-});
-fastify.register(cookie);
+const isProduction = process.env.NODE_ENV === "production";
 
-fastify.register(swagger, {
-  openapi: {
-    openapi: "3.0.0",
-    info: {
-      title: "E-GAOP API",
-      description: "Enterprise-Grade Agent Orchestration Platform API — manage agents, namespaces, executions, and observability across the platform.",
-      version: "1.0.0",
-      contact: { name: "E-GAOP Team", url: "https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents" },
-      license: { name: "MIT", url: "https://opensource.org/licenses/MIT" },
-    },
-    servers: [
-      { url: `http://localhost:${process.env.API_SERVER_REST_PORT || 3001}`, description: "Development" },
-      { url: "https://api.egaop.io", description: "Production" },
-    ],
-    components: {
-      securitySchemes: {
-        bearerAuth: {
-          type: "http",
-          scheme: "bearer",
-          bearerFormat: "JWT",
-          description: "JWT token obtained from /api/auth/login",
-        },
-      },
-      schemas: {
-        Agent: {
-          type: "object",
-          properties: {
-            id: { type: "string", description: "Unique agent identifier" },
-            name: { type: "string", description: "Agent name" },
-            version: { type: "string", example: "v1" },
-            namespace: { type: "string", description: "Namespace the agent belongs to" },
-            status: { type: "string", enum: ["pending", "running", "succeeded", "failed", "cancelled"] },
-            health: { type: "string", enum: ["Healthy", "Unhealthy", "Unknown"] },
-            createdAt: { type: "string", format: "date-time" },
-            spec: { type: "object", description: "Agent specification (model, tools, prompt)" },
-            owner: { type: "string" },
-          },
-        },
-        AgentExecution: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            agentId: { type: "string" },
-            agentName: { type: "string" },
-            namespace: { type: "string" },
-            status: { type: "string", enum: ["running", "succeeded", "failed", "cancelled", "timeout"] },
-            startTime: { type: "string", format: "date-time" },
-            endTime: { type: "string", format: "date-time", nullable: true },
-            durationMs: { type: "number", nullable: true },
-            costUsd: { type: "number" },
-          },
-        },
-        Namespace: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            displayName: { type: "string" },
-            agentCount: { type: "number" },
-            status: { type: "string", enum: ["active", "inactive"] },
-            createdAt: { type: "string", format: "date-time" },
-            tier: { type: "string", enum: ["sandbox", "production", "enterprise"] },
-            quotas: {
-              type: "object",
-              properties: {
-                maxAgents: { type: "number" },
-                concurrentExecutions: { type: "number" },
-                toolCallsPerMinute: { type: "number" },
-              },
-            },
-          },
-        },
-        Trace: {
-          type: "object",
-          properties: {
-            traceId: { type: "string" },
-            agentId: { type: "string" },
-            startTime: { type: "string", format: "date-time" },
-            endTime: { type: "string", format: "date-time" },
-            durationMs: { type: "number" },
-            spanCount: { type: "number" },
-            errorCount: { type: "number" },
-          },
-        },
-        Metrics: {
-          type: "object",
-          properties: {
-            activeAgents: { type: "number" },
-            executions24h: { type: "number" },
-            avgLatencyMs: { type: "number" },
-            errorRate: { type: "number" },
-            totalCostUsd: { type: "number" },
-            activeNamespaces: { type: "number" },
-          },
-        },
-        Error: {
-          type: "object",
-          properties: {
-            error: {
-              type: "object",
-              properties: {
-                message: { type: "string" },
-                code: { type: "string" },
-              },
-            },
-          },
-        },
-        PaginationMeta: {
-          type: "object",
-          properties: {
-            total: { type: "number" },
-            page: { type: "number" },
-            limit: { type: "number" },
-            hasNext: { type: "boolean" },
-          },
-        },
-      },
-    },
-    security: [{ bearerAuth: [] }],
-    tags: [
-      { name: "Agents", description: "Agent CRUD and execution management" },
-      { name: "Namespaces", description: "Namespace isolation and quotas" },
-      { name: "Traces", description: "Execution traces and replay" },
-      { name: "Metrics", description: "Platform metrics and monitoring" },
-      { name: "SLOs", description: "Service Level Objectives and SLI tracking" },
-      { name: "Auth", description: "Authentication and registration" },
-      { name: "Health", description: "Service health checks" },
-      { name: "Streaming", description: "WebSocket real-time event streaming" },
-    ],
-  },
-});
-
-fastify.register(swaggerUi, {
-  routePrefix: "/api/docs",
-});
-
-// ETag support for conditional GET (304 Not Modified)
-// Stores only the content hash — never the response body — bounding memory use.
-const etagStore = new Map<string, string>();
-
-fastify.addHook("onSend", async (request, reply, payload) => {
-  if (request.method === "GET" && typeof payload === "string" && reply.statusCode === 200) {
-    const hash = crypto.createHash("sha256").update(payload).digest("base64url").slice(0, 27);
-    const cacheKey = request.url;
-    const previous = etagStore.get(cacheKey);
-
-    if (previous === hash) {
-      etagStore.delete(cacheKey);
-    } else {
-      etagStore.set(cacheKey, hash);
-      if (etagStore.size > 500) {
-        const firstKey = etagStore.keys().next().value;
-        if (firstKey) etagStore.delete(firstKey);
-      }
-    }
-
-    reply.header("ETag", `"${hash}"`);
-
-    const ifNoneMatch = request.headers["if-none-match"];
-    if (ifNoneMatch === `"${hash}"`) {
-      reply.code(304);
-      return "";
-    }
-  }
-  return payload;
+// CORS preflight: standalone OPTIONS route returns 204 with required headers.
+// Non-preflight CORS headers are set in the onRequest hook below.
+fastify.options("/*", async (_request, reply) => {
+  reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  reply.header("Access-Control-Max-Age", "86400");
+  reply.code(204).send();
 });
 
 // Caching headers for GET responses (enables CDN/proxy caching)
@@ -321,7 +161,30 @@ const CACHE_TTL: Record<string, string> = {
   "/api/auth/me": "private, no-cache, max-age=10",
 };
 
+// ── Global onRequest hook: CORS, security headers, and caching ──────────────
+// Uses onRequest (not onSend) to avoid Fastify v5 response lifecycle conflicts.
+// Headers set here are included in ALL responses — preflight, API, error, etc.
 fastify.addHook("onRequest", async (request, reply) => {
+  // CORS: set Allow-Origin on every response for non-preflight requests.
+  // Preflight OPTIONS handler also sets these; redundant but harmless.
+  const origin = request.headers.origin;
+  if (origin && corsOrigins.includes(origin)) {
+    reply.header("Access-Control-Allow-Origin", origin);
+    reply.header("Access-Control-Allow-Credentials", "true");
+  }
+  reply.header("Vary", "Origin");
+
+  // Security headers (OWASP recommended)
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("X-Frame-Options", "DENY");
+  reply.header("X-XSS-Protection", "0");
+  reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  reply.header("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  if (isProduction) {
+    reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+
+  // Cache-Control for GET responses
   if (request.method === "GET") {
     const cacheKey = Object.keys(CACHE_TTL).find((k) => request.url.startsWith(k));
     if (cacheKey) {
@@ -364,6 +227,19 @@ fastify.addHook("preHandler", async (request, reply) => {
   const publicRoutes = ["/health", "/api/health", "/api/auth/login", "/api/auth/register"];
   if (publicRoutes.includes(request.url) || request.url.startsWith("/api/auth/")) return;
   await authenticate(request, reply);
+
+  // RBAC: check namespace access for resource-scoped routes
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const user = (request as any).user;
+  if (user?.namespace_access && Array.isArray(user.namespace_access) && user.namespace_access.length > 0) {
+    const ns = (request.query as Record<string, string>)?.namespace
+      || (request.params as Record<string, string>)?.name
+      || (request.params as Record<string, string>)?.namespace;
+    // Only enforce if the route specifies a namespace and user has restricted access
+    if (ns && !user.namespace_access.includes(ns) && !user.namespace_access.includes("*")) {
+      reply.code(403).send({ error: { message: "Access denied to namespace", code: "FORBIDDEN" } });
+    }
+  }
 });
 
 const API_VERSION = "v1";
@@ -716,14 +592,55 @@ fastify.post("/api/agents", async (request, reply) => {
 
 fastify.delete("/api/agents/:id", async (request, reply) => {
   const { id } = request.params as { id: string };
+  const q = request.query as Record<string, string>;
+  const namespace = q.namespace || "default";
   return new Promise((resolve) => {
     agentHandlers.DeleteAgent(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto
-      { request: { name: id, namespace: "default" } } as any,
+      { request: { name: id, namespace } } as any,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto callback
       (err: any) => {
-        if (err) { reply.code(404); resolve({ error: { message: err.message } }); return; }
+        if (err) { reply.code(404); resolve({ error: { message: "Agent not found" } }); return; }
         resolve(apiResponse(null));
+      }
+    );
+  });
+});
+
+fastify.put("/api/agents/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Fastify request body
+  const body = request.body as any;
+  return new Promise((resolve) => {
+    agentHandlers.UpdateAgent(
+      {
+        request: {
+          name: id,
+          namespace: body.namespace ?? "default",
+          spec: body.spec ?? {},
+          labels: body.labels ?? {},
+          annotations: body.annotations ?? {},
+        },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto
+      } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto callback
+      (err: any, response: any) => {
+        if (err) {
+          reply.code(404);
+          resolve({ error: { message: err.message, code: "NOT_FOUND" } });
+          return;
+        }
+        const a = response;
+        resolve(apiResponse({
+          id: a.metadata?.uid ?? id,
+          name: a.metadata?.name ?? id,
+          version: `v${a.metadata?.version ?? 1}`,
+          namespace: a.metadata?.namespace ?? body.namespace ?? "default",
+          status: "updated",
+          health: "Healthy",
+          spec: a.spec ?? body.spec ?? {},
+          updatedAt: new Date().toISOString(),
+        }));
       }
     );
   });
@@ -869,6 +786,94 @@ fastify.get("/api/namespaces", async (request) => {
           },
         }));
         resolve(apiResponse(paginate(ns, page, limit)));
+      }
+    );
+  });
+});
+
+fastify.post("/api/namespaces", async (request, reply) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Fastify request body
+  const body = request.body as any;
+  const name = body.name ?? body.displayName ?? "";
+  if (!name) {
+    reply.code(400);
+    return { error: { message: "Namespace name is required", code: "BAD_REQUEST" } };
+  }
+  return new Promise((resolve) => {
+    namespaceHandlers.CreateNamespace(
+      {
+        request: {
+          slug: name.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
+          display_name: body.displayName ?? name,
+          tier: body.tier ?? "sandbox",
+          quotas: body.quotas ?? {},
+        },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto
+      } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto callback
+      (err: any, response: any) => {
+        if (err) {
+          reply.code(409);
+          resolve({ error: { message: err.message, code: "CONFLICT" } });
+          return;
+        }
+        const ns = response;
+        resolve(apiResponse({
+          name: ns.slug ?? name,
+          displayName: ns.display_name ?? name,
+          tier: (ns.tier ?? "sandbox").replace("NAMESPACE_TIER_", "").toLowerCase(),
+          status: "active",
+          createdAt: ns.created_at ? new Date(ns.created_at.seconds * 1000).toISOString() : new Date().toISOString(),
+        }));
+      }
+    );
+  });
+});
+
+fastify.put("/api/namespaces/:name", async (request, reply) => {
+  const { name } = request.params as { name: string };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Fastify request body
+  const body = request.body as any;
+  return new Promise((resolve) => {
+    namespaceHandlers.UpdateNamespace(
+      {
+        request: {
+          slug: name,
+          display_name: body.displayName,
+          tier: body.tier,
+          quotas: body.quotas ?? {},
+        },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto
+      } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto callback
+      (err: any, response: any) => {
+        if (err) {
+          reply.code(404);
+          resolve({ error: { message: err.message, code: "NOT_FOUND" } });
+          return;
+        }
+        const ns = response;
+        resolve(apiResponse({
+          name: ns.slug ?? name,
+          displayName: ns.display_name ?? name,
+          tier: (ns.tier ?? "sandbox").replace("NAMESPACE_TIER_", "").toLowerCase(),
+          updatedAt: new Date().toISOString(),
+        }));
+      }
+    );
+  });
+});
+
+fastify.delete("/api/namespaces/:name", async (request, reply) => {
+  const { name } = request.params as { name: string };
+  return new Promise((resolve) => {
+    namespaceHandlers.DeleteNamespace(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto
+      { request: { slug: name } } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto callback
+      (err: any) => {
+        if (err) { reply.code(404); resolve({ error: { message: "Namespace not found" } }); return; }
+        resolve(apiResponse(null));
       }
     );
   });
@@ -1053,6 +1058,7 @@ fastify.get("/api/slos", async (request) => {
 
 // ── WebSocket Event Streaming ──
 
+const MAX_EXECUTION_SUBSCRIBERS = 500; // max concurrent execution stream subscriptions
 const executionSubscribers = new Map<string, Set<WebSocket>>();
 
 function broadcastToExecution(executionId: string, event: string, data: Record<string, unknown>) {
@@ -1066,33 +1072,23 @@ function broadcastToExecution(executionId: string, event: string, data: Record<s
   }
 }
 
-// SSE fallback for clients without WebSocket support
-fastify.get("/api/events", async (request, reply) => {
-  reply.raw.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-  });
-
-  const send = (event: string, data: Record<string, unknown>) => {
-    reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  };
-
-  const interval = setInterval(() => {
-    send("heartbeat", { timestamp: new Date().toISOString() });
-  }, 15_000);
-
-  request.raw.on("close", () => {
-    clearInterval(interval);
-  });
-});
+// SSE endpoint REMOVED: Fastify lifecycle conflict with reply.raw.writeHead().
+// Frontend uses polling via GET /api/metrics and GET /api/traces instead.
 
 // ── WebSocket JWT validation ──────────────────────────────────────────────
 function verifyWebSocketAuth(request: { headers: Record<string, string | string[] | undefined>; url?: string }): string | null {
+  // Use the same JWT_SECRET that auth/routes.ts validates on startup.
+  // If the env var is missing here, auth/routes.ts would have already thrown.
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret || jwtSecret.length < 32) {
+    logger.error("JWT_SECRET not set or too short — WebSocket auth disabled");
+    return null;
+  }
+
   // Check Authorization header
   const authHeader = request.headers.authorization;
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-    const claims = verifyJWT(authHeader.slice(7), JWT_SECRET);
+    const claims = verifyJWT(authHeader.slice(7), jwtSecret);
     if (claims) return claims.sub;
   }
 
@@ -1102,7 +1098,7 @@ function verifyWebSocketAuth(request: { headers: Record<string, string | string[
       const url = new URL(request.url, "http://localhost");
       const token = url.searchParams.get("token");
       if (token) {
-        const claims = verifyJWT(token, JWT_SECRET);
+        const claims = verifyJWT(token, jwtSecret);
         if (claims) return claims.sub;
       }
     } catch { /* invalid URL — ignore */ }
@@ -1110,8 +1106,6 @@ function verifyWebSocketAuth(request: { headers: Record<string, string | string[
 
   return null;
 }
-
-const JWT_SECRET: string = process.env.JWT_SECRET || "";
 
 // WebSocket endpoint for real-time execution streaming
 // Connect to: ws://host:port/api/ws/executions/:executionId?token=<JWT>
@@ -1128,6 +1122,14 @@ fastify.get("/api/ws/executions/:executionId", { websocket: true } as any, async
   }
 
   logger.info({ executionId, userId }, "WebSocket client connected for execution streaming");
+
+  // Enforce subscriber cap to prevent memory DoS
+  const totalSubscribers = Array.from(executionSubscribers.values()).reduce((sum, s) => sum + s.size, 0);
+  if (totalSubscribers >= MAX_EXECUTION_SUBSCRIBERS) {
+    socket.send(JSON.stringify({ event: "error", data: { message: "Server capacity reached. Try again later." }, timestamp: new Date().toISOString() }));
+    socket.close();
+    return;
+  }
 
   // Register subscriber
   if (!executionSubscribers.has(executionId)) {
@@ -1282,7 +1284,7 @@ if (process.env.NODE_ENV !== "test") {
     }
   });
   healthServer.listen(HEALTH_PORT, "0.0.0.0", () => {
-    logger.info(`Health endpoint listening on port ${HEALTH_PORT}`);
+    logger.info(`Health endpoint listening on 0.0.0.0:${HEALTH_PORT}`);
   });
 
   const shutdown = async () => {

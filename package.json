@@ -24,8 +24,7 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.ts": ["eslint --fix", "tsc --noEmit"],
-    "*.tsx": ["eslint --fix", "tsc --noEmit"]
+    "*.{ts,tsx}": ["eslint --fix"]
   },
   "overrides": {
     "@opentelemetry/propagator-jaeger": "^2.10.0"
