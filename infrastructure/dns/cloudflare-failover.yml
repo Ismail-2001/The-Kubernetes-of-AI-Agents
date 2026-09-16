@@ -1,0 +1,46 @@
+# Cloudflare Load Balancer Configuration
+# Apply via: CF_API_TOKEN=<token> cf-terraforming import ...
+
+load_balancer:
+  name: "api.egaop.io"
+  description: "E-GAOP API primary load balancer"
+  steer_policy: "failover"  # or "random" for active-active
+
+  # Primary origin pool
+  origin_pools:
+    - name: "us-east-1-primary"
+      origins:
+        - address: "api-primary.egaop.io"
+          enabled: true
+      minimum_origins: 1
+      notification_email: "ops@egaop.io"
+
+    - name: "us-west-2-secondary"
+      origins:
+        - address: "api-secondary.egaop.io"
+        enabled: true
+      minimum_origins: 1
+      notification_email: "ops@egaop.io"
+
+  # Health checks
+  health_checks:
+    - name: "api-health"
+      type: "HTTP"
+      method: "GET"
+      path: "/healthz"
+      port: 15051
+      interval: 30          # Check every 30 seconds
+      timeout: 10           # Fail if no response in 10s
+      retries: 3            # 3 consecutive failures = unhealthy
+      expected_codes: ["200"]
+
+    - name: "grpc-health"
+      type: "TCP"
+      port: 50051
+      interval: 30
+      timeout: 10
+      retries: 3
+
+  # Failover settings
+  session_affinity: "none"  # No sticky sessions for failover
+  country_paths: []         # No geo-steering (failover only)

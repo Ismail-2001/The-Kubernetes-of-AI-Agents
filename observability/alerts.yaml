@@ -132,3 +132,30 @@ groups:
         annotations:
           summary: "Synthetic probe slow for {{ $labels.instance }}"
           description: "Probe duration exceeds 5 seconds."
+
+      - alert: RegionUnreachable
+        expr: probe_success{job="blackbox-http", instance=~".*us-east-1.*"} == 0 and probe_success{job="blackbox-http", instance=~".*us-west-2.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Both regions unreachable"
+          description: "All health probes failing in both regions. Manual intervention required."
+
+      - alert: FailoverTriggered
+        expr: changes(dns_record_last_updated_timestamp_seconds{record="api.egaop.io"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DNS failover triggered for api.egaop.io"
+          description: "DNS record has been updated. Verify secondary region is serving traffic."
+
+      - alert: PrimaryRegionDown
+        expr: probe_success{job="blackbox-http", instance=~".*us-east-1.*"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Primary region health probes failing"
+          description: "Primary region (us-east-1) health checks failing for 3+ minutes. Monitor for potential failover."
