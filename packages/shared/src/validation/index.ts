@@ -1,5 +1,4 @@
 import { z, ZodSchema, ZodError } from "zod";
-import type { FastifyRequest, FastifyReply } from "fastify";
 
 // ── RFC 7807 Problem Details for validation errors ──────────────────────────
 
@@ -33,19 +32,40 @@ function formatZodError(err: ZodError, instance: string, traceId: string): Valid
   };
 }
 
+// ── Generic request/reply interfaces (avoids fastify dependency) ────────────
+
+export interface ValidationRequest {
+  body?: unknown;
+  query?: unknown;
+  params?: unknown;
+  url: string;
+}
+
+export interface ValidationReply {
+  getHeader(name: string): unknown;
+  status(code: number): ValidationReply;
+  send(body: unknown): void;
+}
+
 // ── Validation targets ──────────────────────────────────────────────────────
 
 type ValidationTarget = "body" | "query" | "params";
 
 // ── validate() middleware factory ────────────────────────────────────────────
-// Returns a Fastify preHandler that validates the specified request property.
+// Returns a preHandler that validates the specified request property.
+// Works with any framework (Fastify, Express, etc.) via generic interfaces.
 
 export function validate<T extends ZodSchema>(
   target: ValidationTarget,
   schema: T,
 ) {
-  return async (request: FastifyRequest, reply: FastifyReply) => {
-    const traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+  return async (request: ValidationRequest, reply: ValidationReply) => {
+    let traceId: string;
+    try {
+      traceId = (reply.getHeader("X-Request-ID") as string) || crypto.randomUUID();
+    } catch {
+      traceId = crypto.randomUUID();
+    }
     let data: unknown;
 
     switch (target) {
