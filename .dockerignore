@@ -16,7 +16,6 @@ node_modules
 .github
 charts
 docs
-scripts
 secrets
 *.log
 admin-console/.next

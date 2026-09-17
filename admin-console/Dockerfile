@@ -1,9 +1,9 @@
 # Stage 1: Build
 FROM node:22-alpine AS builder
 WORKDIR /app/admin-console
-COPY admin-console/package.json admin-console/package-lock.json ./
+COPY package.json package-lock.json ./
 RUN npm ci
-COPY admin-console/ ./
+COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx next build
 

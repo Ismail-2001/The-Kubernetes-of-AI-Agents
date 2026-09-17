@@ -1,0 +1,21 @@
+extends:
+  - spectral:oas
+
+rules:
+  operation-operationId: warn
+  operation-description: warn
+  operation-tags: warn
+  tag-description: warn
+  info-contact: warn
+  info-license: warn
+  no-eval-in-markdown: error
+  no-script-tags-in-markdown: error
+  oas3-api-servers: warn
+  oas3-examples-value-or-externalValue: error
+  oas3-operation-security-defined: error
+  oas3-schema: error
+  oas3-unused-component: warn
+  oas3-valid-media-example: error
+  oas3-valid-schema-example: error
+  path-params: error
+  typed-enum: error

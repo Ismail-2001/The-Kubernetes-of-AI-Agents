@@ -94,20 +94,10 @@ services:
     restart: unless-stopped
 
   pgbouncer:
-    image: bitnami/pgbouncer:1.23.1
-    environment:
-      POSTGRESQL_HOST: postgres
-      POSTGRESQL_PORT: 5432
-      POSTGRESQL_USERNAME: ${POSTGRES_USER:-egaop}
-      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      POSTGRESQL_DATABASE: egaop
-      PGBOUNCER_PORT: 6432
-      PGBOUNCER_POOL_MODE: transaction
-      PGBOUNCER_DEFAULT_POOL_SIZE: "25"
-      PGBOUNCER_MAX_CLIENT_CONN: "100"
-      PGBOUNCER_QUERY_TIMEOUT: "30"
-      PGBOUNCER_IDLE_TRANSACTION_TIMEOUT: "60"
-      PGBOUNCER_CLIENT_IDLE_TIMEOUT: "600"
+    image: dockette/pgbouncer:1.25.1
+    volumes:
+      - ./infrastructure/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./infrastructure/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6432"]
       interval: 10s
@@ -183,7 +173,7 @@ services:
 
   # ─── Observability Infrastructure ─────────────────────────────────────────
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.115.0
+    image: otel/opentelemetry-collector-contrib:0.160.0
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
@@ -603,7 +593,7 @@ services:
   # Docker socket proxy — exposes a filtered Docker API to sandbox-runtime
   # without requiring root or direct socket access.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.13.0
+    image: tecnativa/docker-socket-proxy:latest
     environment:
       POST: "1"
       CONTAINERS: "1"
