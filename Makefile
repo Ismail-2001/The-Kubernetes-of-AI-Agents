@@ -10,6 +10,7 @@
 	db-shell db-backup db-restore db-status \
 	monitoring grafana prometheus \
 	secrets-init secrets-status secrets-rotate secrets-rotate-dry secrets-verify \
+	tf-init tf-plan tf-apply tf-destroy tf-cost \
 	health status help
 
 # ─── Development ───────────────────────────────────────────────
@@ -128,6 +129,23 @@ secrets-rotate-dry:
 secrets-verify:
 	./scripts/verify-secrets.sh
 
+# ─── Infrastructure ───────────────────────────────────────────
+
+tf-init: ## Initialize Terraform
+	cd infrastructure/terraform && terraform init
+
+tf-plan: ## Plan Terraform changes (staging)
+	cd infrastructure/terraform && terraform workspace select staging && terraform plan -var-file=environments/staging.tfvars
+
+tf-apply: ## Apply Terraform changes (staging)
+	./scripts/tf-apply.sh staging
+
+tf-destroy: ## Destroy Terraform infrastructure (requires confirmation)
+	cd infrastructure/terraform && terraform destroy -var-file=environments/staging.tfvars
+
+tf-cost: ## Run Infracost cost estimation
+	cd infrastructure/terraform && infracost breakdown --usage-file infracost-usage.yml
+
 # ─── Utilities ────────────────────────────────────────────────
 
 health:
@@ -189,6 +207,13 @@ help:
 	@echo "  secrets-rotate       Rotate all secrets (interactive)"
 	@echo "  secrets-rotate-dry   Preview secret rotation without executing"
 	@echo "  secrets-verify       Verify all secrets are valid"
+	@echo ""
+	@echo "Infrastructure:"
+	@echo "  tf-init          Initialize Terraform"
+	@echo "  tf-plan          Plan Terraform changes (staging)"
+	@echo "  tf-apply         Apply Terraform changes (staging)"
+	@echo "  tf-destroy       Destroy Terraform infrastructure"
+	@echo "  tf-cost          Run Infracost cost estimation"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  health           Curl all health endpoints"

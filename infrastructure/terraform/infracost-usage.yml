@@ -1,0 +1,28 @@
+# E-GAOP Terraform Usage Estimates
+# Used by Infracost for cost estimation in PRs
+
+aws_eks_node_group.general:
+  instance_type: t3.large
+  nodes: 3
+  monthly_hours: 730
+
+aws_eks_node_group.spot:
+  instance_type: t3.large
+  nodes: 2
+  monthly_hours: 730
+  spot: true
+
+aws_db_instance.postgres:
+  instance_class: db.r6g.large
+  storage_gb: 100
+  backup_storage_gb: 50
+
+aws_elasticache_cluster.redis:
+  node_type: cache.r6g.large
+  nodes: 3
+  monthly_hours: 730
+
+aws_s3_bucket.wal_archive:
+  standard_storage_gb: 50
+  ia_storage_gb: 100
+  requests: 10000

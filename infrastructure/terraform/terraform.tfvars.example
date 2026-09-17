@@ -1,0 +1,28 @@
+environment         = "staging"
+aws_region          = "us-east-1"
+cluster_name        = "egaop-staging"
+vpc_cidr            = "10.0.0.0/16"
+rds_instance_class  = "db.r6g.large"
+redis_node_type     = "cache.r6g.large"
+enable_multi_az     = true
+kubernetes_version  = "1.30"
+
+general_node_min_size     = 2
+general_node_max_size     = 10
+general_node_desired_size = 3
+
+spot_node_min_size     = 0
+spot_node_max_size     = 5
+spot_node_desired_size = 2
+
+rds_storage_size        = 100
+rds_storage_max_size    = 500
+rds_backup_retention_days = 7
+
+redis_shard_count        = 1
+redis_replicas_per_shard = 2
+
+common_tags = {
+  Team        = "platform"
+  CostCenter  = "engineering"
+}
