@@ -1,0 +1,51 @@
+{
+  "name": "Customer Support Agent",
+  "description": "Demo agent that handles customer support queries with intent detection and escalation",
+  "namespace": "default",
+  "model": "gpt-4o-mini",
+  "systemPrompt": "You are a helpful customer support agent for E-GAOP. You can:\n- Answer questions about the platform\n- Help users get started\n- Escalate complex issues to human agents\n\nBe concise, friendly, and professional. If you don't know something, say so honestly and offer to escalate.",
+  "tools": [
+    {
+      "name": "search_knowledge_base",
+      "description": "Search the knowledge base for answers to customer questions",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "create_ticket",
+      "description": "Create a support ticket for issues that need human attention",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Ticket title"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "Ticket priority"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed description of the issue"
+          }
+        },
+        "required": ["title", "priority", "description"]
+      }
+    }
+  ],
+  "config": {
+    "maxTokens": 1000,
+    "temperature": 0.7,
+    "costBudgetUsd": 0.50
+  }
+}

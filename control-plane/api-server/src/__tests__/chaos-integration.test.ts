@@ -129,13 +129,13 @@ describe("Chaos: PostgreSQL connection pool exhaustion → graceful backpressure
       password: "test",
       max: 1,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 1000,
     });
 
     try {
       // Acquire and hold the single connection so other queries are blocked
       const blockingClient = await exhaustionPool.connect();
-      const sleepPromise = blockingClient.query("SELECT pg_sleep(5)");
+      const sleepPromise = blockingClient.query("SELECT pg_sleep(3)");
 
       // Attempt to acquire the same connection — should error or timeout
       const attempts: Promise<unknown>[] = [];
@@ -169,7 +169,7 @@ describe("Chaos: PostgreSQL connection pool exhaustion → graceful backpressure
     } finally {
       await exhaustionPool.end();
     }
-  });
+  }, 15000);
 
   it("pool recovery after timeout allows subsequent queries to succeed", async () => {
     const pool = new Pool({
@@ -196,7 +196,7 @@ describe("Chaos: PostgreSQL connection pool exhaustion → graceful backpressure
     } finally {
       await pool.end();
     }
-  });
+  }, 15000);
 });
 
 // ── 2. PostgreSQL query timeout ────────────────────────────────────────────

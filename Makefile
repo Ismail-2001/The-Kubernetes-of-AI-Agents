@@ -4,7 +4,8 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: dev dev-docker dev-staging build clean \
+.PHONY: setup setup-skip-docker setup-skip-openai \
+	dev dev-docker dev-staging build clean \
 	test test-api test-shared test-chaos test-load lint typecheck \
 	docker-build docker-up docker-down docker-logs docker-ps docker-restart \
 	db-shell db-backup db-restore db-status \
@@ -12,6 +13,17 @@
 	secrets-init secrets-status secrets-rotate secrets-rotate-dry secrets-verify \
 	tf-init tf-plan tf-apply tf-destroy tf-cost \
 	health status help
+
+# ─── Quick Start ──────────────────────────────────────────────
+
+setup: ## One-command setup (zero to running)
+	./scripts/setup.sh
+
+setup-skip-docker: ## Setup without starting Docker
+	./scripts/setup.sh --skip-docker
+
+setup-skip-openai: ## Setup without OpenAI key prompt
+	./scripts/setup.sh --skip-openai
 
 # ─── Development ───────────────────────────────────────────────
 
@@ -165,6 +177,11 @@ status:
 
 help:
 	@echo "E-GAOP — Available Make Targets"
+	@echo ""
+	@echo "Quick Start:"
+	@echo "  setup            One-command setup (zero to running)"
+	@echo "  setup-skip-docker  Setup without starting Docker"
+	@echo "  setup-skip-openai  Setup without OpenAI key prompt"
 	@echo ""
 	@echo "Development:"
 	@echo "  dev              Start all services locally (npm run dev)"

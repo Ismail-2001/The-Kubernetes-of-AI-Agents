@@ -10,6 +10,8 @@ export interface ProblemDetails {
   detail: string;
   instance: string;
   traceId: string;
+  hint?: string;
+  docs?: string;
   [key: string]: unknown;
 }
 
@@ -43,6 +45,34 @@ const ERROR_TITLE_MAP: Record<string, string> = {
   ACCOUNT_LOCKED: "Account Locked",
 };
 
+const ERROR_HINT_MAP: Record<string, string> = {
+  UNAUTHORIZED: "Include an Authorization header with a valid JWT token. Obtain one via POST /api/auth/login.",
+  INVALID_CREDENTIALS: "Check your email and password. Register at POST /api/auth/register if you don't have an account.",
+  NOT_FOUND: "Verify the resource ID and try again. Use GET /api/agents or GET /api/namespaces to list available resources.",
+  CONFLICT: "A resource with the same name already exists. Use a different name or update the existing resource.",
+  VALIDATION_ERROR: "Fix the validation errors and resend the request. Check the 'errors' field for details.",
+  FORBIDDEN: "Your account does not have permission for this action. Contact your administrator to update your role.",
+  RATE_LIMITED: "Too many requests. Wait a moment and retry, or reduce your request frequency.",
+  INTERNAL: "An unexpected error occurred. If it persists, contact support with the traceId.",
+  POLICY_DENIED: "This action violates a policy. Review your namespace policies at GET /api/policies.",
+  TIMEOUT: "The request timed out. Try again with a smaller payload or narrower scope.",
+  QUOTA_EXCEEDED: "Your namespace quota has been reached. Upgrade your tier or wait for the quota to reset.",
+  ACCOUNT_LOCKED: "Your account is temporarily locked due to too many failed attempts. Wait and try again, or contact support.",
+};
+
+const ERROR_DOCS_MAP: Record<string, string> = {
+  UNAUTHORIZED: "https://docs.egaop.io/api/authentication",
+  INVALID_CREDENTIALS: "https://docs.egaop.io/api/authentication#login",
+  NOT_FOUND: "https://docs.egaop.io/api/errors#not-found",
+  CONFLICT: "https://docs.egaop.io/api/errors#conflict",
+  VALIDATION_ERROR: "https://docs.egaop.io/api/errors#validation",
+  FORBIDDEN: "https://docs.egaop.io/api/errors#authorization",
+  RATE_LIMITED: "https://docs.egaop.io/api/rate-limiting",
+  INTERNAL: "https://docs.egaop.io/api/errors#internal",
+  QUOTA_EXCEEDED: "https://docs.egaop.io/api/quotas",
+  ACCOUNT_LOCKED: "https://docs.egaop.io/api/authentication#account-lockout",
+};
+
 const ERROR_STATUS_MAP: Record<string, number> = {
   UNAUTHORIZED: 401,
   INVALID_CREDENTIALS: 401,
@@ -65,15 +95,20 @@ export function toProblemDetails(
   traceId: string,
   extra?: Record<string, unknown>,
 ): ProblemDetails {
-  return {
+  const result: ProblemDetails = {
     type: ERROR_TYPE_MAP[code] ?? "https://api.egaop.io/errors/internal",
     title: ERROR_TITLE_MAP[code] ?? "Internal Server Error",
     status: ERROR_STATUS_MAP[code] ?? 500,
     detail,
     instance,
     traceId,
-    ...extra,
   };
+  const hint = ERROR_HINT_MAP[code];
+  if (hint) result.hint = hint;
+  const docs = ERROR_DOCS_MAP[code];
+  if (docs) result.docs = docs;
+  if (extra) Object.assign(result, extra);
+  return result;
 }
 
 export class AgentError extends Error {

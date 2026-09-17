@@ -13,6 +13,7 @@ import {
   PIIViolationError,
   grpcStatusFromError,
   toStructuredLog,
+  toProblemDetails,
 } from "../errors/index.js";
 import { status as grpcStatus } from "@grpc/grpc-js";
 
@@ -234,5 +235,56 @@ describe("toStructuredLog", () => {
     const log = toStructuredLog(new Error("plain"));
     expect(log.error_name).toBe("Error");
     expect(log.error_message).toBe("plain");
+  });
+});
+
+describe("toProblemDetails", () => {
+  it("should return standard fields", () => {
+    const problem = toProblemDetails("NOT_FOUND", "Agent not found", "/api/agents/1", "trace-abc");
+    expect(problem.type).toBe("https://api.egaop.io/errors/not-found");
+    expect(problem.title).toBe("Not Found");
+    expect(problem.status).toBe(404);
+    expect(problem.detail).toBe("Agent not found");
+    expect(problem.instance).toBe("/api/agents/1");
+    expect(problem.traceId).toBe("trace-abc");
+  });
+
+  it("should include hint for UNAUTHORIZED", () => {
+    const problem = toProblemDetails("UNAUTHORIZED", "No token", "/api/test", "t-1");
+    expect(problem.hint).toContain("Authorization header");
+    expect(problem.hint).toContain("POST /api/auth/login");
+    expect(problem.docs).toBe("https://docs.egaop.io/api/authentication");
+  });
+
+  it("should include hint for VALIDATION_ERROR", () => {
+    const problem = toProblemDetails("VALIDATION_ERROR", "Bad input", "/api/test", "t-1");
+    expect(problem.hint).toContain("validation errors");
+    expect(problem.docs).toBe("https://docs.egaop.io/api/errors#validation");
+  });
+
+  it("should include extra fields", () => {
+    const problem = toProblemDetails("VALIDATION_ERROR", "Bad", "/api", "t-1", {
+      errors: [{ field: "email", message: "required" }],
+    });
+    expect(problem.errors).toBeDefined();
+    expect((problem as any).errors[0].field).toBe("email");
+  });
+
+  it("should include hint for RATE_LIMITED", () => {
+    const problem = toProblemDetails("RATE_LIMITED", "Too many", "/api", "t-1");
+    expect(problem.hint).toContain("Wait a moment");
+    expect(problem.docs).toBe("https://docs.egaop.io/api/rate-limiting");
+  });
+
+  it("should include hint for INVALID_CREDENTIALS", () => {
+    const problem = toProblemDetails("INVALID_CREDENTIALS", "Bad creds", "/api", "t-1");
+    expect(problem.hint).toContain("email and password");
+    expect(problem.docs).toBe("https://docs.egaop.io/api/authentication#login");
+  });
+
+  it("should not include hint for unknown codes", () => {
+    const problem = toProblemDetails("UNKNOWN_CODE", "msg", "/api", "t-1");
+    expect(problem.hint).toBeUndefined();
+    expect(problem.docs).toBeUndefined();
   });
 });

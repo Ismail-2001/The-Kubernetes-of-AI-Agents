@@ -262,8 +262,35 @@ fastify.setErrorHandler((error: Error & { statusCode?: number }, request, reply)
   else if (statusCode === 404) code = "NOT_FOUND";
   else if (statusCode === 409) code = "CONFLICT";
   else if (statusCode === 429) code = "RATE_LIMITED";
+  else if (statusCode === 400) code = "VALIDATION_ERROR";
 
-  const problem = toProblemDetails(code, error.message, request.url, traceId);
+  // Extract validation details from Fastify/Zod errors when available
+  const extra: Record<string, unknown> = {};
+  if (code === "VALIDATION_ERROR") {
+    // Fastify validation errors have validation property
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const validationErrors = (error as any).validation;
+    if (Array.isArray(validationErrors) && validationErrors.length > 0) {
+      extra.errors = validationErrors.map((v: Record<string, unknown>) => ({
+        field: (v.instancePath as string) ?? "unknown",
+        message: (v.message as string) ?? "Invalid value",
+        received: v.data ?? undefined,
+        expected: (v.params as Record<string, unknown>)?.type ?? (v.params as Record<string, unknown>)?.pattern ?? undefined,
+      }));
+    }
+    // Zod errors have issues property
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const zodIssues = (error as any).issues;
+    if (Array.isArray(zodIssues) && zodIssues.length > 0) {
+      extra.errors = zodIssues.map((issue: Record<string, unknown>) => ({
+        field: Array.isArray(issue.path) ? issue.path.join(".") : "unknown",
+        message: (issue.message as string) ?? "Invalid value",
+        code: issue.code ?? undefined,
+      }));
+    }
+  }
+
+  const problem = toProblemDetails(code, error.message, request.url, traceId, extra);
 
   // Log server errors
   if (statusCode >= 500) {
@@ -278,16 +305,72 @@ fastify.register(authRoutes);
 
 // ── Health routes (public) ──
 fastify.get("/health", async () => {
-  return { status: "healthy", services: [] };
+  return {
+    status: "healthy",
+    version: process.env.npm_package_version ?? "1.0.0",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    services: [],
+  };
 });
 
 fastify.get("/api/health", async () => {
+  const dependencies: Record<string, { status: string; latencyMs?: number }> = {};
+
+  // Check Postgres
   try {
-    const res = await fetch(`http://127.0.0.1:${process.env.API_SERVER_HEALTH_PORT || 15051}/healthz`);
-    return { status: res.ok ? "ok" : "degraded", apiServerReachable: res.ok };
+    const { getPool } = await import("@e-gaop/shared");
+    const pool = await getPool();
+    const pgStart = Date.now();
+    await pool.query("SELECT 1");
+    dependencies.postgres = { status: "ok", latencyMs: Date.now() - pgStart };
   } catch {
-    return { status: "degraded", apiServerReachable: false };
+    dependencies.postgres = { status: "unavailable" };
   }
+
+  // Check Redis
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const RedisModule = await import("ioredis") as any;
+    const Redis = RedisModule.default ?? RedisModule;
+    const redis = new Redis({
+      host: process.env.REDIS_HOST || "redis",
+      port: parseInt(process.env.REDIS_PORT || "6379", 10),
+      password: process.env.REDIS_PASSWORD || undefined,
+      connectTimeout: 3000,
+      maxRetriesPerRequest: 0,
+      lazyConnect: true,
+    });
+    const redisStart = Date.now();
+    await Promise.race([
+      redis.connect().then(() => redis.ping()),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
+    ]);
+    dependencies.redis = { status: "ok", latencyMs: Date.now() - redisStart };
+    redis.disconnect();
+  } catch {
+    dependencies.redis = { status: "unavailable" };
+  }
+
+  // Check Temporal
+  try {
+    const temporalStart = Date.now();
+    const client = await getTemporalClient();
+    await client.workflow.getHandle("health-check-probe").describe().catch(() => {});
+    dependencies.temporal = { status: "ok", latencyMs: Date.now() - temporalStart };
+  } catch {
+    dependencies.temporal = { status: "unavailable" };
+  }
+
+  const allHealthy = Object.values(dependencies).every(d => d.status === "ok");
+
+  return {
+    status: allHealthy ? "ok" : "degraded",
+    version: process.env.npm_package_version ?? "1.0.0",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    dependencies,
+  };
 });
 
 // ── OpenAPI spec endpoint (public) ──
