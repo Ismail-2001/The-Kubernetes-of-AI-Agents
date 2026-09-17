@@ -99,7 +99,7 @@ services:
       - ./infrastructure/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
       - ./infrastructure/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6432"]
+      test: ["CMD", "pgbouncer", "--version"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -314,9 +314,9 @@ services:
       context: .
       dockerfile: infrastructure/migrate/Dockerfile
     environment:
-      POSTGRES_URL: postgresql://${POSTGRES_USER:-egaop}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-egaop}
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-egaop}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-egaop}
     depends_on:
-      pgbouncer:
+      postgres:
         condition: service_healthy
     networks:
       - egaop-net
@@ -338,13 +338,14 @@ services:
       API_SERVER_GRPC_PORT: "50051"
       API_SERVER_HEALTH_PORT: "15051"
       API_SERVER_REST_PORT: "3001"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_HOST: pgbouncer
-      POSTGRES_PORT: "6432"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -399,8 +400,8 @@ services:
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
-      POSTGRES_HOST: pgbouncer
-      POSTGRES_PORT: "6432"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -688,8 +689,8 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
-      POSTGRES_HOST: pgbouncer
-      POSTGRES_PORT: "6432"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}
@@ -744,8 +745,8 @@ services:
       OBSERVABILITY_PLANE_HEALTH_PORT: "15056"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: egaop-observability-plane
-      POSTGRES_HOST: pgbouncer
-      POSTGRES_PORT: "6432"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER:-egaop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-egaop}

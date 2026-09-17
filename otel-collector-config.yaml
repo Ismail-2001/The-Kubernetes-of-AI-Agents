@@ -27,10 +27,10 @@ processors:
 
 exporters:
   otlp:
-    endpoint: ${env:OTEL_EXPORTER_OTLP_TEMP_ENDPOINT:tempo:4317}
+    endpoint: ${env:OTEL_EXPORTER_OTLP_TEMP_ENDPOINT:-tempo:4317}
     tls:
       # Production: set OTEL_EXPORTER_OTLP_INSECURE=false and mount certs
-      insecure: ${env:OTEL_EXPORTER_OTLP_INSECURE:true}
+      insecure: ${env:OTEL_EXPORTER_OTLP_INSECURE:-true}
       # cert_file: /etc/otelcol/certs/tls.crt
       # key_file: /etc/otelcol/certs/tls.key
   prometheus:
