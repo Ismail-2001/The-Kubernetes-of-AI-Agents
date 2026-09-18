@@ -160,7 +160,9 @@ const fastify = Fastify({
 // CORS origins parsed from environment (comma-separated) or default dev origins
 const corsOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim())
-  : ["http://localhost:3000", "http://localhost:5173"];
+  : process.env.NODE_ENV === "production"
+    ? []
+    : ["http://localhost:3000", "http://localhost:5173"];
 
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -214,8 +216,10 @@ fastify.addHook("onRequest", async (request, reply) => {
   reply.header("X-XSS-Protection", "0");
   reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
   reply.header("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  reply.header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+  reply.header("X-Permitted-Cross-Domain-Policies", "none");
   if (isProduction) {
-    reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
   }
 
   // Rate limit headers (in-memory counter per IP)
@@ -225,10 +229,21 @@ fastify.addHook("onRequest", async (request, reply) => {
   const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
   const windowStart = Math.floor(now / windowMs) * windowMs;
   const rateLimitKey = `${clientIp}:${windowStart}`;
-  const currentCount = rateLimitStore.get(rateLimitKey) ?? 0;
+  const currentCount = (rateLimitStore.get(rateLimitKey) ?? 0) + 1;
+  rateLimitStore.set(rateLimitKey, currentCount);
   reply.header("X-RateLimit-Limit", String(rateLimitMax));
-  reply.header("X-RateLimit-Remaining", String(Math.max(0, rateLimitMax - currentCount - 1)));
+  reply.header("X-RateLimit-Remaining", String(Math.max(0, rateLimitMax - currentCount)));
   reply.header("X-RateLimit-Reset", String(Math.ceil((windowStart + windowMs) / 1000)));
+
+  if (currentCount > rateLimitMax) {
+    reply.code(429).send(toProblemDetails(
+      "RATE_LIMITED",
+      `Rate limit exceeded. Max ${rateLimitMax} requests per ${windowMs / 1000}s.`,
+      request.url,
+      reply.getHeader("X-Request-ID") as string || crypto.randomUUID(),
+    ));
+    return;
+  }
 
   // Cache-Control for GET responses
   if (request.method === "GET") {
@@ -1864,18 +1879,6 @@ function verifyWebSocketAuth(request: { headers: Record<string, string | string[
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
     const claims = verifyJWT(authHeader.slice(7), jwtSecret);
     if (claims) return claims.sub;
-  }
-
-  // Fallback: token query parameter (ws://host:port/api/ws/...?token=xxx)
-  if (request.url) {
-    try {
-      const url = new URL(request.url, "http://localhost");
-      const token = url.searchParams.get("token");
-      if (token) {
-        const claims = verifyJWT(token, jwtSecret);
-        if (claims) return claims.sub;
-      }
-    } catch { /* invalid URL — ignore */ }
   }
 
   return null;

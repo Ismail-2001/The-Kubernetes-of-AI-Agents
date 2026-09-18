@@ -4,36 +4,33 @@ import future.keywords.in
 
 default allow = false
 
-# Stripe charges: allow only under 10k cents
-allow if {
+allow {
   input.tool_name == "stripe.charges.create"
   input.args.amount <= 10000
 }
 
-# Admin deletion: only allowed with restricted clearance
-allow if {
+allow {
   input.tool_name == "admin.user.delete"
   input.agent_metadata.labels["security-clearance"] == "restricted"
 }
 
-# All other non-denied tools: allow by default
-allow if {
+allow {
   not startswith(input.tool_name, "stripe.")
   not startswith(input.tool_name, "admin.")
 }
 
-requires_approval if {
+requires_approval {
   input.tool_name == "stripe.charges.create"
   input.args.amount > 10000
 }
 
-deny contains msg if {
+deny[msg] {
   input.tool_name == "stripe.charges.create"
   input.args.amount > 1000000
   msg := sprintf("Absolute maximum charge amount (1M cents) exceeded: %v", [input.args.amount])
 }
 
-deny contains msg if {
+deny[msg] {
   input.tool_name == "admin.user.delete"
   not input.agent_metadata.labels["security-clearance"] == "restricted"
   msg := "Agent does not have permission to use administrative deletion tools."

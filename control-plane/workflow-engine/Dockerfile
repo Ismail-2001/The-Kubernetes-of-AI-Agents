@@ -8,6 +8,7 @@ COPY packages/shared/ ./packages/shared/
 COPY control-plane/workflow-engine/package.json ./control-plane/workflow-engine/
 
 RUN npm ci
+RUN npm install @jsonjoy.com/fs-node@4.64.0 @jsonjoy.com/fs-core@4.64.0 @jsonjoy.com/fs-node-builtins@4.64.0 @jsonjoy.com/fs-node-to-fsa@4.64.0 @jsonjoy.com/fs-node-utils@4.64.0 @jsonjoy.com/fs-print@4.64.0 @jsonjoy.com/fs-snapshot@4.64.0 @jsonjoy.com/fs-fsa@4.64.0
 RUN for dir in workflow-engine; do [ -d "node_modules/$dir/node_modules" ] && cp -r "node_modules/$dir/node_modules/"* node_modules/ 2>/dev/null || true; done
 RUN npm run build -w packages/shared
 
