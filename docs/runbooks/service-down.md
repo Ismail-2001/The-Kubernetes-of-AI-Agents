@@ -33,6 +33,7 @@ docker compose ps
 docker compose ps --all | grep -E "(unhealthy|exited|starting)"
 
 # Prometheus query (replicates the alert expression)
+# Windows: use curl.exe (not curl, which is an alias for Invoke-WebRequest)
 curl -s 'http://localhost:9091/api/v1/query?query=up{job="egaop-services"}' | jq .
 ```
 

@@ -1,0 +1,78 @@
+groups:
+  - name: e-gaop-recording-rules
+    interval: 30s
+    rules:
+      # ── Availability SLI (5m, 30m, 1h, 6h, 1d) ─────────────────────
+      - record: e_gaop:http_requests:rate5m
+        expr: sum(rate(http_server_duration_count[5m]))
+
+      - record: e_gaop:http_requests:rate30m
+        expr: sum(rate(http_server_duration_count[30m]))
+
+      - record: e_gaop:http_requests:rate1h
+        expr: sum(rate(http_server_duration_count[1h]))
+
+      - record: e_gaop:http_errors:rate5m
+        expr: sum(rate(http_server_duration_count{http_status_code=~"5.."}[5m]))
+
+      - record: e_gaop:http_errors:rate30m
+        expr: sum(rate(http_server_duration_count{http_status_code=~"5.."}[30m]))
+
+      - record: e_gaop:http_errors:rate1h
+        expr: sum(rate(http_server_duration_count{http_status_code=~"5.."}[1h]))
+
+      - record: e_gaop:http_availability:5m
+        expr: 1 - (e_gaop:http_errors:rate5m / e_gaop:http_requests:rate5m)
+
+      - record: e_gaop:http_availability:30m
+        expr: 1 - (e_gaop:http_errors:rate30m / e_gaop:http_requests:rate30m)
+
+      - record: e_gaop:http_availability:1h
+        expr: 1 - (e_gaop:http_errors:rate1h / e_gaop:http_requests:rate1h)
+
+      # ── Latency P50/P95/P99 (5m, 30m) ──────────────────────────────
+      - record: e_gaop:http_latency_p50:5m
+        expr: histogram_quantile(0.50, sum(rate(http_server_duration_bucket[5m])) by (le))
+
+      - record: e_gaop:http_latency_p95:5m
+        expr: histogram_quantile(0.95, sum(rate(http_server_duration_bucket[5m])) by (le))
+
+      - record: e_gaop:http_latency_p99:5m
+        expr: histogram_quantile(0.99, sum(rate(http_server_duration_bucket[5m])) by (le))
+
+      - record: e_gaop:http_latency_p50:30m
+        expr: histogram_quantile(0.50, sum(rate(http_server_duration_bucket[30m])) by (le))
+
+      - record: e_gaop:http_latency_p95:30m
+        expr: histogram_quantile(0.95, sum(rate(http_server_duration_bucket[30m])) by (le))
+
+      - record: e_gaop:http_latency_p99:30m
+        expr: histogram_quantile(0.99, sum(rate(http_server_duration_bucket[30m])) by (le))
+
+      # ── Error budget burn rates ─────────────────────────────────────
+      - record: e_gaop:error_budget_burn:5m
+        expr: (1 - e_gaop:http_availability:5m) / 0.001
+
+      - record: e_gaop:error_budget_burn:30m
+        expr: (1 - e_gaop:http_availability:30m) / 0.001
+
+      - record: e_gaop:error_budget_burn:1h
+        expr: (1 - e_gaop:http_availability:1h) / 0.001
+
+      # ── LLM metrics ─────────────────────────────────────────────────
+      - record: e_gaop:llm_tokens:rate5m
+        expr: sum(rate(e_gaop_llm_tokens_used_total[5m]))
+
+      - record: e_gaop:llm_cost:rate1h
+        expr: sum(increase(e_gaop_llm_tokens_used_total[1h])) * 0.00003
+
+      # ── gRPC latency by service ─────────────────────────────────────
+      - record: e_gaop:grpc_latency_p95:5m
+        expr: histogram_quantile(0.95, sum(rate(http_client_duration_bucket[5m])) by (le, service_name))
+
+      - record: e_gaop:grpc_latency_p99:5m
+        expr: histogram_quantile(0.99, sum(rate(http_client_duration_bucket[5m])) by (le, service_name))
+
+      # ── Active agents ───────────────────────────────────────────────
+      - record: e_gaop:active_agents:current
+        expr: e_gaop_active_agents

@@ -202,7 +202,7 @@ services:
     command: ["-config.file=/etc/tempo/config.yml"]
     volumes:
       - ./observability/tempo-config.yml:/etc/tempo/config.yml:ro
-      - ./data/tempo:/tempo
+      - tempo-data:/var/tempo
     logging:
       driver: json-file
       options:
@@ -242,11 +242,33 @@ services:
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./observability/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
       - "--web.enable-lifecycle"
+    depends_on:
+      - alertmanager
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - egaop-net
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
     logging:
       driver: json-file
       options:
@@ -870,6 +892,7 @@ volumes:
   tempo-data:
   loki-data:
   backup-data:
+  alertmanager-data:
 
 networks:
   egaop-net:

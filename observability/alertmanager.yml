@@ -1,0 +1,42 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: "default"
+  routes:
+    - match:
+        severity: critical
+      receiver: "critical"
+      group_wait: 10s
+      repeat_interval: 1h
+    - match:
+        severity: warning
+      receiver: "warning"
+      repeat_interval: 4h
+
+receivers:
+  - name: "default"
+    webhook_configs:
+      - url: "http://grafana:3000/api/alertmanager/grafana/api/v2/alerts"
+        send_resolved: true
+
+  - name: "critical"
+    webhook_configs:
+      - url: "http://grafana:3000/api/alertmanager/grafana/api/v2/alerts"
+        send_resolved: true
+
+  - name: "warning"
+    webhook_configs:
+      - url: "http://grafana:3000/api/alertmanager/grafana/api/v2/alerts"
+        send_resolved: true
+
+inhibit_rules:
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["alertname"]
