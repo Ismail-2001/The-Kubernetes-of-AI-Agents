@@ -1,5 +1,22 @@
 import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, SLOTracker, DEFAULT_SLO_DEFINITIONS, toProblemDetails } from "@e-gaop/shared";
 
+process.on("uncaughtException", (err: Error & { code?: string }) => {
+  if (err.code === "ERR_STREAM_WRITE_AFTER_END" || err.message?.includes("write after end")) {
+    process.stderr.write(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "warn",
+      message: `Suppressed ${err.code}: ${err.message}`,
+    }) + "\n");
+    return;
+  }
+  process.stderr.write(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: "error",
+    message: `Uncaught exception: ${err.message}`,
+    stack: err.stack,
+  }) + "\n");
+});
+
 initTracing("api-server");
 loadSecretsIntoEnv();
 if (process.env.NODE_ENV !== "test") {
@@ -2014,30 +2031,66 @@ if (process.env.NODE_ENV !== "test") {
   });
 
   const healthServer = http.createServer(async (req, res) => {
-    if (req.url === "/healthz" || req.url === "/readyz") {
-      let temporalOk = false;
-      try {
-        const client = await getTemporalClient();
-        await client.workflow.getHandle("health-check-test").describe();
-        temporalOk = true;
-      } catch (err: unknown) {
-        // Workflow not found is OK (Temporal is reachable)
-        const errMsg = err instanceof Error ? err.message : String(err);
-        if (errMsg.includes("not found") || errMsg.includes("NotFound")) {
-          temporalOk = true;
+    try {
+      if (req.url === "/healthz" || req.url === "/readyz") {
+        let temporalOk = false;
+        try {
+          if (temporalClient) {
+            await Promise.race([
+              temporalClient.workflow.getHandle("health-check-test").describe(),
+              new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
+            ]);
+            temporalOk = true;
+          }
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (errMsg.includes("not found") || errMsg.includes("NotFound")) {
+            temporalOk = true;
+          }
+        }
+        let dbOk = false;
+        try {
+          const { getPool } = await import("@e-gaop/shared");
+          const p = await getPool();
+          const r = await p.query("SELECT 1");
+          dbOk = r.rows.length > 0;
+        } catch {}
+        const allOk = dbOk;
+        const code = allOk ? 200 : 503;
+        if (!res.writableEnded && !res.headersSent) {
+          res.writeHead(code, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            status: allOk ? "SERVING" : "DEGRADED",
+            service: "api-server",
+            dependencies: {
+              postgres: dbOk ? "connected" : "unreachable",
+              redis: "unknown",
+              temporal: temporalOk ? "connected" : "unreachable",
+            },
+            uptime: Math.floor(process.uptime()),
+            version: "1.0.0",
+            timestamp: new Date().toISOString(),
+          }));
+        }
+      } else {
+        if (!res.writableEnded && !res.headersSent) {
+          res.writeHead(404);
+          res.end();
         }
       }
-      const code = temporalOk ? 200 : 503;
-      res.writeHead(code, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        status: temporalOk ? "SERVING" : "NOT_SERVING",
-        service: "api-server",
-        temporal: temporalOk ? "connected" : "unreachable",
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(JSON.stringify({
         timestamp: new Date().toISOString(),
-      }));
-    } else {
-      res.writeHead(404);
-      res.end();
+        level: "error",
+        message: `Health endpoint error: ${errMsg}`,
+      }) + "\n");
+      try {
+        if (!res.writableEnded && !res.headersSent) {
+          res.writeHead(500);
+          res.end();
+        }
+      } catch {}
     }
   });
   healthServer.listen(HEALTH_PORT, "0.0.0.0", () => {

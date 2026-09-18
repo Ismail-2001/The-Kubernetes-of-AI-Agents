@@ -199,7 +199,7 @@ services:
     command: ["-config.file=/etc/tempo/config.yml"]
     volumes:
       - ./observability/tempo-config.yml:/etc/tempo/config.yml:ro
-      - tempo-data:/tempo
+      - ./data/tempo:/tempo
     logging:
       driver: json-file
       options:
@@ -269,7 +269,6 @@ services:
     entrypoint: ["/bin/sh", "-c", "sleep 10 && chmod +x /etc/grafana-init.sh && /etc/grafana-init.sh & /run.sh"]
     depends_on:
       - prometheus
-      - tempo
       - loki
     logging:
       driver: json-file
@@ -459,6 +458,7 @@ services:
       TOOL_PROXY_ADDR: tool-proxy:50052
       POLICY_PLANE_ADDR: http://opa:8181
       WORKFLOW_ENGINE_HEALTH_PORT: "15058"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
@@ -638,6 +638,7 @@ services:
       SANDBOX_RUNTIME_PORT: "50054"
       SANDBOX_RUNTIME_HEALTH_PORT: "15054"
       DOCKER_HOST: tcp://docker-socket-proxy:2375
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}

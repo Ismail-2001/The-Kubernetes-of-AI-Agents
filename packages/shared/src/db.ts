@@ -2,12 +2,28 @@ import { Pool, PoolConfig } from "pg";
 
 let pool: Pool | null = null;
 
-const DEFAULT_CONFIG: PoolConfig = {
-  max: parseInt(process.env.DB_POOL_MAX || "20", 10),
-  idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT_MS || "30000", 10),
-  connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || "2000", 10),
-  connectionString: process.env.DATABASE_URL,
-};
+function buildPoolConfig(): PoolConfig {
+  if (process.env.DATABASE_URL) {
+    return {
+      max: parseInt(process.env.DB_POOL_MAX || "20", 10),
+      idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT_MS || "30000", 10),
+      connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || "2000", 10),
+      connectionString: process.env.DATABASE_URL,
+    };
+  }
+  return {
+    host: process.env.POSTGRES_HOST || "postgres",
+    port: parseInt(process.env.POSTGRES_PORT || "5432", 10),
+    user: process.env.POSTGRES_USER || "egaop",
+    password: process.env.POSTGRES_PASSWORD,
+    database: process.env.POSTGRES_DB || "egaop",
+    max: parseInt(process.env.DB_POOL_MAX || "20", 10),
+    idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT_MS || "30000", 10),
+    connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || "2000", 10),
+  };
+}
+
+const DEFAULT_CONFIG: PoolConfig = buildPoolConfig();
 
 async function connectWithRetry(
   config: PoolConfig,

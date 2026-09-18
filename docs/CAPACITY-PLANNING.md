@@ -4,13 +4,55 @@
 
 ## Current Infrastructure
 
-| Component | Spec | Current Usage | Headroom |
-|-----------|------|--------------|----------|
-| API Server | 2 CPU / 512MB | 30% CPU / 256MB | 70% / 256MB |
-| PostgreSQL | 2 CPU / 2GB | 20% CPU / 1GB | 80% / 1GB |
-| Redis | 1 CPU / 256MB | 10% CPU / 64MB | 90% / 192MB |
-| Grafana | 1 CPU / 512MB | 15% CPU / 128MB | 85% / 384MB |
-| Prometheus | 1 CPU / 1GB | 25% CPU / 512MB | 75% / 512MB |
+### Actual Resource Usage (Measured 2026-09-18)
+
+| Service | CPU % | Memory Used | Memory Limit | Memory % | Status |
+|---------|-------|-------------|-------------|----------|--------|
+| api-server | 0.02% | 91.86 MiB | 512 MiB | 17.94% | Healthy |
+| postgres | 0.65% | 56.36 MiB | 1 GiB | 5.50% | Healthy |
+| redis | 1.17% | 14.76 MiB | 512 MiB | 2.88% | Healthy |
+| pgbouncer | 0.07% | 9.20 MiB | 256 MiB | 3.59% | Healthy |
+| otel-collector | 0.04% | 145.20 MiB | 7.66 GiB | 1.85% | Running |
+| prometheus | 1.94% | 91.84 MiB | 7.66 GiB | 1.17% | Running |
+| grafana | 0.12% | 155.00 MiB | 7.66 GiB | 1.98% | Running |
+| loki | 1.28% | 82.23 MiB | 7.66 GiB | 1.05% | Healthy |
+| blackbox-exporter | 0.00% | 26.02 MiB | 128 MiB | 20.32% | Healthy |
+| admin-console | 0.02% | 45.52 MiB | 7.66 GiB | 0.58% | Healthy |
+| memory-plane | 0.00% | 41.75 MiB | 256 MiB | 16.31% | Healthy |
+| sandbox-runtime | 0.52% | 37.80 MiB | 1 GiB | 3.69% | Healthy |
+| base-runtime | 0.00% | 23.87 MiB | 7.66 GiB | 0.30% | Healthy |
+| docker-socket-proxy | 0.00% | 25.50 MiB | 7.66 GiB | 0.33% | Running |
+| secret-store | 0.00% | 0 MiB | — | — | Starting |
+| tool-proxy | 0.00% | 0 MiB | — | — | Starting |
+| observability-plane | 0.00% | 0 MiB | — | — | Starting |
+| llm-router | 0.00% | 0 MiB | — | — | Starting |
+| workflow-engine | 47.52% | 21.72 MiB | 512 MiB | 4.24% | Restarting* |
+| opa | 0.00% | 0 MiB | — | — | Restarting* |
+
+> *workflow-engine and opa are restarting due to pre-existing dependency issues (missing `@jsonjoy.com/fs-node` and rego parse errors respectively).
+
+### Aggregate Resource Totals
+
+| Metric | Value |
+|--------|-------|
+| Total services | 20 (18 custom + 2 infra) |
+| Healthy services | 14 |
+| Total memory used | ~870 MiB |
+| Total memory allocated | ~35 GiB |
+| Total CPU used | ~3% |
+| Total containers | 20 |
+
+### Previous Estimated vs Actual
+
+| Component | Estimated | Actual | Delta |
+|-----------|-----------|--------|-------|
+| API Server | 30% CPU / 256MB | 0.02% / 92MB | Significantly lower |
+| PostgreSQL | 20% CPU / 1GB | 0.65% / 56MB | Significantly lower |
+| Redis | 10% CPU / 64MB | 1.17% / 15MB | Significantly lower |
+| Grafana | 15% CPU / 128MB | 0.12% / 155MB | Memory slightly higher |
+| Prometheus | 25% CPU / 512MB | 1.94% / 92MB | Significantly lower |
+
+> Note: Measured at idle (no active agent traffic). Production load will increase usage significantly.
 
 ## Usage Patterns
 

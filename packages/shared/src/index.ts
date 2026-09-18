@@ -157,3 +157,11 @@ export {
   SLOQuerySchema,
 } from "./validation/index.js";
 export type { ValidationProblem } from "./validation/index.js";
+export {
+  recordLLMCost,
+  llmCostCounter,
+  llmTokensByModel,
+  llmCostByModel,
+  llmCostByNamespace,
+  llmCostByAgent,
+} from "./metrics/cost-metrics.js";

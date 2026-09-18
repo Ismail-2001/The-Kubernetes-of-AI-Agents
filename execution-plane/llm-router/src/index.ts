@@ -1,5 +1,5 @@
 import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv, LLM400Error, LLMAuthError, LLMRateLimitError } from "@e-gaop/shared";
-import { recordLLMCost } from "@e-gaop/shared/src/metrics/cost-metrics.js";
+import { recordLLMCost } from "@e-gaop/shared";
 
 initTracing("llm-router");
 loadSecretsIntoEnv();
