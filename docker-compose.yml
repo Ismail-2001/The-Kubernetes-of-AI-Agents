@@ -289,6 +289,8 @@ services:
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/k8s-ai-agents-dashboard.json:/var/lib/grafana/dashboards/k8s-ai-agents.json:ro
+      - ./observability/grafana/slo-dashboard.json:/var/lib/grafana/dashboards/slo-dashboard.json:ro
+      - ./observability/grafana/cost-dashboard.json:/var/lib/grafana/dashboards/cost-dashboard.json:ro
       - ./scripts/grafana-init.sh:/etc/grafana-init.sh:ro
       - grafana-data:/var/lib/grafana
     entrypoint: ["/bin/sh", "-c", "sleep 10 && chmod +x /etc/grafana-init.sh && /etc/grafana-init.sh & /run.sh"]
