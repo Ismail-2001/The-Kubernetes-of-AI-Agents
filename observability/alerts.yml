@@ -1,110 +1,123 @@
 groups:
   - name: e-gaop-alerts
     rules:
+      # ─── Application Health ──────────────────────────────────────────────────
       - alert: HighErrorRate
         expr: |
-          sum(rate(http_server_duration_count{http_status_code=~"5.."}[5m]))
+          sum(rate(http_server_duration_count{http_status_code=~"5..",namespace="egaop"}[5m]))
           /
-          sum(rate(http_server_duration_count[5m])) > 0.05
+          clamp_min(sum(rate(http_server_duration_count{namespace="egaop"}[5m])), 1) > 0.05
         for: 5m
         labels:
           severity: critical
         annotations:
           summary: "High 5xx error rate (>5%)"
           description: "HTTP 5xx error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+          runbook: "docs/runbooks/high-error-rate.md"
 
       - alert: HighGrpcLatency
         expr: |
-          histogram_quantile(0.95, sum(rate(http_client_duration_bucket[5m])) by (le, service_name)) > 5000
+          histogram_quantile(0.95, sum(rate(http_client_duration_bucket{namespace="egaop"}[5m])) by (le, service_name)) > 5000
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "gRPC P95 latency >5s"
           description: "P95 latency for {{ $labels.service_name }} is {{ $value }}ms."
+          runbook: "docs/runbooks/high-latency-p95.md"
 
       - alert: HighGrpcLatencyP99
         expr: |
-          histogram_quantile(0.99, sum(rate(http_client_duration_bucket[5m])) by (le, service_name)) > 10000
+          histogram_quantile(0.99, sum(rate(http_client_duration_bucket{namespace="egaop"}[5m])) by (le, service_name)) > 10000
         for: 5m
         labels:
           severity: critical
         annotations:
           summary: "gRPC P99 latency >10s"
           description: "P99 latency for {{ $labels.service_name }} is {{ $value }}ms."
+          runbook: "docs/runbooks/high-latency-p99.md"
 
       - alert: AgentExecutionFailureSpike
         expr: |
-          sum(rate(e_gaop_otelcol_exporter_send_failed_spans[5m]))
+          sum(rate(e_gaop_otelcol_exporter_send_failed_spans{namespace="egaop"}[5m]))
           /
-          sum(rate(e_gaop_otelcol_exporter_sent_spans[5m])) > 0.10
+          clamp_min(sum(rate(e_gaop_otelcol_exporter_sent_spans{namespace="egaop"}[5m])), 1) > 0.10
         for: 3m
         labels:
           severity: critical
         annotations:
           summary: "Agent execution failure rate >10%"
           description: "Agent execution failure rate is {{ $value | humanizePercentage }} over the last 3 minutes."
+          runbook: "docs/runbooks/agent-execution-failure.md"
 
       - alert: OpaCircuitBreakerOpen
         expr: |
-          policy_plane_opa_circuit_breaker_state == 1
+          policy_plane_opa_circuit_breaker_state{namespace="egaop"} == 1
         for: 2m
         labels:
           severity: critical
         annotations:
           summary: "OPA circuit breaker is OPEN"
           description: "Policy plane OPA circuit breaker is open — all authorization checks are failing closed."
+          runbook: "docs/runbooks/opa-circuit-breaker.md"
 
       - alert: ToolExecutionP99High
         expr: |
-          histogram_quantile(0.99, sum(rate(http_client_duration_bucket[5m])) by (le, service_name)) > 30000
+          histogram_quantile(0.99, sum(rate(http_client_duration_bucket{namespace="egaop"}[5m])) by (le, service_name)) > 30000
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Tool execution P99 latency >30s"
           description: "P99 latency for {{ $labels.service_name }} is {{ $value }}ms."
+          runbook: "docs/runbooks/high-latency-p95.md"
 
+      # ─── LLM Cost ───────────────────────────────────────────────────────────
       - alert: LLMCostBudgetExceeded
         expr: |
-          sum(increase(e_gaop_llm_tokens_used_total[1h])) * 0.00003 > 50
+          sum(increase(e_gaop_llm_tokens_used_total{namespace="egaop"}[1h])) * 0.00003 > 50
         for: 5m
         labels:
           severity: critical
         annotations:
           summary: "LLM cost budget exceeded ($50/hr)"
           description: "Estimated LLM cost is ${{ $value | printf \"%.2f\" }} per hour."
+          runbook: "docs/runbooks/llm-cost-budget.md"
 
       - alert: LLMTokenRateHigh
         expr: |
-          sum(rate(e_gaop_llm_tokens_used_total[5m])) > 100000
+          sum(rate(e_gaop_llm_tokens_used_total{namespace="egaop"}[5m])) > 100000
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: "LLM token consumption rate >100k/min"
           description: "Token consumption rate is {{ $value | printf \"%.0f\" }} tokens/second."
+          runbook: "docs/runbooks/llm-cost-budget.md"
 
       - alert: ActiveAgentsHigh
         expr: |
-          e_gaop_active_agents > 50
+          e_gaop_active_agents{namespace="egaop"} > 50
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Active agents count >50"
           description: "{{ $value }} agents are currently active — may indicate resource contention."
+          runbook: "docs/runbooks/scaling.md"
 
       - alert: SandboxCreationFailure
         expr: |
-          sum(rate(e_gaop_sandbox_creation_failures_total[5m])) > 0
+          sum(rate(e_gaop_sandbox_creation_failures_total{namespace="egaop"}[5m])) > 0
         for: 2m
         labels:
           severity: critical
         annotations:
           summary: "Sandbox creation failures detected"
           description: "Sandbox creation is failing at {{ $value | printf \"%.2f\" }}/second."
+          runbook: "docs/runbooks/sandbox-creation-failure.md"
 
+      # ─── Service Availability ────────────────────────────────────────────────
       - alert: ServiceDown
         expr: |
           min(up{job="egaop-services"}) == 0
@@ -114,6 +127,7 @@ groups:
         annotations:
           summary: "Service is DOWN"
           description: "One or more E-GAOP services are unreachable."
+          runbook: "docs/runbooks/service-down.md"
 
       - alert: SyntheticProbeDown
         expr: |
@@ -124,6 +138,7 @@ groups:
         annotations:
           summary: "Synthetic probe failing"
           description: "Health probe for {{ $labels.instance }} has been failing for 2+ minutes."
+          runbook: "docs/runbooks/service-down.md"
 
       - alert: SyntheticProbeSlow
         expr: |
@@ -134,6 +149,7 @@ groups:
         annotations:
           summary: "Synthetic probe slow (>5s)"
           description: "Health probe for {{ $labels.instance }} is taking {{ $value }}s."
+          runbook: "docs/runbooks/high-latency-p95.md"
 
       - alert: BlackboxProbeDown
         expr: |
@@ -144,3 +160,64 @@ groups:
         annotations:
           summary: "Blackbox probe failing"
           description: "Blackbox probe for {{ $labels.instance }} is down."
+          runbook: "docs/runbooks/service-down.md"
+
+  # ─── Infrastructure Health ──────────────────────────────────────────────────
+  - name: e-gaop-infrastructure
+    rules:
+      - alert: PodOOMKilled
+        expr: |
+          kube_pod_container_status_last_terminated_reason{namespace="egaop",reason="OOMKilled"} > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pod OOMKilled: {{ $labels.pod }}"
+          description: "Pod {{ $labels.pod }} was terminated due to OOM. Increase memory limits."
+          runbook: "docs/runbooks/scaling.md"
+
+      - alert: PodCrashLooping
+        expr: |
+          rate(kube_pod_container_status_restarts_total{namespace="egaop"}[15m]) * 60 * 5 > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod crash looping: {{ $labels.pod }}"
+          description: "Pod {{ $labels.pod }} has restarted frequently."
+          runbook: "docs/runbooks/service-down.md"
+
+      - alert: PVCNearFull
+        expr: |
+          (kubelet_volume_stats_used_bytes{namespace="egaop"} / kubelet_volume_stats_capacity_bytes{namespace="egaop"}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PVC near full: {{ $labels.persistentvolumeclaim }}"
+          description: "PVC is {{ $value | humanizePercentage }} full."
+          runbook: "docs/runbooks/backup-restore.md"
+
+      - alert: HighCPUThrottling
+        expr: |
+          (sum(rate(container_cpu_cfs_throttled_periods_total{namespace="egaop",container!=""}[5m])) by (pod, container)
+          / sum(rate(container_cpu_cfs_periods_total{namespace="egaop",container!=""}[5m])) by (pod, container)) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU throttling: {{ $labels.pod }}"
+          description: "Container {{ $labels.container }} is CPU-throttled {{ $value | humanizePercentage }} of the time."
+          runbook: "docs/runbooks/scaling.md"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (container_memory_working_set_bytes{namespace="egaop",container!=""}
+          / kube_pod_container_resource_limits{namespace="egaop",resource="memory",container!=""}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage: {{ $labels.pod }}"
+          description: "Container {{ $labels.container }} is using {{ $value | humanizePercentage }} of memory limit."
+          runbook: "docs/runbooks/scaling.md"

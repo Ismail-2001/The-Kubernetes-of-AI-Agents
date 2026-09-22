@@ -1,0 +1,206 @@
+# values-kind.yml — Minimal Kind-specific overrides for E-GAOP
+# Absolute minimum resource usage to avoid Docker Desktop overload
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  serviceMonitorEnabled: false
+  otelEndpoint: ""
+
+tls:
+  certManager:
+    enabled: true
+
+certManager:
+  enabled: true
+
+serviceAccount:
+  create: true
+
+externalSecrets:
+  enabled: true
+  # Kubernetes provider: reads from source secret in this namespace
+  sourceNamespace: external-secrets
+  sourceSecretName: egaop-source-secrets
+  # ESO refresh interval (how often it re-syncs from source)
+  refreshInterval: 1m
+
+vault:
+  enabled: false
+
+# Secrets are now managed by ESO (ExternalSecret CRD).
+# Source of truth: kubectl get secret egaop-source-secrets -n external-secrets
+# ESO syncs source → egaop-e-gaop-managed-secrets → pods
+secrets: {}
+
+ingress:
+  enabled: true
+  className: nginx
+  certManagerIssuer: ""
+  certManagerEmail: ""
+  adminHost: admin.egaop.local
+  apiHost: api.egaop.local
+  grpcHost: grpc.egaop.local
+
+postgresql:
+  enabled: true
+  image:
+    tag: latest
+  metrics:
+    enabled: false
+  primary:
+    persistence:
+      enabled: true
+      size: 1Gi
+  auth:
+    username: egaop
+    password: egaop-kind-test-postgres-24ch!
+    database: egaop
+    existingSecret: "egaop-e-gaop-managed-secrets"
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: postgres-password
+
+redis:
+  enabled: true
+  image:
+    tag: latest
+  metrics:
+    enabled: false
+  architecture: standalone
+  auth:
+    enabled: true
+    existingSecret: "egaop-e-gaop-managed-secrets"
+    existingPasswordKey: redis-password
+  master:
+    persistence:
+      enabled: true
+      size: 1Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
+temporal:
+  enabled: false
+
+opa:
+  enabled: true
+  replicas: 1
+  hpa:
+    enabled: false
+
+otelCollector:
+  enabled: false
+
+migration:
+  enabled: false
+
+api-server:
+  replicas: 1
+  tls:
+    certManager:
+      enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+workflow-engine:
+  replicas: 1
+  tls:
+    certManager:
+      enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+llm-router:
+  replicas: 1
+  tls:
+    certManager:
+      enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+secret-store:
+  replicas: 1
+  tls:
+    certManager:
+      enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+tool-proxy:
+  replicas: 1
+  tls:
+    certManager:
+      enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+sandbox-runtime:
+  replicas: 1
+  tls:
+    certManager:
+      enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+memory-plane:
+  enabled: false
+
+observability-plane:
+  enabled: false
+
+admin-console:
+  replicas: 1
+  tls:
+    certManager:
+      enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+# ─── Backup (Kind) ──────────────────────────────────────────────────────────
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retentionDays: 7
+  s3:
+    enabled: false
+  persistence:
+    enabled: true
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

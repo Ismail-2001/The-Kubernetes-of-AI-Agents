@@ -29,7 +29,7 @@ dependencies:
     condition: temporal.enabled
   # ─── Custom Subcharts (application services) ──────────────────────────────
   - name: opa
-    version: "0.1.0"
+    version: "0.1.1"
     condition: opa.enabled
   - name: otel-collector
     version: "0.1.0"

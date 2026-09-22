@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv, buildHealthResponse, healthToHttpStatus } from "@e-gaop/shared";
 
 initTracing("sandbox-runtime");
 loadSecretsIntoEnv();
@@ -185,6 +185,8 @@ server.addService(HEALTH_SERVICE, {
 if (process.env.NODE_ENV !== "test") {
   const RUNTIME_PORT = process.env.SANDBOX_RUNTIME_PORT || "50054";
   const HEALTH_PORT = parseInt(process.env.SANDBOX_RUNTIME_HEALTH_PORT || "15054", 10);
+  const SERVICE_VERSION = process.env.SERVICE_VERSION || "1.0.0";
+  const healthStartTime = new Date();
 
   server.bindAsync(`0.0.0.0:${RUNTIME_PORT}`, getServerCredentials(), (err, port) => {
     if (err) {
@@ -195,24 +197,33 @@ if (process.env.NODE_ENV !== "test") {
   });
 
   const healthServer = http.createServer(async (req, res) => {
-    if (req.url === "/healthz" || req.url === "/readyz") {
-      try {
-        const ok = await sandboxDriver.health();
-        if (ok) {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ status: "SERVING", service: "sandbox-runtime" }));
-        } else {
-          res.writeHead(503);
-          res.end(JSON.stringify({ status: "NOT_SERVING", service: "sandbox-runtime" }));
-        }
-      } catch {
-        res.writeHead(503);
-        res.end(JSON.stringify({ status: "NOT_SERVING", service: "sandbox-runtime" }));
-      }
-    } else {
-      res.writeHead(404);
-      res.end();
+    const url = req.url ?? "/";
+
+    // ── Liveness: Is the process alive? (no dependency checks) ────────
+    if (url === "/healthz") {
+      const response = buildHealthResponse("sandbox-runtime", SERVICE_VERSION, healthStartTime, []);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
+      return;
     }
+
+    // ── Readiness: Can we create sandboxes? (checks Docker) ──────────
+    if (url === "/readyz") {
+      const dockerOk = await sandboxDriver.health();
+      const checks = [{
+        name: "docker",
+        status: dockerOk ? "healthy" as const : "unhealthy" as const,
+        message: dockerOk ? undefined : "Docker daemon unreachable",
+      }];
+      const response = buildHealthResponse("sandbox-runtime", SERVICE_VERSION, healthStartTime, checks);
+      const code = healthToHttpStatus(response.status);
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
   });
   healthServer.listen(HEALTH_PORT, "0.0.0.0", () => {
     logger.info(`Health endpoint listening on port ${HEALTH_PORT}`);

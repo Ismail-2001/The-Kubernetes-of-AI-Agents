@@ -1,0 +1,54 @@
+{{- if .Values.tls.certManager.enabled }}
+# ─── Internal PKI Hierarchy ───────────────────────────────────────────────────
+# Self-Signed Root → CA Certificate → Service Certificates
+# For Kind/dev: self-signed root. For prod: replace with Let's Encrypt or Vault PKI.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# 1. Bootstrap self-signed issuer (creates the root of trust)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-selfsigned-root
+  labels:
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  selfSigned: {}
+---
+# 2. CA certificate signed by the self-signed root
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-internal-ca
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  isCA: true
+  commonName: {{ include "e-gaop.fullname" . }}-internal-ca
+  subject:
+    organizations:
+      - e-gaop
+    organizationalUnits:
+      - platform
+  duration: 87600h
+  renewBefore: 8760h
+  secretName: {{ include "e-gaop.fullname" . }}-internal-ca-secret
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ include "e-gaop.fullname" . }}-selfsigned-root
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# 3. CA issuer — signs individual service certificates
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-internal-ca
+  labels:
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  ca:
+    secretName: {{ include "e-gaop.fullname" . }}-internal-ca-secret
+{{- end }}

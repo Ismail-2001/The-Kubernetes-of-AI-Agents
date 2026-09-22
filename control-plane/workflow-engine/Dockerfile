@@ -6,6 +6,7 @@ COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY packages/shared/ ./packages/shared/
 COPY control-plane/workflow-engine/package.json ./control-plane/workflow-engine/
+COPY api/proto/ ./api/proto/
 
 RUN npm ci
 RUN npm install @jsonjoy.com/fs-node@4.64.0 @jsonjoy.com/fs-core@4.64.0 @jsonjoy.com/fs-node-builtins@4.64.0 @jsonjoy.com/fs-node-to-fsa@4.64.0 @jsonjoy.com/fs-node-utils@4.64.0 @jsonjoy.com/fs-print@4.64.0 @jsonjoy.com/fs-snapshot@4.64.0 @jsonjoy.com/fs-fsa@4.64.0
@@ -28,6 +29,7 @@ COPY --from=builder /app/control-plane/workflow-engine/package.json ./
 RUN rm -rf node_modules/@e-gaop/shared
 COPY --from=builder /app/packages/shared ./node_modules/@e-gaop/shared
 RUN cp -r node_modules/@e-gaop/shared/node_modules/* node_modules/ 2>/dev/null; rm -rf node_modules/@e-gaop/shared/node_modules
+COPY --from=builder /app/api/proto /api/proto
 USER egaop
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
   CMD node -e "require('http').get('http://localhost:15058/healthz', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"

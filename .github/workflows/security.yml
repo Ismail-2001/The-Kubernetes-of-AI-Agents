@@ -1,0 +1,113 @@
+# ─── Security Scan Pipeline ───────────────────────────────────────────────────
+# Runs Trivy container scanning on all Docker images and Helm chart security
+# validation. Runs weekly + on PRs that touch Dockerfiles or chart templates.
+#
+# ──────────────────────────────────────────────────────────────────────────────
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/Dockerfile"
+      - "charts/**"
+      - ".github/workflows/security.yml"
+  schedule:
+    - cron: "0 6 * * 1"  # Weekly Monday 6am UTC
+
+jobs:
+  # ─── Container Scanning ─────────────────────────────────────────────────────
+  trivy-scan:
+    name: "Trivy: ${{ matrix.service }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-server
+            context: control-plane/api-server
+          - service: workflow-engine
+            context: control-plane/workflow-engine
+          - service: secret-store
+            context: control-plane/secret-store
+          - service: llm-router
+            context: execution-plane/llm-router
+          - service: tool-proxy
+            context: execution-plane/tool-proxy
+          - service: sandbox-runtime
+            context: execution-plane/sandbox-runtime
+          - service: admin-console
+            context: admin-console
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t egaop/${{ matrix.service }}:scan ${{ matrix.context }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "egaop/${{ matrix.service }}:scan"
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+  # ─── Helm Chart Security ────────────────────────────────────────────────────
+  helm-security:
+    name: Helm Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.0"
+
+      - name: Check for secrets in chart templates
+        run: |
+          echo "=== Checking for hardcoded secrets ==="
+          if grep -r "password:" charts/e-gaop/templates/ | grep -v "existingSecret\|secretKeyRef\|valueFrom\|{{-\|{#\|//"; then
+            echo "WARNING: Possible hardcoded passwords in chart templates"
+            exit 1
+          fi
+          echo "OK: No hardcoded secrets found"
+
+      - name: Check for privileged containers
+        run: |
+          echo "=== Checking for privileged containers ==="
+          PRIV=$(grep -r "privileged:" charts/e-gaop/templates/ | grep "true" || true)
+          if [ -n "$PRIV" ]; then
+            echo "WARNING: Privileged containers found:"
+            echo "$PRIV"
+            exit 1
+          fi
+          echo "OK: No privileged containers"
+
+      - name: Check for latest image tags
+        run: |
+          echo "=== Checking for :latest tags ==="
+          if grep -r 'tag:.*latest' charts/e-gaop/values.yaml | grep -v "^#"; then
+            echo "WARNING: :latest tags found in default values"
+            exit 1
+          fi
+          echo "OK: No :latest tags in default values"
+
+  # ─── Secret Detection ────────────────────────────────────────────────────────
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect secrets with gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,20 +1,32 @@
 ## Summary
 
-<!-- What does this PR change? -->
+<!-- Brief description of what this PR does -->
+
+## Type of Change
+
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Infrastructure/CI/CD change
+- [ ] Documentation update
+
+## Changes
+
+- 
+
+## Testing
+
+- [ ] Unit tests pass (`make test`)
+- [ ] Type checking passes (`make typecheck`)
+- [ ] Linting passes (`make lint`)
+- [ ] Helm chart lints cleanly (`make ci-helm`)
+- [ ] Integration tests pass (if applicable)
 
 ## Checklist
 
-- [ ] Code compiles (`npm run typecheck --workspaces`)
-- [ ] Tests pass (`npm test --workspaces --if-present`)
-- [ ] Lint passes (`npm run lint --workspaces --if-present`)
-- [ ] New tests added for new functionality (where applicable)
-
-### If this PR changes the production-readiness score or scope claim:
-
-- [ ] `README.md` and the canonical readiness doc (`docs/FAANG-AUDIT-REPORT.md`) were updated in this same commit
-- [ ] Only one distinct readiness score exists across non-deprecated files (run `scripts/check-readiness-score.sh`)
-- [ ] The stated scope ("pilot workloads", "staging", etc.) matches what has actually been tested
-
-## Test Evidence
-
-<!-- How was this tested? Screenshots, test output, etc. -->
+- [ ] My code follows the project's style guidelines
+- [ ] I have performed a self-review of my code
+- [ ] I have commented my code where necessary
+- [ ] My changes generate no new warnings
+- [ ] I have added tests that prove my fix is effective or my feature works
+- [ ] New and existing unit tests pass locally

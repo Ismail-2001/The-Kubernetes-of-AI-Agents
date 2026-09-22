@@ -16,19 +16,17 @@ spec:
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
+{{- include "e-gaop.prometheusAnnotations" . | nindent 6 }}
       labels:
         app.kubernetes.io/name: tool-proxy
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/part-of: e-gaop
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "{{ .Values.healthPort }}"
     spec:
-      serviceAccountName: {{ .Release.Name }}-e-gaop-app
+{{- include "e-gaop.serviceAccountName" . | nindent 6 }}
+{{- include "e-gaop.podSecurityContext" . | nindent 6 }}
       containers:
         - name: tool-proxy
-          image: "{{ .Values.image }}:{{ .Values.tag }}"
-          imagePullPolicy: IfNotPresent
+{{- include "e-gaop.image" . | nindent 10 }}
           ports:
             - containerPort: {{ .Values.grpcPort }}
               name: grpc
@@ -36,54 +34,16 @@ spec:
             - containerPort: {{ .Values.healthPort }}
               name: health
               protocol: TCP
-          envFrom:
-            - configMapRef:
-                name: {{ .Release.Name }}-e-gaop-shared
+{{- include "e-gaop.envFrom" . | nindent 10 }}
           env:
-            - name: NODE_ENV
-              value: production
-            - name: OTEL_SERVICE_NAME
-              value: egaop-tool-proxy
+{{- include "e-gaop.commonEnv" (dict "serviceName" "tool-proxy" "healthPort" .Values.healthPort) | nindent 12 }}
             - name: SERVICE_GRPC_PORT
               value: "{{ .Values.grpcPort }}"
-            - name: SERVICE_HEALTH_PORT
-              value: "{{ .Values.healthPort }}"
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: health
-            initialDelaySeconds: 10
-            periodSeconds: 30
-            timeoutSeconds: 3
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: health
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
+{{- include "e-gaop.coreSecrets" . | nindent 12 }}
+{{- include "e-gaop.probes" . | nindent 10 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 1001
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-          {{- if .Values.tls.certManager.enabled }}
-          volumeMounts:
-            - name: tls-certs
-              mountPath: /etc/egaop/certs
-              readOnly: true
-          {{- end }}
-      securityContext:
-        fsGroup: 1001
-        runAsNonRoot: true
-        runAsUser: 1001
-      {{- if .Values.tls.certManager.enabled }}
-      volumes:
-        - name: tls-certs
-          secret:
-            secretName: tool-proxy-tls
-            optional: true
-      {{- end }}
+{{- include "e-gaop.containerSecurityContext" . | nindent 10 }}
+{{- include "e-gaop.tlsVolumeMount" . | nindent 10 }}
+{{- include "e-gaop.tlsVolume" (dict "Values" .Values "chartName" "tool-proxy") | nindent 6 }}
 {{- end }}

@@ -1,0 +1,55 @@
+{{- if .Values.externalSecrets.enabled }}
+# ─── RBAC for External Secrets Operator ──────────────────────────────────────
+# ESO needs a ServiceAccount + ClusterRole to read secrets from the source
+# namespace (external-secrets) and write to the target namespace (egaop).
+#
+# Scope: ClusterRole is required because the Kubernetes provider uses the
+# informer cache which is cluster-scoped. The resourceNames field restricts
+# access to only the specific source secret.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ─── ServiceAccount (in egaop namespace) ──────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-eso-store
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "e-gaop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: external-secrets
+
+---
+# ─── ClusterRole: read source secrets from external-secrets namespace ─────────
+# Minimal permissions: read only the specific Secret, no list/watch/create.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-eso-store
+  labels:
+    {{- include "e-gaop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: external-secrets
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+    resourceNames:
+      - {{ .Values.externalSecrets.sourceSecretName | default "egaop-source-secrets" }}
+
+---
+# ─── ClusterRoleBinding: bind ServiceAccount to ClusterRole ───────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-eso-store
+  labels:
+    {{- include "e-gaop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: external-secrets
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "e-gaop.fullname" . }}-eso-store
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "e-gaop.fullname" . }}-eso-store
+    namespace: {{ .Release.Namespace }}
+{{- end }}

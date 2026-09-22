@@ -3,6 +3,32 @@ import pino from "pino";
 
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 
+export async function ensureAuthTables(): Promise<void> {
+  const pool = await getPool();
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'developer',
+      namespace_access JSONB NOT NULL DEFAULT '["default"]',
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      must_change_password BOOLEAN NOT NULL DEFAULT false,
+      failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until TIMESTAMPTZ,
+      last_login_at TIMESTAMPTZ,
+      deleted_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users (lower(email));
+  `);
+
+  logger.info("Auth tables ensured");
+}
+
 export async function ensureTables(): Promise<void> {
   const pool = await getPool();
 

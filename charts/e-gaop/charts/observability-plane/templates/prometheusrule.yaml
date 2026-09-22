@@ -1,4 +1,9 @@
 {{- if and .Values.enabled .Values.prometheusRules.enabled }}
+# ─── E-GAOP SLO + Infrastructure Alert Rules ─────────────────────────────────
+# Multi-window burn rate methodology (Google SRE Workbook).
+# Numerator: error requests over short window
+# Denominator: total requests over long window
+# ──────────────────────────────────────────────────────────────────────────────
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -10,107 +15,226 @@ metadata:
     release: {{ .Release.Name }}
 spec:
   groups:
+    # ─── SLO Burn Rate Alerts ─────────────────────────────────────────────────
     - name: egaop.slo.rules
       rules:
-        # ── 5-minute burn rate: page (fast alert) ──
+        # 5-minute burn rate (fast burn): page immediately
+        # Budget exhaustion in 14.4x → 30d budget lasts ~2 days
         - alert: EgaopSLOBurnRateHigh
           expr: |
             (
-              sum(rate(http_requests_total{app_kubernetes_io_component!=""}[5m])) by (app_kubernetes_io_component)
+              sum(rate(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[5m])) by (app_kubernetes_io_name)
               /
-              sum(rate(http_requests_total{app_kubernetes_io_component!=""}[5m])) by (app_kubernetes_io_component)
+              sum(rate(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[1h])) by (app_kubernetes_io_name)
             ) > 14.4
           for: 2m
           labels:
             severity: critical
+            slo: availability
           annotations:
-            summary: "SLO burn rate critical: {{ "{{ $labels.app_kubernetes_io_component }}" }}"
+            summary: "SLO burn rate critical: {{ "{{ $labels.app_kubernetes_io_name }}" }}"
             description: >
-              Component {{ "{{ $labels.app_kubernetes_io_component }}" }} is consuming its
+              Component {{ "{{ $labels.app_kubernetes_io_name }}" }} is consuming its
               error budget 14.4x faster than allowed. At this rate the 30-day error
-              budget will be exhausted within ~2 days. Immediate investigation required.
+              budget will be exhausted within ~2 days.
+            runbook: "docs/runbooks/service-down.md"
 
-        # ── 30-minute burn rate: page ──
+        # 30-minute burn rate: page with lower urgency
         - alert: EgaopSLOBurnRateHigh30m
           expr: |
             (
-              sum(rate(http_requests_total{app_kubernetes_io_component!=""}[30m])) by (app_kubernetes_io_component)
+              sum(rate(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[30m])) by (app_kubernetes_io_name)
               /
-              sum(rate(http_requests_total{app_kubernetes_io_component!=""}[30m])) by (app_kubernetes_io_component)
+              sum(rate(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[6h])) by (app_kubernetes_io_name)
             ) > 6
           for: 5m
           labels:
             severity: critical
+            slo: availability
           annotations:
-            summary: "SLO burn rate critical (30m): {{ "{{ $labels.app_kubernetes_io_component }}" }}"
+            summary: "SLO burn rate critical (30m): {{ "{{ $labels.app_kubernetes_io_name }}" }}"
             description: >
-              Component {{ "{{ $labels.app_kubernetes_io_component }}" }} is consuming its
+              Component {{ "{{ $labels.app_kubernetes_io_name }}" }} is consuming its
               error budget 6x faster than allowed over a 30-minute window.
+            runbook: "docs/runbooks/high-error-rate.md"
 
-        # ── 60-minute burn rate: ticket (slow alert) ──
+        # 60-minute burn rate (slow burn): ticket
         - alert: EgaopSLOBurnRateWarning
           expr: |
             (
-              sum(rate(http_requests_total{app_kubernetes_io_component!=""}[60m])) by (app_kubernetes_io_component)
+              sum(rate(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[60m])) by (app_kubernetes_io_name)
               /
-              sum(rate(http_requests_total{app_kubernetes_io_component!=""}[60m])) by (app_kubernetes_io_component)
+              sum(rate(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[3d])) by (app_kubernetes_io_name)
             ) > 3
           for: 15m
           labels:
             severity: warning
+            slo: availability
           annotations:
-            summary: "SLO burn rate warning (60m): {{ "{{ $labels.app_kubernetes_io_component }}" }}"
+            summary: "SLO burn rate warning (60m): {{ "{{ $labels.app_kubernetes_io_name }}" }}"
             description: >
-              Component {{ "{{ $labels.app_kubernetes_io_component }}" }} is consuming its
+              Component {{ "{{ $labels.app_kubernetes_io_name }}" }} is consuming its
               error budget 3x faster than allowed over a 60-minute window.
+            runbook: "docs/runbooks/high-error-rate.md"
 
-        # ── Availability below SLO target ──
+        # Availability below 99.9% SLO target
         - alert: EgaopAvailabilityBelowSLO
           expr: |
             (
-              1 - (sum(rate(http_requests_total{code=~"5.."}[5m])) by (app_kubernetes_io_component)
-              /
-              sum(rate(http_requests_total[5m])) by (app_kubernetes_io_component))
+              1 - (
+                sum(rate(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[5m])) by (app_kubernetes_io_name)
+                /
+                clamp_min(sum(rate(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[5m])) by (app_kubernetes_io_name), 1)
+              )
             ) < 0.999
           for: 5m
           labels:
             severity: critical
+            slo: availability
           annotations:
-            summary: "Availability below 99.9%: {{ "{{ $labels.app_kubernetes_io_component }}" }}"
+            summary: "Availability below 99.9%: {{ "{{ $labels.app_kubernetes_io_name }}" }}"
             description: >
-              Component {{ "{{ $labels.app_kubernetes_io_component }}" }} availability has
-              dropped below the 99.9% SLO target.
+              Component {{ "{{ $labels.app_kubernetes_io_name }}" }} availability has
+              dropped below the 99.9% SLO target (current: {{ "{{ $value | humanizePercentage }}" }}).
+            runbook: "docs/runbooks/service-down.md"
 
-        # ── Latency p95 above SLO target ──
+        # p95 latency above 1000ms SLO target
         - alert: EgaopLatencyP95AboveSLO
           expr: |
             histogram_quantile(0.95,
-              sum(rate(http_request_duration_ms_bucket[5m])) by (le, app_kubernetes_io_component)
+              sum(rate(http_server_duration_bucket{app_kubernetes_io_part_of="e-gaop"}[5m])) by (le, app_kubernetes_io_name)
             ) > 1000
           for: 5m
           labels:
             severity: warning
+            slo: latency
           annotations:
-            summary: "p95 latency above 1s: {{ "{{ $labels.app_kubernetes_io_component }}" }}"
+            summary: "p95 latency above 1s: {{ "{{ $labels.app_kubernetes_io_name }}" }}"
             description: >
-              Component {{ "{{ $labels.app_kubernetes_io_component }}" }} p95 latency has
-              exceeded the 1000ms SLO target.
+              Component {{ "{{ $labels.app_kubernetes_io_name }}" }} p95 latency has
+              exceeded the 1000ms SLO target (current: {{ "{{ $value | printf \"%.0f\" }}" }}ms).
+            runbook: "docs/runbooks/high-latency-p95.md"
 
-        # ── Error budget nearly exhausted ──
+        # Error budget nearly exhausted (>0.1% consumed in 1h)
         - alert: EgaopErrorBudgetExhausted
           expr: |
             (
-              sum(increase(http_requests_total{code=~"5.."}[1h])) by (app_kubernetes_io_component)
+              sum(increase(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[1h])) by (app_kubernetes_io_name)
               /
-              clamp_min(sum(increase(http_requests_total[1h])) by (app_kubernetes_io_component), 1)
+              clamp_min(sum(increase(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[1h])) by (app_kubernetes_io_name), 1)
             ) > 0.001
           for: 30m
           labels:
             severity: warning
+            slo: availability
           annotations:
-            summary: "Error budget nearly exhausted: {{ "{{ $labels.app_kubernetes_io_component }}" }}"
+            summary: "Error budget nearly exhausted: {{ "{{ $labels.app_kubernetes_io_name }}" }}"
             description: >
-              Component {{ "{{ $labels.app_kubernetes_io_component }}" }} has consumed more
-              than 0.1% of its 30-day error budget in the last hour, indicating
-              accelerated budget depletion.
+              Component {{ "{{ $labels.app_kubernetes_io_name }}" }} has consumed more
+              than 0.1% of its 30-day error budget in the last hour.
+            runbook: "docs/runbooks/high-error-rate.md"
+
+    # ─── Infrastructure Health Alerts ─────────────────────────────────────────
+    - name: egaop.infrastructure.rules
+      rules:
+        # Pod OOMKilled
+        - alert: EgaopPodOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{namespace="egaop",reason="OOMKilled"} > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod OOMKilled: {{ "{{ $labels.pod }}" }}"
+            description: >
+              Pod {{ "{{ $labels.pod }}" }} in namespace {{ "{{ $labels.namespace }}" }}
+              was terminated due to OOM. Increase memory limits or investigate memory leak.
+            runbook: "docs/runbooks/scaling.md"
+
+        # Pod CrashLoopBackOff
+        - alert: EgaopPodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="egaop"}[15m]) * 60 * 5 > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod crash looping: {{ "{{ $labels.pod }}" }}"
+            description: >
+              Pod {{ "{{ $labels.pod }}" }} has restarted {{ "{{ $value | printf \"%.0f\" }}" }}
+              times in the last 15 minutes.
+            runbook: "docs/runbooks/service-down.md"
+
+        # PVC usage above 85%
+        - alert: EgaopPVCNearFull
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes{namespace="egaop"}
+              /
+              kubelet_volume_stats_capacity_bytes{namespace="egaop"}
+            ) > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC near full: {{ "{{ $labels.persistentvolumeclaim }}" }}"
+            description: >
+              PVC {{ "{{ $labels.persistentvolumeclaim }}" }} is {{ "{{ $value | humanizePercentage }}" }}
+              full. Expand the volume or clean up data.
+            runbook: "docs/runbooks/backup-restore.md"
+
+        # PVC usage above 95% (critical)
+        - alert: EgaopPVCCritical
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes{namespace="egaop"}
+              /
+              kubelet_volume_stats_capacity_bytes{namespace="egaop"}
+            ) > 0.95
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC critical: {{ "{{ $labels.persistentvolumeclaim }}" }}"
+            description: >
+              PVC {{ "{{ $labels.persistentvolumeclaim }}" }} is {{ "{{ $value | humanizePercentage }}" }}
+              full. Immediate action required to prevent data loss.
+            runbook: "docs/runbooks/backup-restore.md"
+
+        # CPU throttling above 50%
+        - alert: EgaopHighCPUThrottling
+          expr: |
+            (
+              sum(rate(container_cpu_cfs_throttled_periods_total{namespace="egaop",container!=""}[5m])) by (pod, container)
+              /
+              sum(rate(container_cpu_cfs_periods_total{namespace="egaop",container!=""}[5m])) by (pod, container)
+            ) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU throttling: {{ "{{ $labels.pod }}" }}/{{ "{{ $labels.container }}" }}"
+            description: >
+              Container {{ "{{ $labels.container }}" }} in pod {{ "{{ $labels.pod }}" }}
+              is being CPU-throttled {{ "{{ $value | humanizePercentage }}" }} of the time.
+              Increase CPU limits.
+            runbook: "docs/runbooks/scaling.md"
+
+        # Memory usage above 90% of limit
+        - alert: EgaopHighMemoryUsage
+          expr: |
+            (
+              container_memory_working_set_bytes{namespace="egaop",container!=""}
+              /
+              kube_pod_container_resource_limits{namespace="egaop",resource="memory",container!=""}
+            ) > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory usage: {{ "{{ $labels.pod }}" }}/{{ "{{ $labels.container }}" }}"
+            description: >
+              Container {{ "{{ $labels.container }}" }} in pod {{ "{{ $labels.pod }}" }}
+              is using {{ "{{ $value | humanizePercentage }}" }} of its memory limit.
+            runbook: "docs/runbooks/scaling.md"
 {{- end }}

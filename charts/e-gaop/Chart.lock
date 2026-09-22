@@ -10,7 +10,7 @@ dependencies:
   version: 0.44.0
 - name: opa
   repository: ""
-  version: 0.1.0
+  version: 0.1.1
 - name: otel-collector
   repository: ""
   version: 0.1.0
@@ -41,5 +41,5 @@ dependencies:
 - name: admin-console
   repository: ""
   version: 0.1.0
-digest: sha256:152d549a0d676831c33144e97af6e6af95d8612c9e371af5416361bf6e0e42eb
-generated: "2026-07-18T23:21:26.0434364+05:00"
+digest: sha256:b80273afc032960033c25c2fc550237acc26f6b5ee03e6c6c070c77a4740df64
+generated: "2026-09-18T18:14:57.865802+05:00"

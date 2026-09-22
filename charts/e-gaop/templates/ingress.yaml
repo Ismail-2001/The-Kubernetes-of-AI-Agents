@@ -1,48 +1,138 @@
 {{- if .Values.ingress.enabled }}
+# ─── E-GAOP Ingress Resources ────────────────────────────────────────────────
+# Split into HTTP and gRPC for independent configuration.
+# HTTP ingress: admin-console (Next.js) + api-server (REST + WebSocket + SSE)
+# gRPC ingress: api-server gRPC services (agent, llm, runtime, etc.)
+# ──────────────────────────────────────────────────────────────────────────────
+
+{{- $fullname := include "e-gaop.fullname" . -}}
+{{- $namespace := .Release.Namespace -}}
+{{- $release := .Release.Name -}}
+
+# ─── HTTP Ingress (admin-console + API REST + WebSocket + SSE) ───────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "e-gaop.fullname" . }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ $fullname }}-http
+  namespace: {{ $namespace }}
   labels:
-    {{- include "e-gaop.labels" . | nindent 4 }}
+    {{- include "e-gaop.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: http
   annotations:
+    # cert-manager: auto-provision TLS certificate
     {{- if .Values.ingress.certManagerIssuer }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.certManagerIssuer | quote }}
+    {{- else if .Values.tls.certManager.enabled }}
+    cert-manager.io/cluster-issuer: {{ $fullname }}-internal-ca
     {{- end }}
-    nginx.ingress.kubernetes.io/rate-limit: "{{ .Values.ingress.rateLimit | default 100 }}"
-    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    # TLS
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Security headers (via NGINX controller add-headers ConfigMap)
+    # CORS for admin-console ↔ api-server
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://{{ .Values.ingress.adminHost | default "admin.egaop.dev" }},https://{{ .Values.ingress.apiHost | default "api.egaop.dev" }}"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type, Accept, X-Request-ID, X-Correlation-ID"
+    nginx.ingress.kubernetes.io/cors-max-age: "86400"
+    # WebSocket support for /api/ws/* paths
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    # Large body for agent config uploads
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # Disable buffering for SSE streaming
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # Rate limiting per IP
+    nginx.ingress.kubernetes.io/limit-rps: "{{ .Values.ingress.rateLimit | default 100 }}"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+    nginx.ingress.kubernetes.io/limit-connections: "{{ .Values.ingress.rateLimit | default 100 }}"
 spec:
   ingressClassName: {{ .Values.ingress.className | default "nginx" }}
   tls:
     - hosts:
-        - {{ .Values.ingress.adminHost | quote }}
-        - {{ .Values.ingress.apiHost | quote }}
-        - {{ .Values.ingress.grpcHost | default "grpc.egaop.dev" | quote }}
-      secretName: {{ include "e-gaop.fullname" . }}-tls
+        - {{ .Values.ingress.adminHost | default "admin.egaop.dev" | quote }}
+        - {{ .Values.ingress.apiHost | default "api.egaop.dev" | quote }}
+      secretName: {{ $fullname }}-tls
   rules:
-    - host: {{ .Values.ingress.adminHost | quote }}
+    # ─── Admin Console (Next.js) ──────────────────────────────────────────────
+    - host: {{ .Values.ingress.adminHost | default "admin.egaop.dev" | quote }}
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: {{ .Release.Name }}-admin-console
+                name: {{ $release }}-admin-console
                 port:
                   number: {{ index .Values "admin-console" "port" | default 3000 }}
-    - host: {{ .Values.ingress.apiHost | quote }}
+    # ─── API Server (REST + WebSocket + SSE) ──────────────────────────────────
+    - host: {{ .Values.ingress.apiHost | default "api.egaop.dev" | quote }}
       http:
         paths:
+          # WebSocket paths — long-lived connections
+          - path: /api/ws
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $release }}-api-server
+                port:
+                  number: {{ index .Values "api-server" "restPort" | default 3001 }}
+          # SSE streaming — long-lived, no buffering
+          - path: /api/events
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $release }}-api-server
+                port:
+                  number: {{ index .Values "api-server" "restPort" | default 3001 }}
+          # All other REST API routes
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: {{ .Release.Name }}-api-server
+                name: {{ $release }}-api-server
                 port:
                   number: {{ index .Values "api-server" "restPort" | default 3001 }}
+---
+# ─── gRPC Ingress (api-server gRPC services) ────────────────────────────────
+# gRPC requires HTTP/2 and a different backend protocol annotation.
+# Separate Ingress avoids HTTP/2 conflicts with WebSocket (which needs HTTP/1.1).
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-grpc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "e-gaop.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: grpc
+  annotations:
+    # cert-manager
+    {{- if .Values.ingress.certManagerIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManagerIssuer | quote }}
+    {{- else if .Values.tls.certManager.enabled }}
+    cert-manager.io/cluster-issuer: {{ $fullname }}-internal-ca
+    {{- end }}
+    # gRPC backend protocol
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    # TLS
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Long timeouts for streaming RPCs (GenerateStream, Watch, etc.)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Large message support (agent configs, trace exports)
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    # gRPC error handling
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+spec:
+  ingressClassName: {{ .Values.ingress.className | default "nginx" }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.grpcHost | default "grpc.egaop.dev" | quote }}
+      secretName: {{ $fullname }}-tls
+  rules:
     - host: {{ .Values.ingress.grpcHost | default "grpc.egaop.dev" | quote }}
       http:
         paths:
@@ -50,7 +140,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ .Release.Name }}-api-server
+                name: {{ $release }}-api-server
                 port:
                   number: {{ index .Values "api-server" "grpcPort" | default 50051 }}
 {{- end }}

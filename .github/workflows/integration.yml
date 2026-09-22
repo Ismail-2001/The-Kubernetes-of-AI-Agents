@@ -1,0 +1,160 @@
+# ─── Integration Test Pipeline ────────────────────────────────────────────────
+# Runs on PRs to main and pushes to main. Spins up a real Kind cluster,
+# builds images, deploys via Helm, and runs the full integration test suite.
+#
+# This is the "does it actually work in Kubernetes?" gate.
+# ──────────────────────────────────────────────────────────────────────────────
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: integration-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  KIND_CLUSTER_NAME: egaop-ci
+  KIND_NODE_VERSION: v1.31.0
+
+jobs:
+  integration:
+    name: Kind Cluster + Deploy + Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # ─── Unit Tests (fast gate) ──────────────────────────────────────────────
+      - name: Run unit tests
+        run: npm run test
+
+      # ─── Kind Cluster ────────────────────────────────────────────────────────
+      - name: Create KinD cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          node_image: "kindest/node:${{ env.KIND_NODE_VERSION }}"
+          wait: 120s
+
+      # ─── Build + Load Images ─────────────────────────────────────────────────
+      - name: Build and load images into Kind
+        run: |
+          SERVICES=(
+            "api-server:control-plane/api-server"
+            "workflow-engine:control-plane/workflow-engine"
+            "secret-store:control-plane/secret-store"
+            "llm-router:execution-plane/llm-router"
+            "tool-proxy:execution-plane/tool-proxy"
+            "sandbox-runtime:execution-plane/sandbox-runtime"
+            "admin-console:admin-console"
+            "memory-plane:memory-plane"
+            "observability-plane:observability-plane"
+          )
+          for svc in "${SERVICES[@]}"; do
+            NAME="${svc%%:*}"
+            CTX="${svc##*:}"
+            echo "=== Building $NAME from $CTX ==="
+            docker build -t "egaop/$NAME:ci" "$CTX"
+            kind load docker-image "egaop/$NAME:ci" --name "${{ env.KIND_CLUSTER_NAME }}"
+          done
+
+      # ─── Install cert-manager + ESO ──────────────────────────────────────────
+      - name: Install cert-manager
+        run: |
+          helm repo add jetstack https://charts.jetstack.io
+          helm install cert-manager jetstack/cert-manager \
+            -n cert-manager --create-namespace \
+            --set crds.enabled=true \
+            --wait --timeout 3m
+
+      - name: Install External Secrets Operator
+        run: |
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm install external-secrets external-secrets/external-secrets \
+            -n external-secrets --create-namespace \
+            --set installCRDs=true \
+            --wait --timeout 2m
+
+      # ─── Install NGINX Ingress ───────────────────────────────────────────────
+      - name: Install NGINX Ingress Controller
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm install ingress-nginx ingress-nginx/ingress-nginx \
+            -n ingress-nginx --create-namespace \
+            --set controller.config.use-http2="true" \
+            --wait --timeout 3m
+
+      # ─── Create ESO Source Secret ────────────────────────────────────────────
+      - name: Create ESO bootstrap secret
+        run: |
+          kubectl create secret generic egaop-source-secrets \
+            -n external-secrets \
+            --from-literal=encryption-key="ci-test-encryption-key-32-chars-long!ci-test-encryption-key-32-chars-long!" \
+            --from-literal=jwt-secret="ci-test-jwt-secret-64-chars-long-for-testing-purposes-only-ci-test-jwt" \
+            --from-literal=database-url="postgresql://egaop:ci-test-postgres-pw-24ch!@egaop-postgresql:5432/egaop" \
+            --from-literal=postgres-password="ci-test-postgres-pw-24ch!" \
+            --from-literal=redis-password="ci-test-redis-password-24ch" \
+            --from-literal=openai-api-key="sk-dev-ci-test-openai-api-key-for-testing" \
+            --from-literal=grafana-password="ci-grafana-secure-password-32ch!" \
+            --from-literal=internal-service-token="ci-internal-service-token-48-characters-long!!ok" \
+            --from-literal=temporal-tls-cert="not-used" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ─── Deploy via Helm ─────────────────────────────────────────────────────
+      - name: Helm install E-GAOP
+        run: |
+          helm install egaop charts/e-gaop \
+            -n egaop --create-namespace \
+            --values charts/e-gaop/values-kind.yml \
+            --set api-server.image.tag=ci \
+            --set workflow-engine.image.tag=ci \
+            --set secret-store.image.tag=ci \
+            --set llm-router.image.tag=ci \
+            --set tool-proxy.image.tag=ci \
+            --set sandbox-runtime.image.tag=ci \
+            --set admin-console.image.tag=ci \
+            --set memory-plane.image.tag=ci \
+            --set observability-plane.image.tag=ci \
+            --timeout 5m
+
+      # ─── Wait for Pods ───────────────────────────────────────────────────────
+      - name: Wait for all pods to be ready
+        run: |
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/part-of=e-gaop \
+            -n egaop \
+            --timeout=180s
+
+      # ─── Run Integration Tests ───────────────────────────────────────────────
+      - name: Run integration tests
+        run: |
+          chmod +x tests/integration.sh
+          bash tests/integration.sh
+
+      # ─── Collect Debug Info on Failure ────────────────────────────────────────
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n egaop -o wide
+          echo ""
+          echo "=== Events ==="
+          kubectl get events -n egaop --sort-by='.lastTimestamp' | tail -30
+          echo ""
+          echo "=== Pod Logs (last 20 lines each) ==="
+          for pod in $(kubectl get pods -n egaop -l app.kubernetes.io/part-of=e-gaop -o name); do
+            echo "--- $pod ---"
+            kubectl logs -n egaop $pod --tail=20 2>/dev/null || true
+          done

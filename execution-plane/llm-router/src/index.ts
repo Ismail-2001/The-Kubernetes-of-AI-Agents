@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv, LLM400Error, LLMAuthError, LLMRateLimitError } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv, LLM400Error, LLMAuthError, LLMRateLimitError, buildHealthResponse, healthToHttpStatus } from "@e-gaop/shared";
 import { recordLLMCost } from "@e-gaop/shared";
 
 initTracing("llm-router");
@@ -19,6 +19,9 @@ import CircuitBreaker from "opossum";
 import { countTokensForModel } from "./tokens.js";
 import { detectPromptInjection, scanMessagesForInjection } from "./prompt-injection.js";
 import { RateLimiter, extractNamespace, getServerCredentials, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, AsyncSemaphore } from "@e-gaop/shared";
+
+const SERVICE_VERSION = process.env.SERVICE_VERSION || "1.0.0";
+const healthStartTime = new Date();
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -1194,20 +1197,24 @@ if (process.env.NODE_ENV !== "test") {
   });
 
   const healthServer = http.createServer((req, res) => {
-    if (req.url === "/healthz" || req.url === "/readyz") {
-      const healthy = overallCircuitState() !== "open";
-      const code = healthy ? 200 : 503;
-      res.writeHead(code, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        status: healthy ? "SERVING" : "NOT_SERVING",
-        service: "llm-router",
-        circuit_breaker: overallCircuitState(),
-        providers: {
-          openai: !!openai,
-          anthropic: !!ANTHROPIC_API_KEY,
-          ollama: true, // Always available locally
+    if (req.url === "/healthz") {
+      const response = buildHealthResponse("llm-router", SERVICE_VERSION, healthStartTime, []);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
+    } else if (req.url === "/readyz") {
+      const circuitState = overallCircuitState();
+      const cbHealthy = circuitState !== "open";
+      const checks = [
+        {
+          name: "circuit_breaker",
+          status: cbHealthy ? ("healthy" as const) : ("unhealthy" as const),
+          message: `state: ${circuitState}`,
         },
-      }));
+      ];
+      const response = buildHealthResponse("llm-router", SERVICE_VERSION, healthStartTime, checks);
+      const code = healthToHttpStatus(response.status);
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
     } else {
       res.writeHead(404);
       res.end();

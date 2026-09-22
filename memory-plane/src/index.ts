@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, createAuditEntry } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, createAuditEntry, buildHealthResponse, healthToHttpStatus, checkPostgres, checkRedis } from "@e-gaop/shared";
 
 initTracing("memory-plane");
 loadSecretsIntoEnv();
@@ -304,16 +304,22 @@ if (process.env.NODE_ENV !== "test") {
     logger.info(`E-GAOP Memory Plane listening on port ${port}`);
   });
 
+  const SERVICE_VERSION = process.env.SERVICE_VERSION || "0.1.0";
+  const healthStartTime = new Date();
+
   const healthServer = http.createServer(async (req, res) => {
-    if (req.url === "/healthz" || req.url === "/readyz") {
-      try {
-        await Promise.all([redis.ping(), pgPool.query("SELECT 1")]);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "SERVING", service: "memory-plane" }));
-      } catch {
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "NOT_SERVING", service: "memory-plane" }));
-      }
+    if (req.url === "/healthz") {
+      const response = buildHealthResponse("memory-plane", SERVICE_VERSION, healthStartTime, []);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
+    } else if (req.url === "/readyz") {
+      const checks = await Promise.all([
+        checkPostgres(() => pgPool.query("SELECT 1")),
+        checkRedis(() => redis.ping()),
+      ]);
+      const response = buildHealthResponse("memory-plane", SERVICE_VERSION, healthStartTime, checks);
+      res.writeHead(healthToHttpStatus(response.status), { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
     } else if (req.url === "/api/v1/memory/search" && req.method === "POST") {
       // Vector similarity search endpoint (used by other services internally)
       if (!verifyServiceToken(req)) {

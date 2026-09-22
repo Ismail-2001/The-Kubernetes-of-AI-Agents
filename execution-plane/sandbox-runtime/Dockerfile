@@ -6,6 +6,7 @@ COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY packages/shared/ ./packages/shared/
 COPY execution-plane/sandbox-runtime/package.json ./execution-plane/sandbox-runtime/
+COPY api/proto/ ./api/proto/
 
 RUN npm ci
 RUN npm run build -w packages/shared
@@ -25,6 +26,7 @@ COPY --from=builder /app/execution-plane/sandbox-runtime/package.json ./
 RUN rm -rf node_modules/@e-gaop/shared
 COPY --from=builder /app/packages/shared ./node_modules/@e-gaop/shared
 RUN cp -r node_modules/@e-gaop/shared/node_modules/* node_modules/ 2>/dev/null; rm -rf node_modules/@e-gaop/shared/node_modules
+COPY --from=builder /app/api/proto /api/proto
 USER egaop
 EXPOSE 50054 15054
 CMD ["node", "dist/index.js"]

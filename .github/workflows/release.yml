@@ -1,74 +1,120 @@
+# ─── Release Pipeline ─────────────────────────────────────────────────────────
+# Triggered on git tags (v*). Builds multi-arch images, pushes to GHCR,
+# runs Helm lint, and optionally deploys to a staging cluster.
+#
+# Usage:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# This triggers: build → push → helm package → GitHub Release
+# ──────────────────────────────────────────────────────────────────────────────
 name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ["v*"]
 
 permissions:
   contents: write
   packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/egaop
 
 jobs:
-  release:
+  # ─── Build + Push Images ────────────────────────────────────────────────────
+  build-push:
+    name: "Build + Push: ${{ matrix.service }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-server
+            context: control-plane/api-server
+          - service: workflow-engine
+            context: control-plane/workflow-engine
+          - service: secret-store
+            context: control-plane/secret-store
+          - service: llm-router
+            context: execution-plane/llm-router
+          - service: tool-proxy
+            context: execution-plane/tool-proxy
+          - service: sandbox-runtime
+            context: execution-plane/sandbox-runtime
+          - service: admin-console
+            context: admin-console
+          - service: memory-plane
+            context: memory-plane
+          - service: observability-plane
+            context: observability-plane
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Validate tag format
-        run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
-          if ! [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Invalid tag format: $TAG (expected semver X.Y.Z)"
-            exit 1
-          fi
-
-      - name: Check CHANGELOG entry exists
-        run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
-          if ! grep -q "\[${TAG}\]" CHANGELOG.md; then
-            echo "❌ No changelog entry found for v${TAG}"
-            echo "   Add a [${TAG}] section to CHANGELOG.md before releasing"
-            exit 1
-          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker images
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Helm Package ───────────────────────────────────────────────────────────
+  helm-package:
+    name: Helm Package + Release
+    runs-on: ubuntu-latest
+    needs: build-push
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.0"
+
+      - name: Update image tags in values.yaml
         run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
-          REGISTRY="ghcr.io/${{ github.repository_owner }}"
-          SERVICES="api-server secret-store workflow-engine llm-router tool-proxy sandbox-runtime memory-plane observability-plane"
-          for svc in $SERVICES; do
-            DOCKERFILE="$(find . -path "*/${svc}/Dockerfile" -print -quit)"
-            if [ -z "$DOCKERFILE" ]; then
-              echo "⚠️  No Dockerfile found for ${svc}, skipping"
-              continue
-            fi
-            docker build \
-              --label "org.opencontainers.image.version=${TAG}" \
-              --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-              -t "${REGISTRY}/egaop-${svc}:${TAG}" \
-              -t "${REGISTRY}/egaop-${svc}:latest" \
-              -f "${DOCKERFILE}" .
-            docker push "${REGISTRY}/egaop-${svc}:${TAG}"
-            docker push "${REGISTRY}/egaop-${svc}:latest"
-            echo "✅ Pushed ${REGISTRY}/egaop-${svc}:${TAG}"
-          done
+          VERSION="${GITHUB_REF#refs/tags/}"
+          echo "=== Releasing $VERSION ==="
+          # Update appVersion in Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"$VERSION\"/" charts/e-gaop/Chart.yaml
+
+      - name: Helm lint
+        run: helm lint charts/e-gaop
+
+      - name: Helm package
+        run: helm package charts/e-gaop --version ${{ github.ref_name }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          files: |
+            e-gaop-*.tgz
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}

@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, PIIViolationError, createAuditEntry } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, PIIViolationError, createAuditEntry, buildHealthResponse, healthToHttpStatus } from "@e-gaop/shared";
 
 initTracing("tool-proxy");
 loadSecretsIntoEnv();
@@ -12,6 +12,9 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import { RateLimiter, extractNamespace, getServerCredentials } from "@e-gaop/shared";
+
+const SERVICE_VERSION = process.env.SERVICE_VERSION || "1.0.0";
+const healthStartTime = new Date();
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -380,9 +383,14 @@ if (process.env.NODE_ENV !== "test") {
   });
 
   const healthServer = http.createServer((req, res) => {
-    if (req.url === "/healthz" || req.url === "/readyz") {
+    if (req.url === "/healthz") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "SERVING", service: "tool-proxy", timestamp: new Date().toISOString() }));
+      res.end(JSON.stringify({ status: "SERVING", service: "tool-proxy" }));
+    } else if (req.url === "/readyz") {
+      const response = buildHealthResponse("tool-proxy", SERVICE_VERSION, healthStartTime, []);
+      const code = healthToHttpStatus(response.status);
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
     } else {
       res.writeHead(404);
       res.end();

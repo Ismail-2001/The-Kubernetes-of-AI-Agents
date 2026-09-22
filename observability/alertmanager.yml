@@ -1,42 +1,95 @@
+# ─── AlertManager Configuration ───────────────────────────────────────────────
+# Routes alerts by severity to appropriate notification channels.
+# Production: PagerDuty (critical) + Slack (warning) + Grafana (all)
+# Development: Grafana only (no external integrations)
+# ──────────────────────────────────────────────────────────────────────────────
 global:
-  resolve_timeout: 5m
+  resolve_timeout: 15m
+  # Production: uncomment and configure these
+  # slack_api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+  # pagerduty_url: "https://events.pagerduty.com/v2/enqueue"
 
 route:
-  group_by: ["alertname", "severity"]
+  group_by: ["alertname", "namespace", "severity"]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  receiver: "default"
+  receiver: "grafana"
+
   routes:
+    # Critical alerts → PagerDuty + Slack (production)
     - match:
         severity: critical
       receiver: "critical"
       group_wait: 10s
+      group_interval: 1m
       repeat_interval: 1h
+
+    # Warning alerts → Slack (production)
     - match:
         severity: warning
       receiver: "warning"
+      group_interval: 5m
       repeat_interval: 4h
 
+    # SLO alerts → dedicated receiver
+    - match:
+        slo: "availability"
+      receiver: "slo-critical"
+      group_wait: 10s
+
+# ─── Receivers ────────────────────────────────────────────────────────────────
 receivers:
-  - name: "default"
+  # Default: Grafana internal alerting
+  - name: "grafana"
     webhook_configs:
-      - url: "http://grafana:3000/api/alertmanager/grafana/api/v2/alerts"
+      - url: "http://egaop-grafana.monitoring.svc:3000/api/alertmanager/grafana/api/v2/alerts"
         send_resolved: true
 
+  # Critical: PagerDuty (production) + Grafana fallback
   - name: "critical"
     webhook_configs:
-      - url: "http://grafana:3000/api/alertmanager/grafana/api/v2/alerts"
+      - url: "http://egaop-grafana.monitoring.svc:3000/api/alertmanager/grafana/api/v2/alerts"
         send_resolved: true
+    # Production: uncomment PagerDuty integration
+    # pagerduty_configs:
+    #   - service_key: "<YOUR_PAGERDUTY_SERVICE_KEY>"
+    #     description: "{{ .CommonAnnotations.summary }}"
+    #     severity: "{{ .CommonLabels.severity }}"
+    #     details:
+    #       component: "e-gaop"
+    #       group: "{{ .CommonLabels.alertname }}"
+    #       class: "{{ .CommonLabels.slo | default \"infrastructure\" }}"
 
+  # Warning: Slack (production) + Grafana fallback
   - name: "warning"
     webhook_configs:
-      - url: "http://grafana:3000/api/alertmanager/grafana/api/v2/alerts"
+      - url: "http://egaop-grafana.monitoring.svc:3000/api/alertmanager/grafana/api/v2/alerts"
+        send_resolved: true
+    # Production: uncomment Slack integration
+    # slack_configs:
+    #   - channel: "#egaop-alerts"
+    #     title: "{{ .CommonAnnotations.summary }}"
+    #     text: "{{ .CommonAnnotations.description }}"
+    #     send_resolved: true
+
+  # SLO breaches: dedicated channel
+  - name: "slo-critical"
+    webhook_configs:
+      - url: "http://egaop-grafana.monitoring.svc:3000/api/alertmanager/grafana/api/v2/alerts"
         send_resolved: true
 
+# ─── Inhibition Rules ────────────────────────────────────────────────────────
+# Suppress lower-severity alerts when a higher-severity alert fires for the same target
 inhibit_rules:
   - source_match:
-      severity: "critical"
+      severity: critical
     target_match:
-      severity: "warning"
-    equal: ["alertname"]
+      severity: warning
+    equal: ["alertname", "namespace"]
+
+  - source_match:
+      severity: critical
+    target_match_re:
+      severity: "^(info|)$"
+    equal: ["alertname", "namespace"]

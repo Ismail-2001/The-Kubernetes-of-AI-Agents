@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, SLOTracker, DEFAULT_SLO_DEFINITIONS, toProblemDetails } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, SLOTracker, DEFAULT_SLO_DEFINITIONS, toProblemDetails, buildHealthResponse, healthToHttpStatus, checkPostgres } from "@e-gaop/shared";
 
 process.on("uncaughtException", (err: Error & { code?: string }) => {
   if (err.code === "ERR_STREAM_WRITE_AFTER_END" || err.message?.includes("write after end")) {
@@ -23,10 +23,18 @@ if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }
 
-// Ensure notification/policy tables exist
+// Ensure notification/policy tables exist (non-blocking)
 if (process.env.NODE_ENV !== "test") {
   import("./ensure-tables.js").then(m => m.ensureTables()).catch(err => {
     console.error("[WARN] Failed to ensure tables:", err.message);
+  });
+}
+
+// Ensure auth tables exist — blocking, needed before Fastify registers auth routes
+let authTablesReady: Promise<void> = Promise.resolve();
+if (process.env.NODE_ENV !== "test") {
+  authTablesReady = import("./ensure-tables.js").then(m => m.ensureAuthTables()).catch(err => {
+    console.error("[WARN] Failed to ensure auth tables:", err.message);
   });
 }
 
@@ -2016,64 +2024,63 @@ if (process.env.NODE_ENV !== "test") {
   const REST_PORT = parseInt(process.env.API_SERVER_REST_PORT || "3001", 10);
   const HEALTH_PORT = parseInt(process.env.API_SERVER_HEALTH_PORT || "15051", 10);
 
-  server.bindAsync(`0.0.0.0:${GRPC_PORT}`, getServerCredentials(), (err, port) => {
-    if (err) {
-      logger.error(err, "Failed to bind gRPC server");
-      return;
-    }
-    server.start();
-    logger.info(`E-GAOP Control Plane gRPC server listening on port ${port}`);
+  // Ensure auth tables exist before starting servers
+  authTablesReady.then(() => {
+    server.bindAsync(`0.0.0.0:${GRPC_PORT}`, getServerCredentials(), (err, port) => {
+      if (err) {
+        logger.error(err, "Failed to bind gRPC server");
+        return;
+      }
+      server.start();
+      logger.info(`E-GAOP Control Plane gRPC server listening on port ${port}`);
+    });
+
+    fastify.listen({ port: REST_PORT, host: "0.0.0.0" }, (err, address) => {
+      if (err) {
+        logger.error(err, "Failed to start REST server");
+        process.exit(1);
+      }
+      logger.info(`E-GAOP Control Plane REST server listening on ${address}`);
+    });
+  }).catch(() => {
+    // Start anyway even if table creation failed
+    server.bindAsync(`0.0.0.0:${GRPC_PORT}`, getServerCredentials(), (err, port) => {
+      if (err) return;
+      server.start();
+      logger.info(`E-GAOP Control Plane gRPC server listening on port ${port}`);
+    });
+    fastify.listen({ port: REST_PORT, host: "0.0.0.0" }, (err, address) => {
+      if (err) { logger.error(err, "Failed to start REST server"); process.exit(1); }
+      logger.info(`E-GAOP Control Plane REST server listening on ${address}`);
+    });
   });
 
-  fastify.listen({ port: REST_PORT, host: "0.0.0.0" }, (err, address) => {
-    if (err) {
-      logger.error(err, "Failed to start REST server");
-      process.exit(1);
-    }
-    logger.info(`E-GAOP Control Plane REST server listening on ${address}`);
-  });
+  const SERVICE_VERSION = process.env.npm_package_version ?? "1.0.0";
+  const healthStartTime = new Date();
 
   const healthServer = http.createServer(async (req, res) => {
     try {
-      if (req.url === "/healthz" || req.url === "/readyz") {
-        let temporalOk = false;
-        try {
-          if (temporalClient) {
-            await Promise.race([
-              temporalClient.workflow.getHandle("health-check-test").describe(),
-              new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
-            ]);
-            temporalOk = true;
-          }
-        } catch (err: unknown) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          if (errMsg.includes("not found") || errMsg.includes("NotFound")) {
-            temporalOk = true;
-          }
-        }
-        let dbOk = false;
-        try {
-          const { getPool } = await import("@e-gaop/shared");
-          const p = await getPool();
-          const r = await p.query("SELECT 1");
-          dbOk = r.rows.length > 0;
-        } catch {}
-        const allOk = dbOk;
-        const code = allOk ? 200 : 503;
+      if (req.url === "/healthz") {
+        const response = buildHealthResponse("api-server", SERVICE_VERSION, healthStartTime, []);
+        const code = healthToHttpStatus(response.status);
         if (!res.writableEnded && !res.headersSent) {
           res.writeHead(code, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({
-            status: allOk ? "SERVING" : "DEGRADED",
-            service: "api-server",
-            dependencies: {
-              postgres: dbOk ? "connected" : "unreachable",
-              redis: "unknown",
-              temporal: temporalOk ? "connected" : "unreachable",
-            },
-            uptime: Math.floor(process.uptime()),
-            version: "1.0.0",
-            timestamp: new Date().toISOString(),
-          }));
+          res.end(JSON.stringify(response));
+        }
+      } else if (req.url === "/readyz") {
+        const { getPool } = await import("@e-gaop/shared");
+        const pool = await getPool();
+        const pgCheck = await checkPostgres(() => pool.query("SELECT 1"));
+        const response = buildHealthResponse("api-server", SERVICE_VERSION, healthStartTime, [pgCheck]);
+        const code = healthToHttpStatus(response.status);
+        if (!res.writableEnded && !res.headersSent) {
+          res.writeHead(code, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(response));
+        }
+      } else if (req.url === "/api/namespaces/health") {
+        if (!res.writableEnded && !res.headersSent) {
+          res.writeHead(404);
+          res.end();
         }
       } else {
         if (!res.writableEnded && !res.headersSent) {
@@ -2093,7 +2100,7 @@ if (process.env.NODE_ENV !== "test") {
           res.writeHead(500);
           res.end();
         }
-      } catch {}
+      } catch { /* response already sent or socket closed */ }
     }
   });
   healthServer.listen(HEALTH_PORT, "0.0.0.0", () => {

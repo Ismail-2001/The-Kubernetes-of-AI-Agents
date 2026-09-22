@@ -8,9 +8,10 @@ metadata:
 data:
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.global.otelEndpoint | quote }}
   LOG_LEVEL: "info"
-  TLS_ENABLED: "true"
+  TLS_ENABLED: {{ .Values.tls.certManager.enabled | quote }}
   POSTGRES_HOST: "{{ .Release.Name }}-postgresql"
   POSTGRES_PORT: "5432"
+  POSTGRES_USER: {{ .Values.postgresql.auth.username | quote }}
   POSTGRES_DB: {{ .Values.postgresql.auth.database | quote }}
   REDIS_HOST: "{{ .Release.Name }}-redis-master"
   REDIS_PORT: "6379"

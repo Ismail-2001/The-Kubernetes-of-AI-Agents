@@ -22,6 +22,10 @@ spec:
         app.kubernetes.io/part-of: e-gaop
     spec:
       serviceAccountName: {{ .Release.Name }}-e-gaop-app
+      securityContext:
+        fsGroup: 1001
+        runAsNonRoot: true
+        runAsUser: 1001
       containers:
         - name: admin-console
           image: "{{ .Values.image }}:{{ .Values.tag }}"
@@ -44,8 +48,45 @@ spec:
               value: "http://{{ .Release.Name }}-api-server:50051"
             - name: NEXT_PUBLIC_SSE_URL
               value: "http://{{ .Release.Name }}-api-server:3001"
+            - name: API_SERVER_HEALTH_URL
+              value: "http://{{ .Release.Name }}-api-server:15051"
             - name: OTEL_SERVICE_NAME
               value: egaop-admin-console
+            - name: EGAOP_MASTER_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-e-gaop-managed-secrets
+                  key: encryption-key
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-e-gaop-managed-secrets
+                  key: jwt-secret
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-e-gaop-managed-secrets
+                  key: postgres-password
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-e-gaop-managed-secrets
+                  key: openai-api-key
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-e-gaop-managed-secrets
+                  key: redis-password
+            - name: INTERNAL_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-e-gaop-managed-secrets
+                  key: internal-service-token
+            - name: GRAFANA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-e-gaop-managed-secrets
+                  key: grafana-password
           livenessProbe:
             httpGet:
               path: /api/health
@@ -67,21 +108,17 @@ spec:
             runAsUser: 1001
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
-          {{- if .Values.tls.certManager.enabled }}
+{{- if .Values.tls.certManager.enabled }}
           volumeMounts:
             - name: tls-certs
               mountPath: /etc/egaop/certs
               readOnly: true
-          {{- end }}
-      securityContext:
-        fsGroup: 1001
-        runAsNonRoot: true
-        runAsUser: 1001
-      {{- if .Values.tls.certManager.enabled }}
+{{- end }}
+{{- if .Values.tls.certManager.enabled }}
       volumes:
         - name: tls-certs
           secret:
             secretName: admin-console-tls
             optional: true
-      {{- end }}
+{{- end }}
 {{- end }}

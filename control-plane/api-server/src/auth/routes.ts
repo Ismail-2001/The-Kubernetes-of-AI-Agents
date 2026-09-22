@@ -273,9 +273,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
   // Ensure admin user exists on first boot
   if (process.env.NODE_ENV !== "test") {
-    const adminPassword = await ensureAdminUser(repo);
-    if (adminPassword) {
-      logger.warn({ username: "admin" }, "First boot: admin account created. Check /run/secrets/ for initial password.");
+    try {
+      const adminPassword = await ensureAdminUser(repo);
+      if (adminPassword) {
+        logger.warn({ username: "admin" }, "First boot: admin account created. Check /run/secrets/ for initial password.");
+      }
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Failed to ensure admin user (tables may not be ready yet)");
     }
   }
 

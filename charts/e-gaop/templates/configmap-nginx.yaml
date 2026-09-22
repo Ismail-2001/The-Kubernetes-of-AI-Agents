@@ -1,0 +1,67 @@
+{{- if .Values.ingress.enabled }}
+# ─── NGINX Ingress Controller Tuning ────────────────────────────────────────
+# Production-grade settings for the E-GAOP platform.
+# Applied globally to the ingress-nginx controller via this ConfigMap.
+# Reference: https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-nginx
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "e-gaop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingress-controller
+data:
+  # ─── HTTP/2 & gRPC ─────────────────────────────────────────────────────────
+  # HTTP/2 enabled for gRPC backend protocol support.
+  # WebSocket traffic is handled per-Ingress via annotations (use-http2: "false").
+  use-http2: "true"
+
+  # ─── Proxy Buffering ───────────────────────────────────────────────────────
+  # Disable buffering for SSE/WebSocket streaming endpoints.
+  # The app already sets X-Accel-Buffering: no, but this reinforces it.
+  proxy-buffering: "off"
+  proxy-buffer-size: "16k"
+  proxy-buffers-number: "4"
+
+  # ─── Request Body ──────────────────────────────────────────────────────────
+  # Max upload size for agent configs, tool payloads, etc.
+  # api-server Fastify has bodyLimit of 1MB; NGINX should be larger to allow
+  # for base64 encoding overhead and multi-part uploads.
+  proxy-body-size: "10m"
+
+  # ─── Timeouts (defaults — overridden per-Ingress via annotations) ──────────
+  proxy-read-timeout: "60"
+  proxy-send-timeout: "60"
+  proxy-connect-timeout: "10"
+
+  # ─── Security Headers (global) ─────────────────────────────────────────────
+  hide-headers: "X-Powered-By,Server"
+  add-headers: "{{ .Release.Namespace }}/{{ include "e-gaop.fullname" . }}-security-headers"
+
+  # ─── TLS ───────────────────────────────────────────────────────────────────
+  ssl-protocols: "TLSv1.2 TLSv1.3"
+  ssl-ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+  ssl-prefer-server-ciphers: "true"
+  hsts: "true"
+  hsts-max-age: "31536000"
+  hsts-include-subdomains: "true"
+  hsts-preload: "true"
+
+  # ─── Compression ───────────────────────────────────────────────────────────
+  use-gzip: "true"
+  gzip-level: "5"
+  gzip-min-length: "256"
+  gzip-types: "application/json application/javascript text/css text/plain text/xml application/grpc"
+
+  # ─── Rate Limiting ─────────────────────────────────────────────────────────
+  limit-req-status-code: "429"
+
+  # ─── Logging ───────────────────────────────────────────────────────────────
+  log-format-upstream: >-
+    $remote_addr - $remote_user [$time_local] "$request"
+    $status $body_bytes_sent "$http_referer" "$http_user_agent"
+    rt=$request_time uct=$upstream_connect_time uht=$upstream_header_time
+    urt=$upstream_response_time host=$host
+{{- end }}

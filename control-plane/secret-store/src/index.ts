@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, createAuditEntry } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, createAuditEntry, buildHealthResponse, healthToHttpStatus, checkPostgres } from "@e-gaop/shared";
 
 initTracing("secret-store");
 loadSecretsIntoEnv();
@@ -13,6 +13,9 @@ import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import { getServerCredentials, encrypt, decrypt, extractNamespace, type EncryptedPayload } from "@e-gaop/shared";
 import { SecretRepository } from "./repository";
+
+const SERVICE_VERSION = process.env.SERVICE_VERSION || "1.0.0";
+const healthStartTime = new Date();
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -204,16 +207,17 @@ if (process.env.NODE_ENV !== "test") {
   });
 
   const healthServer = http.createServer(async (req, res) => {
-    if (req.url === "/healthz" || req.url === "/readyz") {
-      const dbOk = await repo.ping();
-      const code = dbOk ? 200 : 503;
+    if (req.url === "/healthz") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "SERVING", service: "secret-store" }));
+    } else if (req.url === "/readyz") {
+      const checks = await Promise.all([
+        checkPostgres(() => repo.ping()),
+      ]);
+      const response = buildHealthResponse("secret-store", SERVICE_VERSION, healthStartTime, checks);
+      const code = healthToHttpStatus(response.status);
       res.writeHead(code, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        status: dbOk ? "SERVING" : "NOT_SERVING",
-        service: "secret-store",
-        postgres: dbOk ? "connected" : "unreachable",
-        timestamp: new Date().toISOString(),
-      }));
+      res.end(JSON.stringify(response));
     } else {
       res.writeHead(404);
       res.end();

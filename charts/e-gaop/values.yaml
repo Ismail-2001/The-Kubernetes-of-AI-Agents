@@ -97,7 +97,7 @@ postgresql:
   primary:
     persistence:
       size: 10Gi
-      enabled: false
+      enabled: true
     resources:
       requests:
         cpu: 250m
@@ -119,7 +119,7 @@ redis:
   master:
     persistence:
       size: 5Gi
-      enabled: false
+      enabled: true
     resources:
       requests:
         cpu: 100m
@@ -129,6 +129,27 @@ redis:
         memory: 512Mi
   metrics:
     enabled: true
+
+# ─── Backup (PostgreSQL daily pg_dump) ─────────────────────────────────────
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  retentionDays: 7
+  s3:
+    enabled: false
+    bucket: ""
+    region: us-east-1
+  persistence:
+    enabled: false
+    size: 5Gi
+    storageClass: ""
+    emptyDirSize: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
 
 temporal:
   enabled: true

@@ -74,3 +74,9 @@ tests/load/results/*.tar.gz
 # Temporary files
 tmp/
 charts/e-gaop/tmpcharts*/
+
+# Debug/temp artifacts (not source)
+debug-pod.yaml
+test-tcp.js
+observability/cm-patch.json
+observability/prometheus-patch.json

@@ -34,7 +34,7 @@ spec:
             - "--server"
             - "--addr=0.0.0.0:{{ .Values.port }}"
             - "--log-level=info"
-            - "/policies/"
+            - "/policies/main.rego"
           ports:
             - name: http
               containerPort: {{ .Values.port }}
@@ -71,7 +71,8 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: policies
-              mountPath: /policies
+              mountPath: /policies/main.rego
+              subPath: main.rego
               readOnly: true
       volumes:
         - name: policies

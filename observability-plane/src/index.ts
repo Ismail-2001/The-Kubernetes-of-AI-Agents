@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, buildHealthResponse, healthToHttpStatus, checkPostgres } from "@e-gaop/shared";
 
 initTracing("observability-plane");
 loadSecretsIntoEnv();
@@ -228,16 +228,21 @@ if (process.env.NODE_ENV !== "test") {
     logger.info(`E-GAOP Observability Plane listening on port ${port}`);
   });
 
+  const SERVICE_VERSION = process.env.SERVICE_VERSION || "0.1.0";
+  const healthStartTime = new Date();
+
   const healthServer = http.createServer(async (req, res) => {
-    if (req.url === "/healthz" || req.url === "/readyz") {
-      try {
-        await pgPool.query("SELECT 1");
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "SERVING", service: "observability-plane", timestamp: new Date().toISOString() }));
-      } catch {
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "NOT_SERVING", service: "observability-plane" }));
-      }
+    if (req.url === "/healthz") {
+      const response = buildHealthResponse("observability-plane", SERVICE_VERSION, healthStartTime, []);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
+    } else if (req.url === "/readyz") {
+      const checks = await Promise.all([
+        checkPostgres(() => pgPool.query("SELECT 1")),
+      ]);
+      const response = buildHealthResponse("observability-plane", SERVICE_VERSION, healthStartTime, checks);
+      res.writeHead(healthToHttpStatus(response.status), { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
     } else {
       res.writeHead(404);
       res.end();

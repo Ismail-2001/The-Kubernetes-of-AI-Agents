@@ -6,6 +6,7 @@ COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY packages/shared/ ./packages/shared/
 COPY execution-plane/llm-router/package.json ./execution-plane/llm-router/
+COPY api/proto/ ./api/proto/
 
 RUN npm ci
 RUN npm run build -w packages/shared
@@ -25,6 +26,7 @@ COPY --from=builder /app/execution-plane/llm-router/package.json ./
 RUN rm -rf node_modules/@e-gaop/shared
 COPY --from=builder /app/packages/shared ./node_modules/@e-gaop/shared
 RUN cp -r node_modules/@e-gaop/shared/node_modules/* node_modules/ 2>/dev/null; rm -rf node_modules/@e-gaop/shared/node_modules
+COPY --from=builder /app/api/proto /api/proto
 USER egaop
 EXPOSE 50053 15053
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

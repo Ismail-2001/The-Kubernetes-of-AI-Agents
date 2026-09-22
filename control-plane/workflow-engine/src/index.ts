@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, validateSecrets, loadSecretsIntoEnv, buildHealthResponse, healthToHttpStatus, checkPostgres, checkSkipped } from "@e-gaop/shared";
 
 initTracing("workflow-engine");
 loadSecretsIntoEnv();
@@ -21,7 +21,11 @@ const logger = pino({
 
 const HEALTH_PORT = parseInt(process.env.WORKFLOW_ENGINE_HEALTH_PORT || '15058', 10);
 const DLQ_SERVICE_TOKEN = process.env.INTERNAL_SERVICE_TOKEN;
-let workerReady = false;
+const SERVICE_VERSION = process.env.SERVICE_VERSION || "1.0.0";
+const startTime = new Date();
+
+let temporalConnected = false;
+let temporalAddress = '';
 
 function verifyServiceToken(req: http.IncomingMessage): boolean {
   if (!DLQ_SERVICE_TOKEN) return false;
@@ -34,12 +38,28 @@ function verifyServiceToken(req: http.IncomingMessage): boolean {
 
 const healthServer = http.createServer(async (req, res) => {
   const url = req.url ?? '/';
-  // ── Health / Readiness (unauthenticated) ───────────────────────────
-  if (url === '/healthz' || url === '/readyz') {
-    const status = workerReady ? 'SERVING' : 'NOT_SERVING';
-    const code = workerReady ? 200 : 503;
+  // ── Liveness: Is the process alive? (no dependency checks) ────────
+  if (url === '/healthz') {
+    const response = buildHealthResponse("workflow-engine", SERVICE_VERSION, startTime, []);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(response));
+    return;
+  }
+
+  // ── Readiness: Can we accept traffic? (checks real dependencies) ──
+  if (url === '/readyz') {
+    const pool = await getPool();
+    const checks = await Promise.all([
+      checkPostgres(() => pool.query("SELECT 1")),
+      temporalConnected
+        ? Promise.resolve({ name: "temporal" as const, status: "healthy" as const })
+        : checkSkipped("temporal", "not connected — running in degraded mode"),
+    ]);
+
+    const response = buildHealthResponse("workflow-engine", SERVICE_VERSION, startTime, checks);
+    const code = healthToHttpStatus(response.status);
     res.writeHead(code, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status, service: 'workflow-engine' }));
+    res.end(JSON.stringify(response));
     return;
   }
 
@@ -100,12 +120,24 @@ const healthServer = http.createServer(async (req, res) => {
 });
 
 async function run() {
-  const temporalAddress = `${process.env.TEMPORAL_HOST || 'temporal'}:${process.env.TEMPORAL_PORT || '7233'}`;
+  healthServer.listen(HEALTH_PORT, '0.0.0.0', () => {
+    logger.info(`Health endpoint listening on port ${HEALTH_PORT}`);
+  });
+
+  temporalAddress = `${process.env.TEMPORAL_HOST || 'temporal'}:${process.env.TEMPORAL_PORT || '7233'}`;
   logger.info(`Connecting to Temporal at ${temporalAddress}`);
 
-  const connection = await NativeConnection.connect({
-    address: temporalAddress,
-  });
+  let connection;
+  try {
+    connection = await NativeConnection.connect({
+      address: temporalAddress,
+    });
+    temporalConnected = true;
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Temporal not available — running in degraded mode (no workflow execution)');
+    // readiness returns DEGRADED (200) — process is alive, can serve DLQ, but can't execute workflows
+    return;
+  }
 
   // Load real temporal activities (with gRPC calls to policy-plane, sandbox-runtime, etc.)
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -122,15 +154,11 @@ async function run() {
     maxConcurrentWorkflowTaskExecutions: 8,
   });
 
-  workerReady = true;
+  temporalConnected = true;
   logger.info('Workflow Engine worker started');
 
-  healthServer.listen(HEALTH_PORT, '0.0.0.0', () => {
-    logger.info(`Health endpoint listening on port ${HEALTH_PORT}`);
-  });
-
   const shutdown = async () => {
-    workerReady = false;
+    temporalConnected = false;
     logger.info('Shutting down Workflow Engine...');
     healthServer.close();
     await worker.shutdown();

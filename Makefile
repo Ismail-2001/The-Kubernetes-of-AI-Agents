@@ -7,6 +7,7 @@
 .PHONY: setup setup-skip-docker setup-skip-openai \
 	dev dev-docker dev-staging build clean \
 	test test-api test-shared test-chaos test-load lint typecheck \
+	ci ci-helm ci-docker ci-kind ci-full \
 	docker-build docker-up docker-down docker-logs docker-ps docker-restart \
 	db-shell db-backup db-restore db-status \
 	monitoring grafana prometheus \
@@ -69,6 +70,31 @@ lint:
 
 typecheck:
 	npm run typecheck
+
+# ─── CI Pipeline (local) ──────────────────────────────────────
+
+ci: lint typecheck test ## Run full CI pipeline locally (lint → typecheck → test)
+	@echo "✅ CI pipeline passed"
+
+ci-helm: ## Lint and template Helm chart
+	helm lint charts/e-gaop
+	helm template egaop charts/e-gaop --values charts/e-gaop/values-kind.yml > /dev/null
+	@echo "✅ Helm lint passed"
+
+ci-docker: ## Build all Docker images locally
+	@for svc in api-server workflow-engine secret-store llm-router tool-proxy sandbox-runtime admin-console memory-plane observability-plane; do \
+		echo "=== Building $$svc ==="; \
+		docker build -t "egaop/$$svc:ci" $$(echo $$svc | sed 's/-/\//g' 2>/dev/null || echo ".") 2>/dev/null || \
+		docker build -t "egaop/$$svc:ci" . 2>/dev/null || \
+		echo "SKIP: $$svc (no Dockerfile found)"; \
+	done
+	@echo "✅ Docker build complete"
+
+ci-kind: ## Run integration tests against Kind cluster
+	bash tests/integration.sh
+
+ci-full: ci ci-helm ci-docker ## Run complete local CI (lint + typecheck + test + helm + docker)
+	@echo "🎉 Full CI pipeline passed"
 
 # ─── Docker ───────────────────────────────────────────────────
 

@@ -165,3 +165,14 @@ export {
   llmCostByNamespace,
   llmCostByAgent,
 } from "./metrics/cost-metrics.js";
+export {
+  HealthStatus,
+  buildHealthResponse,
+  healthToHttpStatus,
+  checkPostgres,
+  checkRedis,
+  checkGrpc,
+  checkSkipped,
+  type HealthResponse,
+  type DependencyCheck,
+} from "./health/index.js";

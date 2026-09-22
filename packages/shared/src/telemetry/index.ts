@@ -2,6 +2,7 @@ import { trace, diag, DiagConsoleLogger, DiagLogLevel, type Span, type Tracer } 
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
+import { ConsoleSpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { CompressionAlgorithm } from "@opentelemetry/otlp-exporter-base";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
@@ -12,6 +13,7 @@ import os from "os";
 let initialized = false;
 let sdk: NodeSDK | null = null;
 let tracerInstance: Tracer | null = null;
+let traceExporter: OTLPTraceExporter | null = null;
 let prometheusExporter: PrometheusExporter | null = null;
 
 diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.ERROR);
@@ -31,23 +33,87 @@ export function initTracing(config: TelemetryConfig | string): void {
   const serviceVersion =
     typeof config === "string"
       ? process.env.SERVICE_VERSION ?? "1.0.0"
-      : config.serviceVersion ?? process.env.SERVICE_VERSION ?? "1.0.0";
+      : config.serviceName ?? process.env.SERVICE_VERSION ?? "1.0.0";
   const endpoint =
     typeof config === "string"
-      ? process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318"
-      : config.endpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318";
+      ? process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+      : config.endpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
   const metricsPort =
     typeof config === "string" ? 9464 : config.metricsPort ?? 9464;
 
-  const traceExporter = new OTLPTraceExporter({
-    url: `${endpoint}/v1/traces`,
-    compression: CompressionAlgorithm.GZIP,
+  // Skip OTel initialization entirely if no collector endpoint is configured
+  if (!endpoint) {
+    // Fallback mode: still expose Prometheus metrics locally, traces go to console
+    const resource = resourceFromAttributes({
+      "service.name": serviceName,
+      "service.version": serviceVersion,
+      "deployment.environment": process.env.DEPLOYMENT_ENVIRONMENT ?? process.env.NODE_ENV ?? "development",
+      "k8s.namespace.name": process.env.NAMESPACE ?? "default",
+      "host.name": process.env.HOST_NAME ?? os.hostname(),
+    });
+
+    try {
+      prometheusExporter = new PrometheusExporter({
+        port: metricsPort,
+        appendTimestamp: true,
+      });
+    } catch {
+      prometheusExporter = null;
+    }
+
+    sdk = new NodeSDK({
+      resource,
+      spanProcessors: [new SimpleSpanProcessor(new ConsoleSpanExporter())],
+      metricReader: prometheusExporter ?? undefined,
+      instrumentations: [
+        new HttpInstrumentation(),
+        new GrpcInstrumentation(),
+        new PgInstrumentation(),
+      ],
+    });
+
+    try {
+      sdk.start();
+    } catch {
+      // best-effort
+    }
+
+    tracerInstance = trace.getTracer(serviceName, serviceVersion);
+    diag.info(`[telemetry] ${serviceName}: OTel fallback mode — traces → console, metrics → Prometheus :${metricsPort}/metrics`);
+    return;
+  }
+
+  // Suppress OTel unhandled promise rejections (DNS errors when collector is unreachable)
+  const originalListeners = process.listenerCount("unhandledRejection");
+  process.removeAllListeners("unhandledRejection");
+  process.on("unhandledRejection", (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    if (msg.includes("ENOTFOUND") || msg.includes("getaddrinfo") || msg.includes("ECONNREFUSED")) {
+      return; // suppress OTel DNS errors
+    }
+    // Re-emit for non-OTel errors — but only if we were the ones who removed listeners
+    if (originalListeners === 0) {
+      console.error("[telemetry] Unhandled rejection:", reason);
+    }
   });
 
-  prometheusExporter = new PrometheusExporter({
-    port: metricsPort,
-    appendTimestamp: true,
-  });
+  try {
+    traceExporter = new OTLPTraceExporter({
+      url: `${endpoint}/v1/traces`,
+      compression: CompressionAlgorithm.GZIP,
+    });
+  } catch {
+    traceExporter = null;
+  }
+
+  try {
+    prometheusExporter = new PrometheusExporter({
+      port: metricsPort,
+      appendTimestamp: true,
+    });
+  } catch {
+    prometheusExporter = null;
+  }
 
   const resource = resourceFromAttributes({
     "service.name": serviceName,
@@ -59,8 +125,8 @@ export function initTracing(config: TelemetryConfig | string): void {
 
   sdk = new NodeSDK({
     resource,
-    traceExporter,
-    metricReader: prometheusExporter,
+    traceExporter: traceExporter ?? undefined,
+    metricReader: prometheusExporter ?? undefined,
     instrumentations: [
       new HttpInstrumentation(),
       new GrpcInstrumentation(),
@@ -68,7 +134,11 @@ export function initTracing(config: TelemetryConfig | string): void {
     ],
   });
 
-  sdk.start();
+  try {
+    sdk.start();
+  } catch {
+    // OTel startup is best-effort; don't crash the process if collector is unreachable
+  }
 
   tracerInstance = trace.getTracer(serviceName, serviceVersion);
   diag.info(`[telemetry] ${serviceName}: traces → OTLP ${endpoint}, metrics → Prometheus :${metricsPort}/metrics`);

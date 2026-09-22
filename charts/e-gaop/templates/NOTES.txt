@@ -68,3 +68,34 @@ E-GAOP has been deployed to namespace: {{ .Release.Namespace }}
 
   # Run tests
   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+══════════════════════════════════════════════════════════════════════════════
+  BACKUP
+══════════════════════════════════════════════════════════════════════════════
+
+{{- if .Values.backup.enabled }}
+
+  PostgreSQL backup CronJob: {{ .Release.Name }}-backup-postgres
+  Schedule: {{ .Values.backup.schedule }}
+  Retention: {{ .Values.backup.retentionDays }} days
+
+  # Check CronJob status
+  kubectl get cronjob {{ .Release.Name }}-backup-postgres -n {{ .Release.Namespace }}
+
+  # Trigger manual backup
+  kubectl create job --from=cronjob/{{ .Release.Name }}-backup-postgres manual-backup-$(date +%s) -n {{ .Release.Namespace }}
+
+  # View latest backup logs
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=backup --tail=50
+
+  # List backups in PVC
+  kubectl exec -n {{ .Release.Namespace }} deploy/{{ .Release.Name }}-api-server -- ls -la /backups/
+
+  {{- if .Values.backup.s3.enabled }}
+  # Backups also uploaded to S3: s3://{{ .Values.backup.s3.bucket }}/postgres/
+  {{- end }}
+{{- else }}
+
+  Backup is DISABLED. Enable with:
+    --set backup.enabled=true
+{{- end }}

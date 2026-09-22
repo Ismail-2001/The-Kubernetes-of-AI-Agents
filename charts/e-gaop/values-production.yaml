@@ -120,7 +120,11 @@ temporal:
       enabled: true
       storageClass: fast-ssd
 
-# ─── Service Replicas (HA) ──────────────────────────────────────────────────
+# ─── Service Replicas + Resources (right-sized by workload) ──────────────────
+# High-traffic: api-server (3 replicas, 512Mi/1Gi), llm-router (3 replicas, 512Mi/1Gi)
+# Medium-traffic: workflow-engine, secret-store, tool-proxy (2 replicas, 256Mi/512Mi)
+# Low-traffic: sandbox-runtime, admin-console, observability-plane (2 replicas, 128Mi/512Mi)
+# ──────────────────────────────────────────────────────────────────────────────
 defaults:
   replicas: 2
   resources:
@@ -131,12 +135,104 @@ defaults:
       cpu: "1"
       memory: 1Gi
 
+# High-traffic: gateway for all REST/gRPC/WebSocket traffic
 api-server:
   replicas: 3
-secret-store:
-  replicas: 2
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+# High-traffic: all LLM routing, streaming, token management
+llm-router:
+  replicas: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+# Medium-traffic: workflow orchestration
 workflow-engine:
   replicas: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# Medium-traffic: secret management (fast, stateless)
+secret-store:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Medium-traffic: tool execution proxy
+tool-proxy:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Low-traffic: sandbox lifecycle (mostly idle)
+sandbox-runtime:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Low-traffic: vector store operations
+memory-plane:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Low-traffic: metrics/traces processing
+observability-plane:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Low-traffic: Next.js admin UI
+admin-console:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   sandboxIsolationLevel: "Enhanced"
 llm-router:
   replicas: 2
@@ -223,3 +319,23 @@ prometheus:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# ─── Backup (production) ──────────────────────────────────────────────────
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retentionDays: 30
+  s3:
+    enabled: true
+    bucket: egaop-backups
+    region: us-east-1
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: fast-ssd
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi

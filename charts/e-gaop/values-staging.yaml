@@ -95,6 +95,7 @@ postgresql:
     existingSecret: e-gaop-managed-secrets
   primary:
     persistence:
+      enabled: true
       size: 50Gi
 
 redis:
@@ -102,6 +103,7 @@ redis:
   architecture: replication
   master:
     persistence:
+      enabled: true
       size: 10Gi
 
 temporal:

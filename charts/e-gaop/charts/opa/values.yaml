@@ -1,4 +1,5 @@
 enabled: true
+replicas: 2
 
 image:
   repository: openpolicyagent/opa
@@ -6,6 +7,13 @@ image:
   pullPolicy: IfNotPresent
 
 port: 8181
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  cpuTarget: 70
+  memoryTarget: 80
 
 resources:
   requests:

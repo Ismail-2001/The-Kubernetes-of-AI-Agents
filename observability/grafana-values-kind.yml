@@ -1,0 +1,40 @@
+# Grafana — minimal Kind configuration
+persistence:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+adminUser: admin
+adminPassword: "egaop-grafana-admin"
+
+# Datasources
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://egaop-prometheus-server:80
+        uid: prometheus
+        isDefault: true
+        editable: true
+
+# Sidecar picks up ConfigMaps with label grafana_dashboard=1
+sidecar:
+  dashboards:
+    enabled: true
+    searchNamespace: ALL
+    label: grafana_dashboard
+    folderAnnotation: grafana_folder
+  datasources:
+    enabled: false
+
+# No dashboard provider needed — sidecar handles it
+dashboardProviders: {}
+dashboards: {}
