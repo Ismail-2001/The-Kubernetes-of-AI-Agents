@@ -26,6 +26,8 @@ spec:
         fsGroup: 1001
         runAsNonRoot: true
         runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: admin-console
           image: "{{ .Values.image }}:{{ .Values.tag }}"
@@ -108,6 +110,10 @@ spec:
             runAsUser: 1001
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
 {{- if .Values.tls.certManager.enabled }}
           volumeMounts:
             - name: tls-certs

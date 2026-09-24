@@ -112,6 +112,8 @@ spec:
         fsGroup: 10001
         runAsNonRoot: true
         runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: tempo
           image: "{{ .Values.tempo.image.repository }}:{{ .Values.tempo.image.tag }}"
@@ -151,6 +153,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
             - name: config
               mountPath: /etc/tempo

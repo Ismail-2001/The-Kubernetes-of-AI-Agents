@@ -1275,6 +1275,7 @@ spec:
 {{- end }}
 ---
 {{- if .Values.loki.enabled }}
+{{- $promtailNs := printf "%s-infra" .Release.Namespace }}
 # ─── Phase 5: Loki ingress — promtail push + grafana query ──────────────────
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -1290,7 +1291,11 @@ spec:
     - Ingress
   ingress:
     - from:
-        - podSelector:
+        # Phase 8: promtail moved to the {{ $promtailNs }} namespace (PSA privileged)
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $promtailNs }}
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: promtail
               app.kubernetes.io/instance: {{ .Release.Name }}
@@ -1327,12 +1332,15 @@ spec:
 {{- end }}
 ---
 {{- if .Values.promtail.enabled }}
+{{- $promtailNs := printf "%s-infra" .Release.Namespace }}
 # ─── Phase 5: Promtail egress — Loki push + k8s API (service discovery) ─────
+# Phase 8: lives in {{ $promtailNs }}, so the Loki rule needs an explicit
+# namespaceSelector (podSelector alone only matches same-namespace pods).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "e-gaop.fullname" . }}-promtail-egress
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $promtailNs }}
 spec:
   podSelector:
     matchLabels:
@@ -1342,7 +1350,10 @@ spec:
     - Egress
   egress:
     - to:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: loki
               app.kubernetes.io/instance: {{ .Release.Name }}

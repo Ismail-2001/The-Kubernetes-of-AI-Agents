@@ -1,12 +1,32 @@
 {{- if .Values.promtail.enabled }}
+{{- $promtailNs := printf "%s-infra" .Release.Namespace }}
 # =============================================================================
 # Phase 5 — Promtail DaemonSet: ships container logs to Loki
+# Phase 8 — Promtail runs in a dedicated {{ $promtailNs }} namespace labeled
+#          PSA privileged: its hostPath volumes (/var/log, /var/lib/docker/
+#          containers) are incompatible with the restricted profile enforced
+#          in {{ .Release.Namespace }}. Namespace labels — not pod labels —
+#          are what the PSA admission controller evaluates.
 # =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $promtailNs }}
+  labels:
+    app.kubernetes.io/part-of: e-gaop
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/warn-version: latest
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "e-gaop.fullname" . }}-promtail
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $promtailNs }}
   labels:
     app.kubernetes.io/name: promtail
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -46,13 +66,13 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "e-gaop.fullname" . }}-promtail
-    namespace: {{ .Release.Namespace }}
+    namespace: {{ $promtailNs }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "e-gaop.fullname" . }}-promtail
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $promtailNs }}
   labels:
     app.kubernetes.io/name: promtail
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -67,7 +87,8 @@ data:
       filename: /run/promtail/positions.yaml
 
     clients:
-      - url: http://{{ include "e-gaop.fullname" . }}-loki:3100/loki/api/v1/push
+      # Cross-namespace: promtail lives in {{ $promtailNs }}, Loki in {{ .Release.Namespace }}
+      - url: http://{{ include "e-gaop.fullname" . }}-loki.{{ .Release.Namespace }}.svc.cluster.local:3100/loki/api/v1/push
 
     scrape_configs:
       - job_name: kubernetes-pods
@@ -91,7 +112,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: {{ include "e-gaop.fullname" . }}-promtail
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $promtailNs }}
   labels:
     app.kubernetes.io/name: promtail
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -115,6 +136,16 @@ spec:
       serviceAccountName: {{ include "e-gaop.fullname" . }}-promtail
       priorityClassName: system-node-critical
       terminationGracePeriodSeconds: 30
+      securityContext:
+        # Root is required to tail node logs: kubelet writes container logs
+        # as 0640 root:root and /var/log/pods is 0750 on Kind — uid 10001
+        # cannot read them even with supplemental group root (hostPath
+        # positions dir would also be unwritable). Allowed here because
+        # {{ $promtailNs }} is PSA privileged; capabilities are still dropped.
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: promtail
           image: "{{ .Values.promtail.image.repository }}:{{ .Values.promtail.image.tag }}"
@@ -146,6 +177,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
             - name: config
               mountPath: /etc/promtail

@@ -128,16 +128,29 @@ async function run() {
   logger.info(`Connecting to Temporal at ${temporalAddress}`);
 
   let connection;
-  try {
-    connection = await NativeConnection.connect({
-      address: temporalAddress,
-    });
-    temporalConnected = true;
-  } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Temporal not available — running in degraded mode (no workflow execution)');
-    // readiness returns DEGRADED (200) — process is alive, can serve DLQ, but can't execute workflows
-    return;
+  // Retry the initial connect: temporal is briefly unavailable during rolling
+  // restarts and cluster resume. A one-shot attempt left this pod permanently
+  // degraded (readiness: temporal unhealthy) with no recovery path.
+  // Readiness reports temporal as degraded-but-200 until connect succeeds.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      connection = await NativeConnection.connect({
+        address: temporalAddress,
+      });
+      break;
+    } catch (err) {
+      logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          attempt,
+          retryInMs: 5000,
+        },
+        'Temporal not available — running in degraded mode (no workflow execution), retrying',
+      );
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
   }
+  temporalConnected = true;
 
   // Load real temporal activities (with gRPC calls to policy-plane, sandbox-runtime, etc.)
   // eslint-disable-next-line @typescript-eslint/no-require-imports

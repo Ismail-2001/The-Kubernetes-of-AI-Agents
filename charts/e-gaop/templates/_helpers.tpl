@@ -104,7 +104,7 @@ Core 7 secrets from managed-secrets. Used by all backend services.
 {{- end }}
 
 {{/*
-Container securityContext (non-root, read-only fs)
+Container securityContext (non-root, read-only fs, PSA restricted)
 */}}
 {{- define "e-gaop.containerSecurityContext" -}}
 securityContext:
@@ -112,16 +112,23 @@ securityContext:
   runAsUser: 1001
   readOnlyRootFilesystem: true
   allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
 {{- end }}
 
 {{/*
-Pod-level securityContext
+Pod-level securityContext (PSA restricted)
 */}}
 {{- define "e-gaop.podSecurityContext" -}}
 securityContext:
   fsGroup: 1001
   runAsNonRoot: true
   runAsUser: 1001
+  seccompProfile:
+    type: RuntimeDefault
 {{- end }}
 
 {{/*

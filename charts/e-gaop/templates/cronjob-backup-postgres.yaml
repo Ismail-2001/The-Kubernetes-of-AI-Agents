@@ -34,6 +34,8 @@ spec:
             runAsNonRoot: true
             runAsUser: 999
             fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
           initContainers:
             - name: wait-for-postgres
               image: "{{ .Values.postgresql.image.registry | default "docker.io" }}/{{ .Values.postgresql.image.repository | default "bitnami/postgresql" }}:{{ .Values.postgresql.image.tag | default "16" }}"
@@ -68,6 +70,10 @@ spec:
                 runAsUser: 999
                 readOnlyRootFilesystem: true
                 allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
           containers:
             - name: backup
               image: "{{ .Values.postgresql.image.registry | default "docker.io" }}/{{ .Values.postgresql.image.repository | default "bitnami/postgresql" }}:{{ .Values.postgresql.image.tag | default "16" }}"
@@ -121,6 +127,10 @@ spec:
                 runAsUser: 999
                 readOnlyRootFilesystem: true
                 allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
           volumes:
             - name: backup-scripts
               configMap:

@@ -97,6 +97,27 @@ temporal:
       limits:
         cpu: 500m
         memory: 512Mi
+    # Phase 8 — PSA restricted: pod-level runAsNonRoot + seccomp for all
+    # temporal server deployments (frontend/history/matching/worker)
+    securityContext:
+      fsGroup: 1000
+      runAsUser: 1000
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    frontend:
+      containerSecurityContext: &temporalContainerSC
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+    history:
+      containerSecurityContext: *temporalContainerSC
+    matching:
+      containerSecurityContext: *temporalContainerSC
+    worker:
+      containerSecurityContext: *temporalContainerSC
     config:
       persistence:
         defaultStore: default
@@ -124,6 +145,26 @@ temporal:
             secretKey: "postgres-password"
             maxConns: 20
             maxConnLifetime: "1h"
+  # Phase 8 — PSA restricted: temporal UI image (temporalio/ui) runs as root
+  # by default but ships a `temporal` user (uid 5000) owning /home/ui-server —
+  # it must run as that uid or ./config/docker.yaml creation fails (EACCES).
+  # Listens on 8080, so no capabilities needed.
+  web:
+    securityContext:
+      runAsUser: 5000
+      runAsGroup: 5000
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext: *temporalContainerSC
+  admintools:
+    securityContext: &temporalToolSC
+      runAsUser: 1000
+      runAsGroup: 1000
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext: *temporalContainerSC
   postgresql:
     enabled: false
   mysql:
@@ -135,6 +176,9 @@ temporal:
   cassandra:
     enabled: false
   schema:
+    # Phase 8 — PSA restricted: schema job pods (admin-tools image, root default)
+    securityContext: *temporalToolSC
+    containerSecurityContext: *temporalContainerSC
     createDatabase:
       # temporal / temporal_visibility already pre-created on egaop-postgresql
       enabled: false
@@ -152,6 +196,66 @@ temporal:
           memory: 192Mi
         limits:
           memory: 512Mi
+      # Phase 6: Tempo OTLP remote_write lands here (was added via live patch)
+      extraArgs:
+        web.enable-remote-write-receiver: null
+      # Phase 8 — PSA restricted
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containerSecurityContext: &promContainerSC
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+    configmapReload:
+      prometheus:
+        containerSecurityContext: *promContainerSC
+    alertmanager:
+      podSecurityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      configmapReload:
+        securityContext:
+          runAsUser: 65534
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+    prometheus-pushgateway:
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containerSecurityContext: *promContainerSC
+    # Phase 8 — PSA restricted: node-exporter needs hostNetwork/hostPath/proc,
+    # inherently incompatible with restricted (and its probes were failing
+    # 21 restarts/37h on Kind). Node CPU/mem still scraped via kubelet
+    # cadvisor jobs (kubernetes-nodes, kubernetes-nodes-cadvisor).
+    prometheus-node-exporter:
+      enabled: false
   grafana:
     enabled: true
     resources:
@@ -231,9 +335,11 @@ promtail:
     requests:
       cpu: 25m
       memory: 48Mi
+    # Phase 8: 96Mi OOM-killed twice while catching up a 12h log backlog
+    # after the namespace move (fresh positions file) — 128Mi headroom
     limits:
       cpu: 100m
-      memory: 96Mi
+      memory: 128Mi
 
 # Phase 6 — Tempo distributed tracing (Kind-sized)
 tempo:
@@ -249,9 +355,11 @@ tempo:
     requests:
       cpu: 50m
       memory: 96Mi
+    # Phase 8: 384Mi OOM-killed flushing the OTLP remote_write backlog when
+    # prometheus-server rolled (Recreate strategy = downtime window)
     limits:
       cpu: 300m
-      memory: 384Mi
+      memory: 512Mi
 
 api-server:
   replicas: 1

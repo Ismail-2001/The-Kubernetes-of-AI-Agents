@@ -27,6 +27,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 999
         fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: migrate
           image: "{{ .Values.migration.image | default "postgres" }}:{{ .Values.migration.tag | default "16" }}"
@@ -74,6 +76,14 @@ spec:
             - name: migrations
               mountPath: /migrations
               readOnly: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
       volumes:
         - name: migrations
           configMap:
