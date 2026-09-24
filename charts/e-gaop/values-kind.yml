@@ -174,13 +174,14 @@ migration:
   enabled: true
 
 # Phase 4 — Kind-sized quotas (headroom above current ~18.5 CPU limits used)
+# Phase 5: raised limits.cpu 24→32 for Loki+Promtail+Grafana headroom
 resourceQuota:
   enabled: true
   requests:
     cpu: "8"
     memory: 10Gi
   limits:
-    cpu: "24"
+    cpu: "32"
     memory: 24Gi
   pods: "100"
   services: "50"
@@ -201,6 +202,37 @@ resourceQuota:
   podMax:
     cpu: "6"
     memory: 6Gi
+
+# Phase 5 — Log aggregation (Kind-sized)
+loki:
+  enabled: true
+  image:
+    repository: grafana/loki
+    tag: "3.0.0"
+  retention: 168h
+  persistence:
+    enabled: true
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+
+promtail:
+  enabled: true
+  image:
+    repository: grafana/promtail
+    tag: "3.0.0"
+  resources:
+    requests:
+      cpu: 25m
+      memory: 48Mi
+    limits:
+      cpu: 100m
+      memory: 96Mi
 
 api-server:
   replicas: 1
