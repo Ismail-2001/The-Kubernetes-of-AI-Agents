@@ -162,3 +162,48 @@ k6 run tests/load/load-test.js --out json=results.json
 |------|--------|---------|
 | 2026-09-17 | Platform Team | Initial baseline |
 | 2026-09-17 | Platform Team | Week 4 actual results (10 VUs, 60s Node.js test) |
+| 2026-09-24 | Platform Team | Phase 7: Kind cluster load test + HPA validation |
+
+## Phase 7 Results (Kind cluster — 2026-09-24)
+
+| Parameter | Value |
+|-----------|-------|
+| Tool | Node.js load harness (in-cluster via port-forward) |
+| Test script | tests/load/node-load-test.js (adapted credentials) |
+| Environment | Kind `egaop` (2 nodes) |
+| VUs | 20 |
+| Duration | 60s |
+| Auth | loadtest@test.com |
+
+### Test 3: Kind Cluster Mixed Workload (20 VUs, 60s)
+
+| Metric | Result | SLO | Status |
+|--------|--------|-----|--------|
+| Total Requests | 11,879 | — | — |
+| RPS | 197.8 | > 50 req/s | PASS |
+| Avg Latency | 39.7ms | — | — |
+| P50 Latency | 23ms | < 100ms | PASS |
+| P95 Latency | 85ms | < 500ms | PASS |
+| P99 Latency | 213ms | < 1000ms | PASS |
+| Max Latency | 4070ms | — | — |
+| Error Rate | 0.25% | < 1% | PASS |
+
+### HPA Validation
+
+| Observation | Detail |
+|-------------|--------|
+| Scale-up trigger | api-server CPU spiked to 112% (> 70% target) under load |
+| Scale-up action | HPA scaled 2 → 4 replicas within stabilization window |
+| Scale-down | After load ended, CPU dropped; scale-down follows 300s window |
+| Memory HPA (workflow-engine) | Was pegged at 98% / 6 (max) with 128Mi request |
+| Right-size action | Raised request 128Mi → 192Mi, limit 256Mi → 512Mi |
+| Post-fix expectation | Steady-state ~125Mi / 192Mi ≈ 65% (< 80% target) → allows scale-down |
+
+### Key Findings (Phase 7)
+
+1. **SLOs all PASS** — P95 85ms, error rate 0.25%, throughput 197.8 RPS on Kind
+2. **CPU HPA works end-to-end** — scaled api-server 2→4 under sustained load
+3. **Memory HPA overscaled workflow-engine** — 128Mi request left only 2% headroom at steady state; fixed to 192Mi
+4. **sandbox-runtime HPA cpu <unknown>** — expected in Kind (no Docker → pods unready → no CPU metrics)
+5. **admin-console memory ~73%** — approaching 80% target; monitor if it scales
+

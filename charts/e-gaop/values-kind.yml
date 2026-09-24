@@ -270,12 +270,14 @@ workflow-engine:
   tls:
     certManager:
       enabled: true
+  # Phase 7: request 128Mi → 192Mi so memory HPA (80%) no longer pegs at max
+  # (steady-state usage ~125Mi = 98% of 128Mi request → 65% of 192Mi)
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 192Mi
     limits:
-      memory: 256Mi
+      memory: 512Mi
 
 llm-router:
   replicas: 1
