@@ -175,13 +175,14 @@ migration:
 
 # Phase 4 — Kind-sized quotas (headroom above current ~18.5 CPU limits used)
 # Phase 5: raised limits.cpu 24→32 for Loki+Promtail+Grafana headroom
+# Phase 6: raised limits.cpu 32→40 for Tempo + rolling-restart headroom
 resourceQuota:
   enabled: true
   requests:
     cpu: "8"
     memory: 10Gi
   limits:
-    cpu: "32"
+    cpu: "40"
     memory: 24Gi
   pods: "100"
   services: "50"
@@ -233,6 +234,24 @@ promtail:
     limits:
       cpu: 100m
       memory: 96Mi
+
+# Phase 6 — Tempo distributed tracing (Kind-sized)
+tempo:
+  enabled: true
+  image:
+    repository: grafana/tempo
+    tag: "2.6.1"
+  retention: 168h
+  persistence:
+    enabled: true
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
 
 api-server:
   replicas: 1

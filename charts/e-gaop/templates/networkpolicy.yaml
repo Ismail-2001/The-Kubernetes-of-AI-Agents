@@ -1368,7 +1368,7 @@ spec:
         - { protocol: TCP, port: 53 }
 {{- end }}
 ---
-# ─── Grafana egress: prometheus query + loki query (was missing → dashboards broken under default-deny)
+# ─── Grafana egress: prometheus query + loki query + tempo traces ───────────
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -1399,12 +1399,21 @@ spec:
       ports:
         - { protocol: TCP, port: 3100 }
 {{- end }}
+{{- if .Values.tempo.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 3200 }
+{{- end }}
     - to: []
       ports:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
 ---
-# Prometheus ingress: from grafana (dashboards) — complements allow-ingress-metrics
+# Prometheus ingress: from grafana (dashboards) + tempo (span-metrics remote_write)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -1428,5 +1437,89 @@ spec:
             matchLabels:
               app.kubernetes.io/name: loki
               app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if .Values.tempo.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo
+              app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
       ports:
         - { protocol: TCP, port: 9090 }
+{{- if .Values.tempo.enabled }}
+---
+# ─── Phase 6: Tempo ingress — OTLP push from apps + grafana query + prom scrape ─
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-allow-ingress-tempo
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: TCP, port: 4317 }
+        - { protocol: TCP, port: 4318 }
+        - { protocol: TCP, port: 3200 }
+---
+# Tempo egress: DNS + span-metrics remote_write to prometheus
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-tempo-egress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/component: server
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 80 }
+        - { protocol: TCP, port: 9090 }
+    - to: []
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# App egress → Tempo OTLP (all egaop pods may export traces)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-allow-egress-tempo-otlp
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 4317 }
+        - { protocol: TCP, port: 4318 }
+{{- end }}

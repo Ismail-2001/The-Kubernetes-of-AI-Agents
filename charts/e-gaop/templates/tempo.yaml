@@ -1,0 +1,211 @@
+{{- if .Values.tempo.enabled }}
+# =============================================================================
+# Phase 6 — Tempo distributed tracing (monolithic, filesystem storage)
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-tempo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+data:
+  tempo-config.yml: |
+    server:
+      http_listen_port: 3200
+
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+
+    ingester:
+      max_block_duration: 5m
+
+    compactor:
+      compaction:
+        block_retention: {{ .Values.tempo.retention | default "168h" }}
+
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /var/tempo/traces
+        wal:
+          path: /var/tempo/wal
+
+    metrics_generator:
+      registry:
+        external_labels:
+          source: tempo
+          cluster: kubernetes
+      storage:
+        path: /var/tempo/generator/wal
+        remote_write:
+          - url: http://{{ .Release.Name }}-prometheus-server:80/api/v1/write
+            send_exemplars: true
+      traces_storage:
+        path: /var/tempo/generator/traces
+      ring:
+        kvstore:
+          store: inmemory
+
+    overrides:
+      defaults:
+        metrics_generator:
+          processors: [service-graphs, span-metrics]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-tempo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.tempo.persistence.size | default "2Gi" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-tempo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tempo
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: e-gaop
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3200"
+    spec:
+      serviceAccountName: {{ include "e-gaop.fullname" . }}-tempo
+      securityContext:
+        fsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: tempo
+          image: "{{ .Values.tempo.image.repository }}:{{ .Values.tempo.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/tempo/tempo-config.yml
+          ports:
+            - name: http
+              containerPort: 3200
+              protocol: TCP
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.tempo.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+              readOnly: true
+            - name: storage
+              mountPath: /var/tempo
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "e-gaop.fullname" . }}-tempo
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ include "e-gaop.fullname" . }}-tempo
+        - name: tmp
+          emptyDir: {}
+      nodeSelector:
+        kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-tempo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-tempo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3200
+      targetPort: http
+      protocol: TCP
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
