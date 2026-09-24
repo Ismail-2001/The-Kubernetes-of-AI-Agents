@@ -7,6 +7,7 @@ COPY tsconfig.base.json ./
 COPY packages/shared/ ./packages/shared/
 COPY observability-plane/package.json ./observability-plane/
 
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 RUN npm run build -w packages/shared
 

@@ -12,6 +12,8 @@ BEGIN
 END $$;
 
 -- Users table
+-- NOTE: The application may have already created this table with TEXT ids.
+-- CREATE IF NOT EXISTS is a no-op in that case; downstream FKs use TEXT to match.
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -33,29 +35,53 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (lower(email)) WHERE 
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role) WHERE deleted_at IS NULL;
 
 -- Sessions table (for refresh tokens / session tracking)
-CREATE TABLE IF NOT EXISTS user_sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash VARCHAR(255) NOT NULL,
-    ip_address INET,
-    user_agent TEXT,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- user_id type follows whatever users.id is (TEXT in app-created schema,
+-- UUID in migration-created schema) — detect at migration time.
+DO $$
+DECLARE
+    uid_type TEXT;
+BEGIN
+    SELECT data_type INTO uid_type
+      FROM information_schema.columns
+     WHERE table_name = 'users' AND column_name = 'id';
+
+    EXECUTE format($f$
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id %s NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash VARCHAR(255) NOT NULL,
+            ip_address INET,
+            user_agent TEXT,
+            expires_at TIMESTAMPTZ NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    $f$, CASE WHEN uid_type = 'text' THEN 'TEXT' ELSE 'UUID' END);
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON user_sessions (user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON user_sessions (token_hash);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON user_sessions (expires_at);
 
 -- Password reset tokens
-CREATE TABLE IF NOT EXISTS password_resets (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash VARCHAR(255) NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL,
-    used_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+DO $$
+DECLARE
+    uid_type TEXT;
+BEGIN
+    SELECT data_type INTO uid_type
+      FROM information_schema.columns
+     WHERE table_name = 'users' AND column_name = 'id';
+
+    EXECUTE format($f$
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id %s NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash VARCHAR(255) NOT NULL,
+            expires_at TIMESTAMPTZ NOT NULL,
+            used_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    $f$, CASE WHEN uid_type = 'text' THEN 'TEXT' ELSE 'UUID' END);
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets (token_hash);
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets (user_id);

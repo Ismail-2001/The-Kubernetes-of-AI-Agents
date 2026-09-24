@@ -7,6 +7,7 @@ COPY tsconfig.base.json ./
 COPY packages/shared/ ./packages/shared/
 COPY memory-plane/package.json ./memory-plane/
 
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 RUN for dir in memory-plane; do [ -d "node_modules/$dir/node_modules" ] && cp -r "node_modules/$dir/node_modules/"* node_modules/ 2>/dev/null || true; done
 RUN npm run build -w packages/shared

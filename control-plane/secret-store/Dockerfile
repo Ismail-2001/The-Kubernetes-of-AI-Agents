@@ -8,6 +8,7 @@ COPY packages/shared/ ./packages/shared/
 COPY control-plane/secret-store/package.json ./control-plane/secret-store/
 COPY api/proto/ ./api/proto/
 
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 RUN npm run build -w packages/shared
 

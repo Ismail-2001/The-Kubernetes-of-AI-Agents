@@ -19,10 +19,11 @@ CREATE TABLE IF NOT EXISTS agent_memory (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_memory_namespace_agent_key
     ON agent_memory (namespace, agent_id, key);
 
--- IVFFlat index for cosine similarity search on embeddings
-CREATE INDEX IF NOT EXISTS idx_agent_memory_embedding
-    ON agent_memory USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+-- ANN index for cosine similarity on embeddings is intentionally omitted here.
+-- ivfflat/hnsw require AVX2 CPU instructions; on AVX-less VMs the CREATE INDEX
+-- crashes the backend with SIGILL (uncatchable). Create it manually on
+-- production hardware: CREATE INDEX idx_agent_memory_embedding ON agent_memory
+-- USING hnsw (embedding vector_cosine_ops);
 
 -- Index for expired entry cleanup
 CREATE INDEX IF NOT EXISTS idx_agent_memory_expires_at

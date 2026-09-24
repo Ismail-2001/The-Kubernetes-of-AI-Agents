@@ -84,7 +84,82 @@ redis:
         memory: 128Mi
 
 temporal:
-  enabled: false
+  enabled: true
+  server:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 2Gi
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    config:
+      persistence:
+        defaultStore: default
+        default:
+          driver: "sql"
+          sql:
+            driver: "postgres12"
+            host: "egaop-postgresql"
+            port: 5432
+            database: "temporal"
+            user: "egaop"
+            existingSecret: "egaop-e-gaop-managed-secrets"
+            secretKey: "postgres-password"
+            maxConns: 20
+            maxConnLifetime: "1h"
+        visibility:
+          driver: "sql"
+          sql:
+            driver: "postgres12"
+            host: "egaop-postgresql"
+            port: 5432
+            database: "temporal_visibility"
+            user: "egaop"
+            existingSecret: "egaop-e-gaop-managed-secrets"
+            secretKey: "postgres-password"
+            maxConns: 20
+            maxConnLifetime: "1h"
+  postgresql:
+    enabled: false
+  mysql:
+    enabled: false
+  # Temporal subchart overrides for Kind (resource-constrained)
+  # Cassandra abandoned (mmap OOM); ES exhausts Kind. Use external Bitnami PostgreSQL.
+  elasticsearch:
+    enabled: false
+  cassandra:
+    enabled: false
+  schema:
+    createDatabase:
+      # temporal / temporal_visibility already pre-created on egaop-postgresql
+      enabled: false
+    setup:
+      enabled: true
+    update:
+      enabled: true
+  # Keep Temporal's Prometheus/Grafana (they serve our 42 alert rules + dashboards)
+  prometheus:
+    enabled: true
+    server:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 192Mi
+        limits:
+          memory: 512Mi
+  grafana:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
 
 opa:
   enabled: true
@@ -96,7 +171,7 @@ otelCollector:
   enabled: false
 
 migration:
-  enabled: false
+  enabled: true
 
 api-server:
   replicas: 1

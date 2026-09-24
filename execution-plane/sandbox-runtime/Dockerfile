@@ -8,6 +8,7 @@ COPY packages/shared/ ./packages/shared/
 COPY execution-plane/sandbox-runtime/package.json ./execution-plane/sandbox-runtime/
 COPY api/proto/ ./api/proto/
 
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 RUN npm run build -w packages/shared
 

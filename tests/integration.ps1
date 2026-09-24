@@ -28,9 +28,14 @@ Write-Host "`n=== E-GAOP Integration Tests ===" -ForegroundColor Cyan
 # 1. Pod Health
 Write-Host "`n--- 1. Pod Health ---" -ForegroundColor Yellow
 $notRunning = kubectl get pods -n $NAMESPACE --no-headers 2>$null | Where-Object { $_ -notmatch "Running" -and $_ -notmatch "Completed" }
-$notReady = kubectl get pods -n $NAMESPACE --no-headers 2>$null | Where-Object { $_ -match "Running" -and $_ -notmatch "1/1" -and $_ -notmatch "sandbox-runtime" }
+$notReady = kubectl get pods -n $NAMESPACE --no-headers 2>$null | Where-Object {
+    $_ -match "Running" -and
+    $_ -notmatch "sandbox-runtime" -and
+    $_ -match '^\S+\s+(\d+)/(\d+)' -and
+    ([int]$Matches[1] -ne [int]$Matches[2])
+}
 Assert-True (-not $notRunning) "All pods are Running"
-Assert-True (-not $notReady) "All pods are 1/1 Ready (sandbox-runtime expected 0/1 in Kind: Docker unreachable)"
+Assert-True (-not $notReady) "All Running pods fully ready (sandbox-runtime expected 0/1 in Kind: Docker unreachable)"
 
 # 2. Liveness (/healthz = always 200)
 Write-Host "`n--- 2. Liveness Contract ---" -ForegroundColor Yellow
@@ -65,7 +70,7 @@ Assert-True ($resp -match '"status":"SERVING"') "api-server readiness is SERVING
 $resp = Invoke-Health $wfPod 15058 "/readyz"
 Assert-True ($resp -match '"postgres"') "workflow-engine readiness checks postgres"
 Assert-True ($resp -match '"temporal"') "workflow-engine readiness checks temporal"
-Assert-True ($resp -match '"DEGRADED"') "workflow-engine is DEGRADED (no Temporal)"
+Assert-True ($resp -match '"name":"temporal","status":"healthy"') "workflow-engine temporal is healthy"
 
 $resp = Invoke-Health $sandboxPod 15054 "/readyz"
 Assert-True ($resp -match '"docker"') "sandbox-runtime readiness checks docker"

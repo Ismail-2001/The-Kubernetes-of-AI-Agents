@@ -8,6 +8,7 @@ COPY packages/shared/ ./packages/shared/
 COPY execution-plane/tool-proxy/package.json ./execution-plane/tool-proxy/
 COPY api/proto/ ./api/proto/
 
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 RUN npm run build -w packages/shared
 

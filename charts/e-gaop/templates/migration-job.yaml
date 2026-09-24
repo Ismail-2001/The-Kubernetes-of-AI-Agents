@@ -8,8 +8,8 @@ metadata:
     {{- include "e-gaop.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
   annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 3
@@ -39,10 +39,19 @@ spec:
               echo "Host: $POSTGRES_HOST"
               echo "Database: $POSTGRES_DB"
               echo ""
+              echo "Waiting for PostgreSQL..."
+              for i in $(seq 1 60); do
+                if pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" >/dev/null 2>&1; then
+                  echo "PostgreSQL is ready."
+                  break
+                fi
+                echo "  attempt $i/60 - not ready yet..."
+                sleep 2
+              done
               for f in /migrations/*.sql; do
                 echo "--- Applying: $(basename $f) ---"
-                psql "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB?sslmode=require" \
-                  -f "$f" --set ON_ERROR_STOP=1
+                psql "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB?sslmode=prefer" \
+                  -f "$f" --set ON_ERROR_STOP=1 -v ON_ERROR_STOP=1
                 echo "--- Done: $(basename $f) ---"
                 echo ""
               done
@@ -55,15 +64,12 @@ spec:
             - name: POSTGRES_DB
               value: {{ .Values.postgresql.auth.database | quote }}
             - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-postgresql
-                  key: username
+              value: {{ .Values.postgresql.auth.username | quote }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-postgresql
-                  key: password
+                  name: {{ .Values.postgresql.auth.existingSecret | default (printf "%s-postgresql" .Release.Name) }}
+                  key: {{ .Values.postgresql.auth.secretKeys.userPasswordKey | default "password" }}
           volumeMounts:
             - name: migrations
               mountPath: /migrations

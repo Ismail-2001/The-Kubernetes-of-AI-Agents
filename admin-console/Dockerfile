@@ -2,6 +2,7 @@
 FROM node:22-alpine AS builder
 WORKDIR /app/admin-console
 COPY package.json package-lock.json ./
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1

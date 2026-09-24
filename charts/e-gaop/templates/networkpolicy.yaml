@@ -981,6 +981,274 @@ spec:
         - protocol: TCP
           port: 8181
 ---
+# ─── Temporal ──────────────────────────────────────────────────────────────
+# Temporal egress: servers → PostgreSQL (SQL persistence)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-temporal-egress-postgres
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: temporal
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Temporal mesh: full ingress/egress among temporal pods (rpc + ring + metrics)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-temporal-mesh
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: temporal
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: temporal
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 7233 }
+        - { protocol: TCP, port: 7234 }
+        - { protocol: TCP, port: 7235 }
+        - { protocol: TCP, port: 7239 }
+        - { protocol: TCP, port: 7243 }
+        - { protocol: TCP, port: 6933 }
+        - { protocol: TCP, port: 6934 }
+        - { protocol: TCP, port: 6935 }
+        - { protocol: TCP, port: 6939 }
+        - { protocol: TCP, port: 9090 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: temporal
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 7233 }
+        - { protocol: TCP, port: 7234 }
+        - { protocol: TCP, port: 7235 }
+        - { protocol: TCP, port: 7239 }
+        - { protocol: TCP, port: 7243 }
+        - { protocol: TCP, port: 6933 }
+        - { protocol: TCP, port: 6934 }
+        - { protocol: TCP, port: 6935 }
+        - { protocol: TCP, port: 6939 }
+        - { protocol: TCP, port: 9090 }
+---
+# Temporal ingress: workflow-engine → frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-workflow-engine-to-temporal
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: temporal
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: workflow-engine
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 7233 }
+        - { protocol: TCP, port: 7243 }
+---
+# Temporal ingress: prometheus → metrics
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-allow-ingress-temporal-metrics
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: temporal
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/component: server
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 9090 }
+---
+# Temporal web ingress: from anywhere in-namespace (UI)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-allow-ingress-temporal-web
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: web
+      app.kubernetes.io/name: temporal
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# Workflow-engine egress: → temporal frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-workflow-engine-egress-temporal
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: workflow-engine
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: temporal
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 7233 }
+        - { protocol: TCP, port: 7243 }
+---
+# Schema/admin tools egress: jobs → postgres (already covered by temporal name label on schema pods)
+---
+# Monitoring egress: prometheus/kube-state-metrics → kube-apiserver (k8s SD)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-allow-egress-k8s-api
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+        - ipBlock:
+            cidr: 10.96.0.0/12
+        - ipBlock:
+            cidr: 172.16.0.0/12
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 6443 }
+---
+# Monitoring egress: prometheus → cluster pods (scrape metrics)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-prometheus-egress-scrape
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+      app.kubernetes.io/component: server
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 9090 }
+        - { protocol: TCP, port: 9091 }
+        - { protocol: TCP, port: 9093 }
+        - { protocol: TCP, port: 9100 }
+        - { protocol: TCP, port: 15051 }
+        - { protocol: TCP, port: 15052 }
+        - { protocol: TCP, port: 15053 }
+        - { protocol: TCP, port: 15054 }
+        - { protocol: TCP, port: 15057 }
+        - { protocol: TCP, port: 15058 }
+        - { protocol: TCP, port: 6933 }
+        - { protocol: TCP, port: 6934 }
+        - { protocol: TCP, port: 6935 }
+        - { protocol: TCP, port: 6939 }
+---
+# Metrics ingress: prometheus → app/infra pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-allow-ingress-metrics
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/component: server
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 9090 }
+        - { protocol: TCP, port: 9091 }
+        - { protocol: TCP, port: 9093 }
+        - { protocol: TCP, port: 9100 }
+        - { protocol: TCP, port: 15051 }
+        - { protocol: TCP, port: 15052 }
+        - { protocol: TCP, port: 15053 }
+        - { protocol: TCP, port: 15054 }
+        - { protocol: TCP, port: 15057 }
+        - { protocol: TCP, port: 15058 }
+        - { protocol: TCP, port: 6933 }
+        - { protocol: TCP, port: 6934 }
+        - { protocol: TCP, port: 6935 }
+        - { protocol: TCP, port: 6939 }
+---
 {{- if .Values.backup.enabled }}
 # ─── Backup egress: backup → postgres ──────────────────────────────────────
 apiVersion: networking.k8s.io/v1
