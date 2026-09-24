@@ -1,0 +1,28 @@
+{{- if .Values.resourceQuota.enabled }}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-default-limits
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: {{ .Values.resourceQuota.containerDefaults.cpu | default "500m" }}
+        memory: {{ .Values.resourceQuota.containerDefaults.memory | default "512Mi" }}
+      defaultRequest:
+        cpu: {{ .Values.resourceQuota.containerDefaults.requestCpu | default "50m" }}
+        memory: {{ .Values.resourceQuota.containerDefaults.requestMemory | default "128Mi" }}
+      max:
+        cpu: {{ .Values.resourceQuota.containerMax.cpu | default "2" }}
+        memory: {{ .Values.resourceQuota.containerMax.memory | default "2Gi" }}
+      min:
+        cpu: {{ .Values.resourceQuota.containerMin.cpu | default "10m" }}
+        memory: {{ .Values.resourceQuota.containerMin.memory | default "32Mi" }}
+    - type: Pod
+      max:
+        cpu: {{ .Values.resourceQuota.podMax.cpu | default "4" }}
+        memory: {{ .Values.resourceQuota.podMax.memory | default "4Gi" }}
+{{- end }}

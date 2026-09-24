@@ -400,6 +400,38 @@ migration:
 metricsServer:
   enabled: true
 
+# ─── Resource Quotas (Phase 4) ──────────────────────────────────────────────
+# Namespace guardrails: cap aggregate requests/limits and enforce container
+# default/min/max so a single misconfigured workload cannot starve the cluster.
+resourceQuota:
+  enabled: true
+  requests:
+    cpu: "4"
+    memory: 6Gi
+  limits:
+    cpu: "12"
+    memory: 16Gi
+  pods: "80"
+  services: "40"
+  persistentvolumeclaims: "20"
+  secrets: "60"
+  configmaps: "60"
+  containerDefaults:
+    cpu: 500m
+    memory: 512Mi
+    requestCpu: 50m
+    requestMemory: 128Mi
+  containerMax:
+    cpu: "2"
+    memory: 2Gi
+  containerMin:
+    cpu: 10m
+    memory: 32Mi
+  podMax:
+    cpu: "4"
+    memory: 4Gi
+
+
 # ─── Canary / Blue-Green Deployments ────────────────────────────────────────
 # Enable to deploy canary pods alongside stable. Traffic split requires Istio.
 # Without Istio, canary pods run but receive no traffic until manually promoted.

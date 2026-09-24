@@ -173,6 +173,35 @@ otelCollector:
 migration:
   enabled: true
 
+# Phase 4 — Kind-sized quotas (headroom above current ~18.5 CPU limits used)
+resourceQuota:
+  enabled: true
+  requests:
+    cpu: "8"
+    memory: 10Gi
+  limits:
+    cpu: "24"
+    memory: 24Gi
+  pods: "100"
+  services: "50"
+  persistentvolumeclaims: "20"
+  secrets: "80"
+  configmaps: "80"
+  containerDefaults:
+    cpu: 500m
+    memory: 512Mi
+    requestCpu: 50m
+    requestMemory: 64Mi
+  containerMax:
+    cpu: "4"
+    memory: 3Gi
+  containerMin:
+    cpu: 10m
+    memory: 16Mi
+  podMax:
+    cpu: "6"
+    memory: 6Gi
+
 api-server:
   replicas: 1
   tls:

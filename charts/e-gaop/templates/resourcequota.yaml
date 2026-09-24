@@ -1,0 +1,20 @@
+{{- if .Values.resourceQuota.enabled }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-compute-quota
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  hard:
+    requests.cpu: {{ .Values.resourceQuota.requests.cpu | default "4" }}
+    requests.memory: {{ .Values.resourceQuota.requests.memory | default "6Gi" }}
+    limits.cpu: {{ .Values.resourceQuota.limits.cpu | default "12" }}
+    limits.memory: {{ .Values.resourceQuota.limits.memory | default "16Gi" }}
+    pods: {{ .Values.resourceQuota.pods | default "80" }}
+    services: {{ .Values.resourceQuota.services | default "40" }}
+    persistentvolumeclaims: {{ .Values.resourceQuota.persistentvolumeclaims | default "20" }}
+    secrets: {{ .Values.resourceQuota.secrets | default "60" }}
+    configmaps: {{ .Values.resourceQuota.configmaps | default "60" }}
+{{- end }}
