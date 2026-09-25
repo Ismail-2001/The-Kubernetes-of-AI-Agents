@@ -131,7 +131,7 @@ spec:
   tls:
     - hosts:
         - {{ .Values.ingress.grpcHost | default "grpc.egaop.dev" | quote }}
-      secretName: {{ $fullname }}-tls
+      secretName: {{ $fullname }}-grpc-tls
   rules:
     - host: {{ .Values.ingress.grpcHost | default "grpc.egaop.dev" | quote }}
       http:

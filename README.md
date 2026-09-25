@@ -303,7 +303,8 @@ self-signed-root (selfsigned)
         ├── memory-plane-tls
         ├── observability-plane-tls
         ├── admin-console-tls
-        └── egaop-e-gaop-tls (Ingress wildcard)
+        ├── egaop-e-gaop-tls (Ingress: admin.egaop.local, api.egaop.local)
+        └── egaop-e-gaop-grpc-tls (Ingress: grpc.egaop.local)
 ```
 
 TLS terminates at NGINX Ingress — internal traffic uses HTTP for performance.
