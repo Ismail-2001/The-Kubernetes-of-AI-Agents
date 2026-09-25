@@ -142,8 +142,8 @@ const handlers = [
     return HttpResponse.json({
       data: {
         id: "agent-new",
-        name: (body as any).name ?? "new-agent",
-        namespace: (body as any).namespace ?? "default",
+        name: (body.name as string) ?? "new-agent",
+        namespace: (body.namespace as string) ?? "default",
         status: "pending",
         version: 1,
         lastExecution: null,

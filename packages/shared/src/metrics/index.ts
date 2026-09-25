@@ -1,7 +1,7 @@
 import { MeterProvider } from "@opentelemetry/sdk-metrics";
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { diag } from "@opentelemetry/api";
+import { diag, metrics } from "@opentelemetry/api";
 import type { Meter, Histogram, Counter, UpDownCounter } from "@opentelemetry/api";
 import { getPrometheusExporter } from "../telemetry/index";
 import os from "os";
@@ -78,8 +78,9 @@ export function getMeter(name: string): Meter {
 
   if (!meterProvider) {
     diag.warn("MeterProvider not initialized. Call initMetrics() first. Returning noop meter.");
-    const { NoopMeter } = require("@opentelemetry/api");
-    return new NoopMeter();
+    // NoopMeter is not part of the public @opentelemetry/api surface; the
+    // global (no-op) MeterProvider exposed via metrics.getMeter() is.
+    return metrics.getMeter(name);
   }
 
   const meter = meterProvider.getMeter(name);

@@ -1,5 +1,3 @@
-import * as grpc from "@grpc/grpc-js";
-
 const mockCreate = jest.fn();
 jest.mock("openai", () => {
   return {

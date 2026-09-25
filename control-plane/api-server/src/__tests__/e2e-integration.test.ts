@@ -185,7 +185,6 @@ describe("E2E: Observability", () => {
 // ── Rate limiting ─────────────────────────────────────────────────────────
 describe("E2E: Rate Limiting", () => {
   it("Returns 429 after exceeding rate limit", async () => {
-    const originalMax = process.env.RATE_LIMIT_MAX;
     // We can't easily change the runtime rate limit, so just verify headers
     const res = await api("GET", "/");
     const limit = parseInt(res.headers["x-ratelimit-limit"] || "100", 10);

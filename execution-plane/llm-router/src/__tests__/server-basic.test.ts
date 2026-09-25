@@ -1,14 +1,22 @@
 import * as grpc from "@grpc/grpc-js";
 import { streamOpenAIProvider, streamLLMWithFallback } from "../index";
 
-let handlers: Map<string, { func: any; type: string; path: string }>;
+type TestHandler = {
+  func: any;
+  type: string;
+  path: string;
+  serialize: (value: any) => Buffer;
+  deserialize: (bytes: Buffer) => any;
+};
+
+let handlers: Map<string, TestHandler>;
 
 beforeAll(() => {
   delete process.env.OPENAI_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
   jest.resetModules();
   const api = require("../index");
-  handlers = (api.server as any).handlers as Map<string, { func: any; type: string; path: string }>;
+  handlers = (api.server as any).handlers as Map<string, TestHandler>;
 });
 
 const GEN_PATH = "/egaop.v1.LLMService/Generate";
@@ -18,7 +26,7 @@ const HEALTH_PATH = "/grpc.health.v1.Health/Check";
 describe("LLM Router server without API keys", () => {
   it("Generate fails with FAILED_PRECONDITION when no API key is set", async () => {
     const handler = handlers.get(GEN_PATH)!;
-    const err = await new Promise((resolve) => {
+    const err = await new Promise<any>((resolve) => {
       handler.func(
         { request: { agent_id: "default/a", execution_id: "e", model: "gpt-4o", messages: [] } },
         (e: any) => resolve(e),

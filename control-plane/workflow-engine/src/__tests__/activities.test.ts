@@ -109,12 +109,12 @@ const grpcMock = jest.requireMock("@grpc/grpc-js") as {
 // Client instantiation order in activities/index.ts:
 // 0 = llmClient, 1 = toolClient, 2 = memoryClient,
 // 3 = obsClient, 4 = agentClient, 5 = runtimeClient
-function grpcClient(index: number): Record<string, jest.Mock> {
-  return grpcMock.__clients[index];
+function grpcClient(index: number): any {
+  return grpcMock.__clients[index]!;
 }
 
 function quotaInstance(): QuotaInstance {
-  return sharedMock.__quotaInstances[0];
+  return sharedMock.__quotaInstances[0]!;
 }
 
 function generateResponse(overrides: Record<string, unknown> = {}) {
@@ -314,7 +314,7 @@ describe("callLLMStream", () => {
       (event: string, handler: (chunk: Record<string, unknown>) => void) => {
         if (event === "data") dataHandlers.push(handler as (chunk: Record<string, unknown>) => void);
         if (event === "end") endHandlers.push(handler as () => void);
-        if (event === "error") errorHandlers.push(handler as (err: Error) => void);
+        if (event === "error") errorHandlers.push(handler as unknown as (err: Error) => void);
       }
     );
     grpcClient(0).GenerateStream = jest.fn().mockReturnValue({
@@ -330,7 +330,7 @@ describe("callLLMStream", () => {
     });
 
     const first = gen.next();
-    dataHandlers[0]({ content: "hello", done: false, model_used: "gpt-4o" });
+    dataHandlers[0]!({ content: "hello", done: false, model_used: "gpt-4o" });
     await expect(first).resolves.toEqual({
       value: {
         content: "hello",
@@ -344,7 +344,7 @@ describe("callLLMStream", () => {
     });
 
     const second = gen.next();
-    dataHandlers[0]({
+    dataHandlers[0]!({
       content: " world",
       done: true,
       model_used: "gpt-4o",
@@ -389,7 +389,7 @@ describe("callLLMStream", () => {
     });
 
     const pending = gen.next();
-    errorHandlers[0](new Error("stream failed"));
+    errorHandlers[0]!(new Error("stream failed"));
     await expect(pending).rejects.toThrow("stream failed");
   });
 
@@ -412,7 +412,7 @@ describe("callLLMStream", () => {
     });
 
     const pending = gen.next();
-    endHandlers[0]();
+    endHandlers[0]!();
     await expect(pending).resolves.toEqual({ value: undefined, done: true });
   });
 

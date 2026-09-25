@@ -21,8 +21,48 @@ env:
   KIND_NODE_VERSION: v1.31.0
 
 jobs:
+  # ─── Quality Gates (fast, fail early) ───────────────────────────────────────
+  quality:
+    name: Quality Gates (typecheck + lint + unit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            admin-console/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests (hermetic — live-stack suites behind E2E=1)
+        run: npm run test
+
+      # admin-console is not an npm workspace; gate it separately.
+      - name: Install admin-console dependencies
+        run: npm ci --ignore-scripts
+        working-directory: admin-console
+
+      - name: Admin console typecheck + lint
+        working-directory: admin-console
+        run: |
+          npm run typecheck
+          npm run lint
+
   integration:
     name: Kind Cluster + Deploy + Integration
+    needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -35,10 +75,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
-
-      # ─── Unit Tests (fast gate) ──────────────────────────────────────────────
-      - name: Run unit tests
-        run: npm run test
 
       # ─── Kind Cluster ────────────────────────────────────────────────────────
       - name: Create KinD cluster
@@ -66,7 +102,14 @@ jobs:
             NAME="${svc%%:*}"
             CTX="${svc##*:}"
             echo "=== Building $NAME from $CTX ==="
-            docker build -t "egaop/$NAME:ci" "$CTX"
+            # Service Dockerfiles COPY root files (package.json, tsconfig.base.json,
+            # packages/shared, api/proto) → root context with -f. Only admin-console
+            # is self-contained (its own package.json/lock at context root).
+            if [ "$NAME" = "admin-console" ]; then
+              docker build -t "egaop/$NAME:ci" "$CTX"
+            else
+              docker build -f "$CTX/Dockerfile" -t "egaop/$NAME:ci" .
+            fi
             kind load docker-image "egaop/$NAME:ci" --name "${{ env.KIND_CLUSTER_NAME }}"
           done
 

@@ -1,5 +1,5 @@
-import { reactWorkflow, cancelSignal, statusQuery } from "../temporal/workflows/react-workflow";
-import { hitlApprovalGate, approvalSignal } from "../temporal/workflows/hitl-gate";
+import { reactWorkflow } from "../temporal/workflows/react-workflow";
+import { hitlApprovalGate } from "../temporal/workflows/hitl-gate";
 import type { AgentExecutionInput, HITLApprovalInput } from "../temporal/types";
 
 jest.mock("@temporalio/workflow", () => {
@@ -42,8 +42,8 @@ const workflowMock = jest.requireMock("@temporalio/workflow") as {
   __handlers: Record<string, (...args: unknown[]) => unknown>;
 };
 
-const activities = workflowMock.__activities;
-const handlers = workflowMock.__handlers;
+const activities: Record<string, any> = workflowMock.__activities;
+const handlers: Record<string, any> = workflowMock.__handlers;
 
 function finalAnswer(overrides: Record<string, unknown> = {}) {
   return {
@@ -131,8 +131,8 @@ describe("reactWorkflow", () => {
     expect(result.status).toBe("SUCCEEDED");
     expect(result.iterations).toBe(2);
     expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0].toolName).toBe("search");
-    expect(result.toolCalls[0].status).toBe("succeeded");
+    expect(result.toolCalls[0]!.toolName).toBe("search");
+    expect(result.toolCalls[0]!.status).toBe("succeeded");
     expect(activities.executeTool).toHaveBeenCalledTimes(1);
   });
 
@@ -232,7 +232,7 @@ describe("reactWorkflow", () => {
 
     expect(result.status).toBe("SUCCEEDED");
     expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0].status).toBe("failed");
+    expect(result.toolCalls[0]!.status).toBe("failed");
   });
 
   it("returns ERROR when sandbox creation fails", async () => {
@@ -286,7 +286,7 @@ describe("reactWorkflow", () => {
     const result = await reactWorkflow(baseInput());
 
     expect(result.status).toBe("SUCCEEDED");
-    expect(result.toolCalls[0].toolCallId).toBe("call_9");
+    expect(result.toolCalls[0]!.toolCallId).toBe("call_9");
   });
 
   it("reports status via the status query handler", async () => {
@@ -327,7 +327,7 @@ describe("hitlApprovalGate", () => {
   }
 
   it("returns the decision when the request is approved", async () => {
-    workflowMock.condition.mockImplementation(async (predicate: () => boolean) => {
+    workflowMock.condition.mockImplementation(async (_predicate: () => boolean) => {
       handlers["approval"]({ approver: "admin@example.com", decision: "approve", reason: "ok" });
       return true;
     });
@@ -342,7 +342,7 @@ describe("hitlApprovalGate", () => {
   });
 
   it("throws when the request is rejected", async () => {
-    workflowMock.condition.mockImplementation(async (predicate: () => boolean) => {
+    workflowMock.condition.mockImplementation(async (_predicate: () => boolean) => {
       handlers["approval"]({ approver: "admin@example.com", decision: "reject", reason: "too risky" });
       return true;
     });
