@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}-opa
     app.kubernetes.io/part-of: e-gaop
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicas | default 2 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: opa

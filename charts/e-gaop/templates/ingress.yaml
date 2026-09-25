@@ -124,8 +124,6 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     # Large message support (agent configs, trace exports)
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-    # gRPC error handling
-    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
 spec:
   ingressClassName: {{ .Values.ingress.className | default "nginx" }}
   tls:

@@ -32,9 +32,6 @@ defaults:
     limits:
       cpu: "1"
       memory: 1Gi
-  podAnnotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "9464"
 
 api-server:
   replicas: 2

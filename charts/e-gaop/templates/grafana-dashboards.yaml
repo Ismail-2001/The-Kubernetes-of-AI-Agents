@@ -1,0 +1,28 @@
+{{- if and .Values.temporal.enabled .Values.temporal.grafana.enabled }}
+{{- $root := . }}
+# =============================================================================
+# W3 - E-GAOP dashboard ConfigMap, provisioned into Grafana via the
+# temporal.grafana.extraVolumeMounts entry in values-kind.yml
+# (mounted at /var/lib/grafana/dashboards/egaop, served by the "egaop"
+# dashboard provider -> folder "E-GAOP").
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "e-gaop.fullname" . }}-grafana-dashboards-egaop
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+    app.kubernetes.io/component: dashboards
+data:
+{{- range $f := list "egaop-cluster-health" "egaop-temporal" }}
+{{- $content := $root.Files.Get (printf "observability-stack/grafana/dashboards/%s.json" $f) }}
+{{- if not $content }}
+{{- fail (printf "dashboard file not found in chart: observability-stack/grafana/dashboards/%s.json" $f) }}
+{{- end }}
+  {{ $f }}.json: |
+{{ $content | indent 4 }}
+{{- end }}
+{{- end }}
