@@ -1,0 +1,37 @@
+# E-GAOP Alertmanager configuration.
+# Live target: ConfigMap `egaop-alertmanager` (namespace egaop), key
+# `alertmanager.yml`. The Alertmanager pod has no config reloader sidecar —
+# restart the pod after applying changes:
+#   kubectl delete pod -n egaop egaop-alertmanager-0
+#
+# Receiver: replace the placeholder `url` with a real webhook (Slack incoming
+# webhook, PagerDuty Events API, Opsgenie, ...). Until then, firing alerts are
+# still fully visible in the Alertmanager UI/API (svc/egaop-alertmanager:9093)
+# and deliveries to the placeholder are simply logged as failures.
+global:
+  resolve_timeout: 5m
+route:
+  receiver: default-receiver
+  group_by: [alertname, namespace]
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: default-receiver
+      group_wait: 30s
+      repeat_interval: 4h
+receivers:
+  - name: default-receiver
+    webhook_configs:
+      - url: https://hooks.slack.com/services/REPLACE_WITH_SLACK_WEBHOOK
+        send_resolved: true
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal: [alertname, namespace]
+templates:
+  - /etc/alertmanager/*.tmpl

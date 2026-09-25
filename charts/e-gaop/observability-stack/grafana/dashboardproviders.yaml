@@ -1,0 +1,18 @@
+apiVersion: 1
+providers:
+  - name: default
+    folder: ""
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/default
+    disableDeletion: false
+    editable: true
+    orgId: 1
+  - name: egaop
+    folder: E-GAOP
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/egaop
+    disableDeletion: false
+    editable: true
+    orgId: 1

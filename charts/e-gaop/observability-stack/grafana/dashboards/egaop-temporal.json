@@ -1,0 +1,222 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active pollers",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(temporal_num_pollers)",
+          "legendFormat": "pollers",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Free worker task slots",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(temporal_worker_task_slots_available)",
+          "legendFormat": "slots",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "Workers registered",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 5, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(temporal_worker_start)",
+          "legendFormat": "workers",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Workflow end-to-end latency p95",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "id": 4,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(temporal_workflow_endtoend_latency_bucket[5m])))",
+          "legendFormat": "p95",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(temporal_workflow_endtoend_latency_bucket[5m])))",
+          "legendFormat": "p50",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "ms", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Activity execution latency p95",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "id": 5,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(temporal_activity_execution_latency_bucket[5m])))",
+          "legendFormat": "p95",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(temporal_activity_execution_latency_bucket[5m])))",
+          "legendFormat": "p50",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "ms", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Workflow completion rate",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 13},
+      "id": 6,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(temporal_workflow_completed[5m]))",
+          "legendFormat": "completed/s",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Request failure ratio",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 13},
+      "id": 7,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(temporal_request_failure[5m])) / clamp_min(sum(rate(temporal_request[5m])), 0.001)",
+          "legendFormat": "failures",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never", "fillOpacity": 10},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.05}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Long-request failures per minute",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 13},
+      "id": 8,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(temporal_long_request_failure[5m])) * 60",
+          "legendFormat": "failures/min",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Task-queue polls",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 21},
+      "id": 9,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(temporal_workflow_task_queue_poll_succeed[5m]))",
+          "legendFormat": "workflow polls succeeded/s",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(temporal_workflow_task_queue_poll_empty[5m]))",
+          "legendFormat": "workflow polls empty/s",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(temporal_activity_poll_no_task[5m]))",
+          "legendFormat": "activity polls no-task/s",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["egaop"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "E-GAOP — Temporal Workflows",
+  "uid": "egaop-temporal",
+  "version": 1
+}

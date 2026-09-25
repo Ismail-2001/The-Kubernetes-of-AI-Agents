@@ -1,0 +1,10 @@
+[
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/volumeMounts/-",
+    "value": {
+      "name": "dashboards-default",
+      "mountPath": "/var/lib/grafana/dashboards/egaop"
+    }
+  }
+]

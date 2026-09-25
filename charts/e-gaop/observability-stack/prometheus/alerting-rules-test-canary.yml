@@ -1,0 +1,21 @@
+# W2 end-to-end verification snippet — NOT a standalone rule file.
+#
+# This is a single entry for the top-level `groups:` list. During the test it
+# is appended to the end of alerting-rules.yml (one document, one `groups:`
+# key) and applied together; after verification it is removed. The rule fires
+# on the next evaluation tick (evaluation_interval: 1m) and exercises
+# Prometheus -> Alertmanager -> webhook receiver delivery.
+  - name: egaop.canary.rules
+    rules:
+      - alert: EgaopW2Canary
+        expr: vector(1) > 0
+        for: 0s
+        labels:
+          severity: info
+          test: w2
+        annotations:
+          summary: "W2 alert-pipeline canary"
+          description: >-
+            Temporary verification rule — proves rule evaluation, alert
+            routing and webhook delivery. Safe to ignore; removed after
+            verification.

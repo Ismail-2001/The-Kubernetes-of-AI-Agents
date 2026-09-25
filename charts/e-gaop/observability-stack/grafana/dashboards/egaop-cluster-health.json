@@ -1,0 +1,213 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Workload availability",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(kube_deployment_status_replicas_available{namespace=\"egaop\"}) / sum(kube_deployment_spec_replicas{namespace=\"egaop\"}) * 100",
+          "legendFormat": "available",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 95}, {"color": "green", "value": 99}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Scrape targets up",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(up == 1) / count(up) * 100",
+          "legendFormat": "healthy",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 95}, {"color": "green", "value": 100}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Targets down",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "id": 3,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(up == 0) or vector(0)",
+          "legendFormat": "down",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 3}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Pods not ready",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "id": 4,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(kube_pod_status_ready{condition=\"false\",namespace=\"egaop\"} == 1) or vector(0)",
+          "legendFormat": "not ready",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Container restarts (1h)",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "id": 5,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"egaop\"}[1h]))",
+          "legendFormat": "{{pod}}",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU usage by pod",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "id": 6,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"egaop\",container!=\"\"}[5m]))",
+          "legendFormat": "{{pod}}",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "cores", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory working set by pod",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "id": 7,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"egaop\",container!=\"\"})",
+          "legendFormat": "{{pod}}",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU throttling ratio",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "id": 8,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace=\"egaop\",container!=\"\"}[5m])) / sum by (pod) (rate(container_cpu_cfs_periods_total{namespace=\"egaop\",container!=\"\"}[5m]))",
+          "legendFormat": "{{pod}}",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "max": 1, "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Targets by job (up)",
+      "datasource": {"type": "prometheus", "uid": "TemporalMetrics"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 21},
+      "id": 9,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (job) (up)",
+          "legendFormat": "{{job}}",
+          "datasource": {"type": "prometheus", "uid": "TemporalMetrics"}
+        }
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "never", "stacking": {"mode": "normal"}}}, "overrides": []}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["egaop"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "E-GAOP — Cluster Health",
+  "uid": "egaop-cluster-health",
+  "version": 1
+}

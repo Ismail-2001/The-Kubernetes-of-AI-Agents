@@ -1,0 +1,20 @@
+# Alertmanager configuration used only during W2 end-to-end verification:
+# routes everything to an in-cluster test sink (Pod `w2-sink`,
+# Service `w2-sink.egaop.svc:8080`) so webhook delivery can be observed in
+# the sink logs. Replaced by alertmanager.yml (placeholder receiver) after
+# the test; the sink Pod/Service are then deleted.
+global:
+  resolve_timeout: 5m
+route:
+  receiver: sink-receiver
+  group_by: [alertname, namespace]
+  group_wait: 5s
+  group_interval: 1m
+  repeat_interval: 5m
+receivers:
+  - name: sink-receiver
+    webhook_configs:
+      - url: http://w2-sink.egaop.svc:8080/
+        send_resolved: true
+templates:
+  - /etc/alertmanager/*.tmpl

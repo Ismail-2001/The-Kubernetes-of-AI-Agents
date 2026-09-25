@@ -1,0 +1,279 @@
+# E-GAOP alerting rules — plain Prometheus rule-file format.
+#
+# Live target: ConfigMap `egaop-prometheus-server` (namespace egaop), key
+# `alerting_rules.yml` (already listed in prometheus.yml `rule_files`).
+# The observability-plane PrometheusRule CR stays disabled
+# (prometheusRules.enabled=false — no prometheus-operator CRDs installed),
+# so this file is the operative source of truth. A configmap-reloader sidecar
+# watches /etc/config and POSTs /-/reload on change (no pod restart needed).
+#
+# All expressions below were validated against live series:
+#   kube_*/container_* (kube-state-metrics, cadvisor), temporal_* (native
+#   :9090), prometheus_* (self-monitoring), up (all jobs).
+# egaop.slo.rules depends on OTel http_server_duration_* metrics that appear
+# only once the OTel collector pipeline is deployed; the group is inert until
+# then and activates automatically when those series exist.
+groups:
+  - name: egaop.availability.rules
+    rules:
+      - alert: EgaopTargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scrape target down: {{ $labels.job }}/{{ $labels.instance }}"
+          description: >-
+            Prometheus has failed to scrape {{ $labels.instance }}
+            (job={{ $labels.job }}, pod={{ $labels.pod }}) for 5 minutes.
+          runbook: "docs/runbooks/service-down.md"
+
+      - alert: EgaopPrometheusAlertmanagerMissing
+        expr: prometheus_notifications_alertmanagers_discovered < 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus has no Alertmanager targets"
+          description: >-
+            Prometheus discovered fewer than one Alertmanager — alerts are
+            being evaluated but nowhere delivered. Check the
+            egaop-alertmanager StatefulSet and the alerting section of
+            prometheus.yml.
+          runbook: "docs/runbooks/service-down.md"
+
+      - alert: EgaopPrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus config reload failed"
+          description: >-
+            The last Prometheus configuration/rule reload failed; the running
+            config is stale. Check the configmap-reloader logs and the
+            prometheus server log for the parse error.
+          runbook: "docs/runbooks/service-down.md"
+
+  - name: egaop.infrastructure.rules
+    rules:
+      - alert: EgaopPodOOMKilled
+        expr: kube_pod_container_status_last_terminated_reason{namespace="egaop",reason="OOMKilled"} > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pod OOMKilled: {{ $labels.pod }}"
+          description: >-
+            Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} was
+            terminated due to OOM. Increase memory limits or investigate a
+            memory leak.
+          runbook: "docs/runbooks/scaling.md"
+
+      - alert: EgaopPodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{namespace="egaop"}[15m]) * 60 * 5 > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod crash looping: {{ $labels.pod }}"
+          description: >-
+            Pod {{ $labels.pod }} has restarted
+            {{ $value | printf "%.0f" }} times in the last 15 minutes.
+          runbook: "docs/runbooks/service-down.md"
+
+      - alert: EgaopHighCPUThrottling
+        expr: |
+          (
+            sum(rate(container_cpu_cfs_throttled_periods_total{namespace="egaop",container!=""}[5m])) by (pod, container)
+            /
+            sum(rate(container_cpu_cfs_periods_total{namespace="egaop",container!=""}[5m])) by (pod, container)
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU throttling: {{ $labels.pod }}/{{ $labels.container }}"
+          description: >-
+            Container {{ $labels.container }} in pod {{ $labels.pod }} is being
+            CPU-throttled {{ $value | humanizePercentage }} of the time.
+            Increase CPU limits.
+          runbook: "docs/runbooks/scaling.md"
+
+      - alert: EgaopHighMemoryUsage
+        expr: |
+          (
+            container_memory_working_set_bytes{namespace="egaop",container!=""}
+            /
+            kube_pod_container_resource_limits{namespace="egaop",resource="memory",container!=""}
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage: {{ $labels.pod }}/{{ $labels.container }}"
+          description: >-
+            Container {{ $labels.container }} in pod {{ $labels.pod }} is using
+            {{ $value | humanizePercentage }} of its memory limit.
+          runbook: "docs/runbooks/scaling.md"
+
+  - name: egaop.temporal.rules
+    rules:
+      - alert: EgaopTemporalHighFailureRate
+        expr: |
+          (
+            sum(rate(temporal_request_failure[5m]))
+            /
+            clamp_min(sum(rate(temporal_request[5m])), 0.001)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Temporal request failure rate above 5%"
+          description: >-
+            More than 5% of Temporal requests are failing over the last
+            5 minutes (current: {{ $value | humanizePercentage }}).
+          runbook: "docs/runbooks/service-down.md"
+
+      - alert: EgaopTemporalNoPollers
+        expr: sum(temporal_num_pollers) == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No Temporal pollers registered"
+          description: >-
+            No workflow/activity pollers have been registered for 10 minutes —
+            task queues are not being drained. Check the temporal-worker
+            deployment.
+          runbook: "docs/runbooks/service-down.md"
+
+      - alert: EgaopTemporalLongRequestFailures
+        expr: sum(rate(temporal_long_request_failure[10m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sustained Temporal long-request failures"
+          description: >-
+            Temporal is recording long-request failures for 5+ minutes
+            ({{ $value | printf "%.2f" }}/s) — often a sign of history service
+            pressure or clock/timeout issues.
+          runbook: "docs/runbooks/service-down.md"
+
+  # Burn-rate SLO alerts (Google SRE Workbook, multi-window).
+  # Inert until OTel http_server_duration_* series exist (OTel collector
+  # pipeline); no expression changes needed when it lands.
+  - name: egaop.slo.rules
+    rules:
+      - alert: EgaopSLOBurnRateHigh
+        expr: |
+          (
+            sum(rate(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[5m])) by (app_kubernetes_io_name)
+            /
+            sum(rate(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[1h])) by (app_kubernetes_io_name)
+          ) > 14.4
+        for: 2m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "SLO burn rate critical: {{ $labels.app_kubernetes_io_name }}"
+          description: >-
+            Component {{ $labels.app_kubernetes_io_name }} is consuming its
+            error budget 14.4x faster than allowed. At this rate the 30-day
+            error budget will be exhausted within ~2 days.
+          runbook: "docs/runbooks/service-down.md"
+
+      - alert: EgaopSLOBurnRateHigh30m
+        expr: |
+          (
+            sum(rate(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[30m])) by (app_kubernetes_io_name)
+            /
+            sum(rate(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[6h])) by (app_kubernetes_io_name)
+          ) > 6
+        for: 5m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "SLO burn rate critical (30m): {{ $labels.app_kubernetes_io_name }}"
+          description: >-
+            Component {{ $labels.app_kubernetes_io_name }} is consuming its
+            error budget 6x faster than allowed over a 30-minute window.
+          runbook: "docs/runbooks/high-error-rate.md"
+
+      - alert: EgaopSLOBurnRateWarning
+        expr: |
+          (
+            sum(rate(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[60m])) by (app_kubernetes_io_name)
+            /
+            sum(rate(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[3d])) by (app_kubernetes_io_name)
+          ) > 3
+        for: 15m
+        labels:
+          severity: warning
+          slo: availability
+        annotations:
+          summary: "SLO burn rate warning (60m): {{ $labels.app_kubernetes_io_name }}"
+          description: >-
+            Component {{ $labels.app_kubernetes_io_name }} is consuming its
+            error budget 3x faster than allowed over a 60-minute window.
+          runbook: "docs/runbooks/high-error-rate.md"
+
+      - alert: EgaopAvailabilityBelowSLO
+        expr: |
+          (
+            1 - (
+              sum(rate(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[5m])) by (app_kubernetes_io_name)
+              /
+              clamp_min(sum(rate(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[5m])) by (app_kubernetes_io_name), 1)
+            )
+          ) < 0.999
+        for: 5m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Availability below 99.9%: {{ $labels.app_kubernetes_io_name }}"
+          description: >-
+            Component {{ $labels.app_kubernetes_io_name }} availability has
+            dropped below the 99.9% SLO target (current:
+            {{ $value | humanizePercentage }}).
+          runbook: "docs/runbooks/service-down.md"
+
+      - alert: EgaopLatencyP95AboveSLO
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_duration_bucket{app_kubernetes_io_part_of="e-gaop"}[5m])) by (le, app_kubernetes_io_name)
+          ) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          slo: latency
+        annotations:
+          summary: "p95 latency above 1s: {{ $labels.app_kubernetes_io_name }}"
+          description: >-
+            Component {{ $labels.app_kubernetes_io_name }} p95 latency has
+            exceeded the 1000ms SLO target (current:
+            {{ $value | printf "%.0f" }}ms).
+          runbook: "docs/runbooks/high-latency-p95.md"
+
+      - alert: EgaopErrorBudgetExhausted
+        expr: |
+          (
+            sum(increase(http_server_duration_count{http_status_code=~"5..",app_kubernetes_io_part_of="e-gaop"}[1h])) by (app_kubernetes_io_name)
+            /
+            clamp_min(sum(increase(http_server_duration_count{app_kubernetes_io_part_of="e-gaop"}[1h])) by (app_kubernetes_io_name), 1)
+          ) > 0.001
+        for: 30m
+        labels:
+          severity: warning
+          slo: availability
+        annotations:
+          summary: "Error budget nearly exhausted: {{ $labels.app_kubernetes_io_name }}"
+          description: >-
+            Component {{ $labels.app_kubernetes_io_name }} has consumed more
+            than 0.1% of its 30-day error budget in the last hour.
+          runbook: "docs/runbooks/high-error-rate.md"

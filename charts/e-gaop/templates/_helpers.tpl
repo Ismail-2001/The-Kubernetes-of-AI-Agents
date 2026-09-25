@@ -159,12 +159,20 @@ readinessProbe:
 {{- end }}
 
 {{/*
-Prometheus scrape annotations
+Prometheus scrape annotations.
+
+Application services do not expose an HTTP /metrics endpoint (telemetry is
+exported over OTLP) and .Values.healthPort serves only health probes —
+advertising it to Prometheus creates permanently-down scrape targets.
+Subcharts that serve /metrics natively (loki, tempo, temporal, pushgateway)
+carry their own annotations. Opt in per-service by defining .Values.metricsPort.
 */}}
 {{- define "e-gaop.prometheusAnnotations" -}}
+{{- if .Values.metricsPort }}
 annotations:
   prometheus.io/scrape: "true"
-  prometheus.io/port: "{{ .Values.healthPort }}"
+  prometheus.io/port: "{{ .Values.metricsPort }}"
+{{- end }}
 {{- end }}
 
 {{/*
