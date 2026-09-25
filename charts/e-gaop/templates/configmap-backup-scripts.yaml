@@ -37,10 +37,15 @@ data:
     DUMP_SIZE=$(stat -c%s "$BACKUP_FILE" 2>/dev/null || stat -f%z "$BACKUP_FILE" 2>/dev/null || echo "unknown")
     echo "$LOG_PREFIX pg_dump complete: $BACKUP_FILE ($DUMP_SIZE bytes)"
 
+    echo "$LOG_PREFIX Verifying dump archive..."
+    pg_restore --list "$BACKUP_FILE" >/dev/null
+    echo "$LOG_PREFIX Dump archive verified (pg_restore --list OK)"
+
     echo "$LOG_PREFIX Compressing backup..."
     gzip -9 "$BACKUP_FILE"
     COMPRESSED_SIZE=$(stat -c%s "$BACKUP_GZ" 2>/dev/null || stat -f%z "$BACKUP_GZ" 2>/dev/null || echo "unknown")
-    echo "$LOG_PREFIX Compressed: $BACKUP_GZ ($COMPRESSED_SIZE bytes)"
+    gzip -t "$BACKUP_GZ"
+    echo "$LOG_PREFIX Compressed: $BACKUP_GZ ($COMPRESSED_SIZE bytes) gzip OK"
 
     {{- if .Values.backup.s3.enabled }}
     echo "$LOG_PREFIX Uploading to S3: s3://{{ .Values.backup.s3.bucket }}/postgres/"

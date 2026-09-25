@@ -9,6 +9,9 @@ metadata:
     app.kubernetes.io/component: backup
 spec:
   schedule: {{ .Values.backup.schedule | quote }}
+  {{- if .Values.backup.timeZone }}
+  timeZone: {{ .Values.backup.timeZone | quote }}
+  {{- end }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -116,6 +119,8 @@ spec:
                   readOnly: true
                 - name: backups
                   mountPath: /backups
+                - name: tmp
+                  mountPath: /tmp
               resources:
                 requests:
                   cpu: {{ .Values.backup.resources.requests.cpu | default "100m" }}
@@ -144,6 +149,8 @@ spec:
               emptyDir:
                 sizeLimit: {{ .Values.backup.persistence.emptyDirSize | default "2Gi" }}
               {{- end }}
+            - name: tmp
+              emptyDir: {}
 ---
 {{- if .Values.backup.persistence.enabled }}
 apiVersion: v1

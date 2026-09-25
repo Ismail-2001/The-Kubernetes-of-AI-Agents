@@ -134,6 +134,7 @@ redis:
 backup:
   enabled: false
   schedule: "0 2 * * *"
+  timeZone: ""
   retentionDays: 7
   s3:
     enabled: false

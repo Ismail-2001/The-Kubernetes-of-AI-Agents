@@ -457,6 +457,7 @@ admin-console:
 backup:
   enabled: true
   schedule: "0 2 * * *"
+  timeZone: "Asia/Karachi"
   retentionDays: 7
   s3:
     enabled: false
