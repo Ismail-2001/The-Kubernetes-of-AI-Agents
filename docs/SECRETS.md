@@ -28,6 +28,16 @@ openssl rand -base64 24   # POSTGRES_PASSWORD
 openssl rand -base64 16   # GRAFANA_PASSWORD
 ```
 
+### GitHub Actions CI secrets
+
+```bash
+node scripts/generate-secrets.mjs           # fresh set -> secrets/github-secrets.env (gitignored)
+node scripts/generate-secrets.mjs --force   # rotate (overwrites existing file)
+```
+
+Paste each `NAME=value` into repo → Settings → Secrets and variables → Actions.
+Manual fill-ins: `OPENAI_API_KEY`, `SLACK_WEBHOOK`, `GCP_*` (see `docs/GCP-SETUP.md`).
+
 ## Where Secrets Are Loaded
 
 | Environment | Source | Notes |
