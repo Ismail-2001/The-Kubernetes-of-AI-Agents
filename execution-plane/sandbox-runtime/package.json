@@ -12,8 +12,8 @@
                 },
     "dependencies":  {
                           "@e-gaop/shared":  "*",
-                          "@grpc/grpc-js":  "^1.14.3",
-                          "@grpc/proto-loader":  "^0.8.0",
+                          "@grpc/grpc-js":  "^1.14.5",
+                          "@grpc/proto-loader":  "^0.8.1",
                           "@kubernetes/client-node": "^1.1.0",
                           "dockerode":  "^5.0.0",
                           "pino":  "^10.3.1",
