@@ -16,7 +16,7 @@ Every agent execution request is evaluated against OPA/Rego policies before proc
 - **Deny**: cross-namespace execution (`namespace: default`, `resourceNamespace: finance`, `callerRole: developer`) → `"Policy denied: Policy denied"`
 - **Allow**: same-namespace execution (`callerRole: namespace_admin`) → passes policy check
 
-Source: `prs/001-fix-opa-bypass.md`, `policy-plane/`
+Source: `docs/prs/001-fix-opa-bypass.md`, `policy-plane/`
 
 ### JWT Authentication (score: 2/2)
 

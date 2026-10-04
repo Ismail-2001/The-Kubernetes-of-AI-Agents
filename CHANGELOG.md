@@ -6,7 +6,7 @@ All notable changes to E-GAOP are documented here. Format follows [Keep a Change
 
 ### Added
 
-- **Production secrets checklist:** `PRODUCTION-SECRETS-CHECKLIST.md` with every secret that must be generated/rotated before deployment, Kubernetes secret creation commands, pre/post-deployment verification steps.
+- **Production secrets checklist:** `docs/PRODUCTION-SECRETS-CHECKLIST.md` with every secret that must be generated/rotated before deployment, Kubernetes secret creation commands, pre/post-deployment verification steps.
 
 ### Security
 

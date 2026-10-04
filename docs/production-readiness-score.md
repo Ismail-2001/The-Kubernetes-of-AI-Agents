@@ -30,7 +30,7 @@
 > - **Security #4 (TLS/mTLS): 0 → 1 (partial).** Prior-round evidence is real but NOT
 >   re-verified live this round (Docker daemon wedged). `packages/shared/src/tls.ts` has
 >   real TLS code (`TLS_ENABLED`, `createSsl`, documented `requestCert:false` workaround);
->   `certs/` has real CA/server/client certs; `prs/005-...` has real post-TLS OPA
+>   `certs/` has real CA/server/client certs; `docs/prs/005-...` has real post-TLS OPA
 >   deny/allow traces (2026-07-11). Upgraded from absent→partial on prior evidence;
 >   full mTLS + rotation still open.
 > - **Reliability #7 (Timeout handling): 1 → 2.** Load test (BK) + workflow-engine logs
@@ -152,7 +152,7 @@ Weighted total = `sum(category_weight × category_pct)`.
 | 1 | OPA policy enforcement | 2 | **Yes** | Verified live: reads real request values, blocks correctly |
 | 2 | JWT authentication | 2 | — | Verified via API with Bearer token |
 | 3 | API authorization (RBAC) | 1 | — | Namespace-level access present; not comprehensively tested |
-| 4 | TLS / mTLS | 1 | **Yes (rev)** | Prior-round real evidence (`tls.ts`, `certs/`, prs/005 traces) but not re-verified live this round (Docker daemon wedged); full mTLS + cert rotation still open |
+| 4 | TLS / mTLS | 1 | **Yes (rev)** | Prior-round real evidence (`tls.ts`, `certs/`, docs/prs/005 traces) but not re-verified live this round (Docker daemon wedged); full mTLS + cert rotation still open |
 | 5 | Sandbox isolation (Docker namespaces) | 2 | — | Standard isolation; containers on internal `egaop-sandbox` network |
 | 6 | Secret management | 1 | — | `.env` file; no vault/HSM |
 | 7 | Input sanitization | 1 | — | Basic; no injection testing |
@@ -405,7 +405,7 @@ Items explicitly not addressed by this engagement:
 3. ~~Concurrent load testing~~ — **RESOLVED.**
 4. **`startTime` dead field** — Now wired to `workflowInfo().startTime.toISOString()`. Marked resolved.
  5. **Kubernetes / Helm validation** — PARTIALLY VERIFIED: `helm install` succeeded (deployed, rev 1) after fixing 11 chart bugs; OPA pod CrashLoopBackOff (root cause undiagnosed; cluster overloaded Docker daemon)
- 6. **TLS/mTLS** — PARTIAL: prior-round real evidence exists (`tls.ts`, `certs/`, prs/005 traces) but not re-verified live this round (Docker daemon wedged); no mTLS, no cert rotation
+ 6. **TLS/mTLS** — PARTIAL: prior-round real evidence exists (`tls.ts`, `certs/`, docs/prs/005 traces) but not re-verified live this round (Docker daemon wedged); no mTLS, no cert rotation
  7. ~~Backup / disaster recovery~~ — **RESOLVED.**
  8. **CI/CD deploy-on-merge** — RE-OPENED (downgraded 2→0): workflows exist but never executed; no run environment available locally
  9. ~~Alerting~~ — **RESOLVED.**

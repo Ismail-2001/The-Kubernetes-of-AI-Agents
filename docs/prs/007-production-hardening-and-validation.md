@@ -31,7 +31,7 @@ The platform had no alerting (outages would go undetected), no backup/restore ca
 - `helm template` ✅ — renders ~180 manifests after fixing 11 chart bugs (CRLF→LF; hyphenated value refs; subchart value-prefix removal; cert-manager CRD guard; ServiceMonitor CRD guard; OTel endpoint; secrets wiring; bitnami `allowInsecureImages`; OPA/otelCollector value-shape; configmap hostnames; ingress nested-quote).
 - `helm install egaop-test charts/e-gaop -n egaop --set ingress.enabled=false` → **STATUS: deployed, REVISION 1** ✅.
 - Real finding: OPA pod CrashLoopBackOff (root cause undiagnosed due to Docker daemon overload).
-- Results in `scripts/helm-validation-bl-results.md` (55 lines, 11 bugs documented).
+- Results in `docs/benchmarks/helm-validation-bl-results.md` (55 lines, 11 bugs documented).
 
 **CI/CD pipeline (added but unverified):**
 - `.github/workflows/ci.yml` — PR checks: lint, typecheck, unit-tests, Docker build with GHA cache.
@@ -50,8 +50,8 @@ The platform had no alerting (outages would go undetected), no backup/restore ca
 
 - **Alerting verified**: `scripts/grafana-init.mjs` — 5 alert rules created. Verification: `secret-store` stopped → `E-GAOP Service Down [active]` appeared in Grafana Alertmanager API within 5 min.
 - **Backup verified**: `scripts/full-backup-test.sh` — 3/3 backup→destroy→restore→verify cycles. Grafana DS="Prometheus" preserved, Redis key `bk:test:val`="hello-world-42", Postgres `bk_verify` count=1 val="backup-test-record-1".
-- **Load test verified**: `scripts/load-test-bk-results.md` — 10/12/15 concurrency table, temporal workflow describe output, `DEADLINE_EXCEEDED` log lines from workflow-engine at `172.19.0.14:50053`.
-- **Helm install verified**: `scripts/helm-validation-bl-results.md` — `helm install` STATUS: deployed, REVISION 1. 11 bug fixes documented with before/after.
+- **Load test verified**: `docs/benchmarks/load-test-bk-results.md` — 10/12/15 concurrency table, temporal workflow describe output, `DEADLINE_EXCEEDED` log lines from workflow-engine at `172.19.0.14:50053`.
+- **Helm install verified**: `docs/benchmarks/helm-validation-bl-results.md` — `helm install` STATUS: deployed, REVISION 1. 11 bug fixes documented with before/after.
 - **CI/CD files exist**: `.github/workflows/ci.yml` (170 lines), `deploy.yml`, `dependabot.yml`. Verified zero run artifacts.
 - **Independent verification**: `docs/production-readiness-final.md` — 7 categories, 53 items, all evidence-traceable. Verification history documented.
 

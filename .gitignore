@@ -80,3 +80,6 @@ debug-pod.yaml
 test-tcp.js
 observability/cm-patch.json
 observability/prometheus-patch.json
+
+# Editor/tool sessions (never commit)
+.opencode/
