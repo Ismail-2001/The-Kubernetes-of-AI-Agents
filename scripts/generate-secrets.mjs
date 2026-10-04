@@ -13,7 +13,7 @@
  *   hex32     -> openssl rand -hex 32      (64 chars,  for JWT / master key / token)
  *   base64    -> openssl rand -base64 N    (passwords)
  * Manual values (you fill these in GitHub UI):
- *   OPENAI_API_KEY, SLACK_WEBHOOK, GCP_* (from docs/GCP-SETUP.md Step 5)
+ *   OPENAI_API_KEY, SLACK_WEBHOOK, AZURE_* (from docs/AZURE-SETUP.md Step 4)
  */
 import { randomBytes } from "node:crypto";
 import { writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -45,10 +45,10 @@ const secrets = [
   ["GRAFANA_PASSWORD", b64(16)],
   ["OPENAI_API_KEY", `${PLACEHOLDER}WITH_YOUR_OPENAI_KEY`],
   ["SLACK_WEBHOOK", `${PLACEHOLDER}WITH_SLACK_WEBHOOK`],
-  // ── GCP Workload Identity Federation (docs/GCP-SETUP.md Step 5) ────────────
-  ["GCP_PROJECT_ID", `${PLACEHOLDER}GCP_PROJECT_ID`],
-  ["GCP_WIF_PROVIDER", `${PLACEHOLDER}GCP_WIF_PROVIDER`],
-  ["GCP_SA_EMAIL", `${PLACEHOLDER}GCP_SA_EMAIL`],
+  // ── Azure OIDC federation (docs/AZURE-SETUP.md Step 4) ─────────────────────
+  ["AZURE_CLIENT_ID", `${PLACEHOLDER}AZURE_CLIENT_ID`],
+  ["AZURE_TENANT_ID", `${PLACEHOLDER}AZURE_TENANT_ID`],
+  ["AZURE_SUBSCRIPTION_ID", `${PLACEHOLDER}AZURE_SUBSCRIPTION_ID`],
 ];
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -69,9 +69,9 @@ console.log("  1. GitHub repo -> Settings -> Secrets and variables -> Actions");
 console.log("     https://github.com/Ismail-2001/The-Kubernetes-of-AI-Agents/settings/secrets/actions");
 console.log("  2. Add each NAME/value as a repository secret (11 total).");
 console.log(`  3. MANUAL values to fill in yourself: ${manual.join(", ")}`);
-console.log("       - OPENAI_API_KEY : https://platform.openai.com/api-keys");
-console.log("       - SLACK_WEBHOOK  : https://api.slack.com/messaging/webhooks (free workspace)");
-console.log("       - GCP_*          : printed by docs/GCP-SETUP.md Step 5 (Cloud Shell)");
+console.log("       - OPENAI_API_KEY      : https://platform.openai.com/api-keys");
+console.log("       - SLACK_WEBHOOK       : https://api.slack.com/messaging/webhooks (free workspace)");
+console.log("       - AZURE_*             : printed by docs/AZURE-SETUP.md Step 4 (Cloud Shell)");
 console.log(`  4. Auto-generated (keep private): ${generated.length} values — do not re-share.`);
 console.log("  5. Environments: create 'staging' (no rules) + 'production' (required reviewer).");
 console.log("");

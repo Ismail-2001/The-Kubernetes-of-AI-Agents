@@ -36,7 +36,7 @@ node scripts/generate-secrets.mjs --force   # rotate (overwrites existing file)
 ```
 
 Paste each `NAME=value` into repo → Settings → Secrets and variables → Actions.
-Manual fill-ins: `OPENAI_API_KEY`, `SLACK_WEBHOOK`, `GCP_*` (see `docs/GCP-SETUP.md`).
+Manual fill-ins: `OPENAI_API_KEY`, `SLACK_WEBHOOK`, `AZURE_*` (see `docs/AZURE-SETUP.md`).
 
 ## Where Secrets Are Loaded
 
@@ -63,6 +63,13 @@ Every service calls `validateSecrets()` from `@e-gaop/shared` before starting:
 ✓ POSTGRES_PASSWORD validated (32 chars)
 ✓ OPENAI_API_KEY validated (51 chars)
 ✓ GRAFANA_PASSWORD validated (22 chars)
+```
+
+### Rotation & verification tooling
+
+```bash
+./scripts/rotate-secrets.sh --dry-run   # preview rotation (JWT / DB / master key / tokens)
+./scripts/verify-secrets.sh             # pre-deploy: presence, length, entropy, DB/Redis connectivity
 ```
 
 ## Key Rotation — `EGAOP_MASTER_ENCRYPTION_KEY`

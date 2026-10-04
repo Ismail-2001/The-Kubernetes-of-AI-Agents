@@ -1,5 +1,9 @@
 # GCP Free-Trial Setup — Phase A ($0, 90-day clock)
 
+> **STATUS: fallback path — active path is `docs/AZURE-SETUP.md` (no credit card).**
+> This doc stays valid if a Visa/Master card becomes available; the plan is
+> cloud-agnostic (only Phase C/D differ). Azure chosen: card-free student route.
+
 > **Goal:** one GCP account + one project + budget guardrails + GitHub OIDC federation,
 > in a single sitting. Everything below runs in **Cloud Shell** (browser terminal —
 > `gcloud` pre-installed, no local install needed).
