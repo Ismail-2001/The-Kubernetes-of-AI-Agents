@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/e-gaop-banner.png" alt="E-GAOP — The Kubernetes of AI Agents" width="100%">
+
 # E-GAOP
 
 ### The Kubernetes of AI Agents
