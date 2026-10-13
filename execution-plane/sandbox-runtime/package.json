@@ -12,12 +12,12 @@
                 },
     "dependencies":  {
                           "@e-gaop/shared":  "*",
-                          "@grpc/grpc-js":  "^1.14.3",
-                          "@grpc/proto-loader":  "^0.8.0",
+                          "@grpc/grpc-js":  "^1.14.6",
+                          "@grpc/proto-loader":  "^0.8.1",
                           "@kubernetes/client-node": "^1.1.0",
                           "dockerode":  "^5.0.0",
-                          "pino":  "^10.3.1",
-                          "pino-pretty":  "^13.0.0",
+                          "pino":  "^10.4.0",
+                          "pino-pretty":  "^13.2.0",
                           "zod":  "^3.23.8"
                       },
     "devDependencies":  {
