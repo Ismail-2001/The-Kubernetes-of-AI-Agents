@@ -8,4 +8,5 @@ data:
   WORKFLOW_ENGINE_HEALTH_PORT: "{{ .Values.healthPort }}"
   TEMPORAL_TASK_QUEUE: {{ .Values.taskQueue | default "egaop-agent-queue" | quote }}
   SANDBOX_ISOLATION_LEVEL: {{ .Values.sandboxIsolationLevel | default "Enhanced" | quote }}
+  POLICY_PLANE_ADDR: "http://{{ .Release.Name }}-policy-plane:15059"
 {{- end }}

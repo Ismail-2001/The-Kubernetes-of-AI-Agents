@@ -1,0 +1,51 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-policy-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: policy-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: e-gaop
+spec:
+  replicas: {{ .Values.replicas | default 2 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-plane
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: policy-plane
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: e-gaop
+{{- include "e-gaop.prometheusAnnotations" . | nindent 8 }}
+    spec:
+{{- include "e-gaop.serviceAccountName" . | nindent 6 }}
+{{- include "e-gaop.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: policy-plane
+{{- include "e-gaop.image" . | nindent 10 }}
+          ports:
+            - containerPort: {{ .Values.grpcPort }}
+              name: grpc
+              protocol: TCP
+            - containerPort: {{ .Values.healthPort }}
+              name: health
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-e-gaop-shared
+            - configMapRef:
+                name: {{ .Release.Name }}-policy-plane
+          env:
+{{- include "e-gaop.commonEnv" (dict "serviceName" "policy-plane" "healthPort" .Values.healthPort) | nindent 12 }}
+{{- include "e-gaop.coreSecrets" . | nindent 12 }}
+{{- include "e-gaop.probes" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- include "e-gaop.containerSecurityContext" . | nindent 10 }}
+{{- include "e-gaop.tlsVolumeMount" . | nindent 10 }}
+{{- include "e-gaop.tlsVolume" (dict "Values" .Values "chartName" "policy-plane") | nindent 6 }}
+{{- end }}

@@ -11,6 +11,7 @@
     (dict "name" "sandbox-runtime"  "port" 50054)
     (dict "name" "memory-plane"     "port" 50055)
     (dict "name" "observability-plane" "port" 50056)
+    (dict "name" "policy-plane"     "port" 50059)
     (dict "name" "admin-console"    "port" 3000)
  -}}
 {{- range $services }}

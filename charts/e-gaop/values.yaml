@@ -374,6 +374,23 @@ observability-plane:
     cpuTarget: 70
     memoryTarget: 80
 
+policy-plane:
+  enabled: true
+  image: egaop/policy-plane
+  tag: latest
+  replicas: 1
+  grpcPort: 50059
+  healthPort: 15059
+  tls:
+    certManager:
+      enabled: false
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    cpuTarget: 70
+    memoryTarget: 80
+
 admin-console:
   enabled: true
   image: egaop/admin-console

@@ -830,6 +830,18 @@ memory-plane:
 observability-plane:
   enabled: false
 
+policy-plane:
+  replicas: 2
+  tls:
+    certManager:
+      enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
 admin-console:
   replicas: 6
   tls:

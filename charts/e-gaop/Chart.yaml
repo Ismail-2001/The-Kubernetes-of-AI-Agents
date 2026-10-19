@@ -50,5 +50,7 @@ dependencies:
     version: "0.1.0"
   - name: observability-plane
     version: "0.1.0"
+  - name: policy-plane
+    version: "0.1.0"
   - name: admin-console
     version: "0.1.0"

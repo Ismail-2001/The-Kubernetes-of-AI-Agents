@@ -138,7 +138,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "e-gaop.fullname" . }}-api-server-to-policy-plane
+  name: {{ include "e-gaop.fullname" . }}-workflow-engine-to-policy-plane
   namespace: {{ .Release.Namespace }}
 spec:
   podSelector:
@@ -151,11 +151,11 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: api-server
+              app.kubernetes.io/name: workflow-engine
               app.kubernetes.io/instance: {{ .Release.Name }}
       ports:
         - protocol: TCP
-          port: 50059
+          port: 15059
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -541,12 +541,12 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "e-gaop.fullname" . }}-api-server-egress-opa
+  name: {{ include "e-gaop.fullname" . }}-policy-plane-egress-opa
   namespace: {{ .Release.Namespace }}
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: api-server
+      app.kubernetes.io/name: policy-plane
       app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes:
     - Egress
@@ -589,28 +589,6 @@ spec:
       ports:
         - protocol: TCP
           port: 6379
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "e-gaop.fullname" . }}-workflow-engine-egress-opa
-  namespace: {{ .Release.Namespace }}
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: workflow-engine
-      app.kubernetes.io/instance: {{ .Release.Name }}
-  policyTypes:
-    - Egress
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: opa
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - protocol: TCP
-          port: 8181
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -845,14 +823,6 @@ spec:
       ports:
         - protocol: TCP
           port: 50056
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: policy-plane
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - protocol: TCP
-          port: 50059
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -915,6 +885,14 @@ spec:
       ports:
         - protocol: TCP
           port: 50056
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: policy-plane
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 15059
 ---
 # ─── OPA ingress ────────────────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1

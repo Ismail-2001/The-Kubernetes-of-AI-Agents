@@ -484,7 +484,7 @@ services:
       LLM_ROUTER_ADDR: llm-router:50053
       MEMORY_PLANE_ADDR: memory-plane:50055
       TOOL_PROXY_ADDR: tool-proxy:50052
-      POLICY_PLANE_ADDR: http://opa:8181
+      POLICY_PLANE_ADDR: http://policy-plane:15059
       WORKFLOW_ENGINE_HEALTH_PORT: "15058"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
@@ -511,6 +511,8 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      policy-plane:
+        condition: service_healthy
     networks:
       - egaop-net
     deploy:
@@ -799,6 +801,53 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - egaop-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  policy-plane:
+    build:
+      context: .
+      dockerfile: policy-plane/Dockerfile
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      POLICY_PLANE_PORT: "50059"
+      POLICY_PLANE_HEALTH_PORT: "15059"
+      OPA_URL: http://opa:8181
+      EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GRAFANA_PASSWORD: ${GRAFANA_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: egaop-policy-plane
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:15059/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - ./certs:/etc/egaop/certs:ro
+    depends_on:
+      opa:
+        condition: service_started
       otel-collector:
         condition: service_started
     networks:

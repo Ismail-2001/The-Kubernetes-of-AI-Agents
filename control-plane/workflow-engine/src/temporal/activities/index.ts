@@ -9,6 +9,8 @@ import { classifyLLMResponse } from "../classification";
 
 const quotaEnforcer = new QuotaEnforcer();
 
+export const DEFAULT_POLICY_PLANE_ADDR = "http://policy-plane:15059";
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -571,7 +573,7 @@ export async function evaluatePolicy(
   params: EvaluatePolicyParams
 ): Promise<PolicyDecision> {
   const policyPlaneAddr =
-    process.env.POLICY_PLANE_ADDR || "http://policy-plane:50059";
+    process.env.POLICY_PLANE_ADDR || DEFAULT_POLICY_PLANE_ADDR;
   const policyPath = "egaop/execution";
   const timeoutMs = parseInt(process.env.OPA_TIMEOUT_MS || "5000", 10);
 

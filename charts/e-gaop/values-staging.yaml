@@ -83,6 +83,9 @@ observability-plane:
       cpu: "2"
       memory: 2Gi
 
+policy-plane:
+  replicas: 2
+
 admin-console:
   replicas: 2
 

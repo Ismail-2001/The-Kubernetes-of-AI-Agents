@@ -1,0 +1,20 @@
+enabled: true
+image: egaop/policy-plane
+tag: latest
+replicas: 2
+grpcPort: 50059
+healthPort: 15059
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+hpa:
+  enabled: false
+serviceMonitor:
+  enabled: false
+tls:
+  certManager:
+    enabled: false

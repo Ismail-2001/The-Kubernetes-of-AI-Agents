@@ -45,6 +45,10 @@ observability-plane:
   tls:
     certManager:
       enabled: true
+policy-plane:
+  tls:
+    certManager:
+      enabled: true
 admin-console:
   tls:
     certManager:
@@ -214,6 +218,17 @@ memory-plane:
 
 # Low-traffic: metrics/traces processing
 observability-plane:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Low-traffic: policy evaluations (cached, fail-closed)
+policy-plane:
   replicas: 2
   resources:
     requests:
