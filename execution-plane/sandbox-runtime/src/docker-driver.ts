@@ -82,13 +82,18 @@ export class DockerSandboxDriver implements SandboxDriver {
     const NanoCpus = spec.cpu ? Math.round(parseFloat(spec.cpu) * 1_000_000_000) : 500_000_000;
     const memoryBytes = spec.memory ? parseInt(spec.memory) * 1024 * 1024 : 512 * 1024 * 1024;
 
-    const HostConfig: Docker.ContainerCreateOptions["HostConfig"] & { Runtime?: string; SecurityOpt?: string[] } = {
+    const HostConfig: Docker.ContainerCreateOptions["HostConfig"] & { Runtime?: string; SecurityOpt?: string[]; Tmpfs?: Record<string, string> } = {
       Memory: memoryBytes,
       NanoCpus,
       NetworkMode: "egaop-sandbox",
       SecurityOpt: ["no-new-privileges"],
       CapDrop: ["ALL"],
-      ReadonlyRootfs: false,
+      // P1-5: read-only rootfs; agent scratch space is tmpfs only.
+      ReadonlyRootfs: true,
+      Tmpfs: {
+        "/tmp": "rw,noexec,nosuid,size=256m,mode=1777",
+        "/workspace": "rw,nosuid,size=256m,mode=1777",
+      },
     };
 
     if (this.seccompProfile) {
@@ -112,7 +117,8 @@ export class DockerSandboxDriver implements SandboxDriver {
       container = await this.docker.createContainer({
         Image: containerImage,
         name: `egaop-agent-${spec.executionId}`,
-        Cmd: ["node", "/workspace/server.js"],
+        // P1-5: server.js lives outside /workspace so /workspace can be tmpfs.
+        Cmd: ["node", "/opt/egaop/server.js"],
         Env: Object.entries(spec.envVars ?? {}).map(([k, v]) => `${k}=${v}`),
         HostConfig,
         Labels: {

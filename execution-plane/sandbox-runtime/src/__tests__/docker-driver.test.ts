@@ -86,6 +86,25 @@ describe("DockerSandboxDriver", () => {
       expect(opts.Env).toContain("FOO=bar");
     });
 
+    it("should use a read-only rootfs with tmpfs scratch + workspace (P1-5)", async () => {
+      await driver.createSandbox({
+        executionId: "exec-ro",
+        agentId: "agent-1",
+        namespace: "egaop",
+        image: "egaop-base-runtime:latest",
+        isolationLevel: "Standard",
+      });
+
+      const opts = mockDocker.createContainer.mock.calls[0][0];
+      expect(opts.HostConfig.ReadonlyRootfs).toBe(true);
+      expect(opts.HostConfig.Tmpfs["/tmp"]).toMatch(/noexec/);
+      expect(opts.HostConfig.Tmpfs["/tmp"]).toMatch(/nosuid/);
+      expect(opts.HostConfig.Tmpfs["/tmp"]).toMatch(/mode=1777/);
+      expect(opts.HostConfig.Tmpfs["/workspace"]).toMatch(/nosuid/);
+      expect(opts.HostConfig.Tmpfs["/workspace"]).toMatch(/mode=1777/);
+      expect(opts.Cmd).toEqual(["node", "/opt/egaop/server.js"]);
+    });
+
     it("should set gVisor runtime for Enhanced isolation", async () => {
       await driver.createSandbox({
         executionId: "exec-2",

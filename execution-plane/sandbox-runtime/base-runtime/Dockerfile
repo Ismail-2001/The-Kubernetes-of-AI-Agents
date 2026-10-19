@@ -25,9 +25,10 @@ RUN mkdir -p /workspace && chown agent:agent /workspace
 # Create /tmp for scratch space
 RUN chmod 1777 /tmp
 
-# Persistent HTTP shell server — keeps the container alive and accepts /exec commands
-COPY server.js /workspace/server.js
-RUN chown agent:agent /workspace/server.js
+# Persistent HTTP shell server — keeps the container alive and accepts /exec commands.
+# P1-5: lives at /opt/egaop so /workspace can be a writable tmpfs over a read-only rootfs.
+RUN mkdir -p /opt/egaop
+COPY server.js /opt/egaop/server.js
 
 USER agent
 WORKDIR /workspace
@@ -37,8 +38,8 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "console.log('ok')" && python3 -c "print('ok')"
 
 LABEL org.opencontainers.image.title="egaop-base-runtime"
-LABEL org.opencontainers.image.description="Minimal sandbox runtime for E-GAOP agent execution"
+LABEL org.opencontainers.image.description="Minimal sandbox runtime for E-GAOP agent workloads"
 LABEL org.opencontainers.image.vendor="E-GAOP"
 
 # Persistent HTTP shell server — keeps container alive, accepts /exec POST commands
-CMD ["node", "/workspace/server.js"]
+CMD ["node", "/opt/egaop/server.js"]
