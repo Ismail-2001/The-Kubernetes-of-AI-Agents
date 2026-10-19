@@ -6,12 +6,11 @@ if (process.env.NODE_ENV !== "test") {
   validateSecrets();
 }
 
-import path from "path";
 import http from "http";
 import * as grpc from "@grpc/grpc-js";
-import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import { PolicyPlaneService } from "./service";
+import { createPolicyHttpHandler } from "./http-api";
 import { getServerCredentials } from "@e-gaop/shared";
 
 const OPA_URL = process.env.OPA_URL || "http://localhost:8181";
@@ -55,64 +54,9 @@ const logger = pino({
   } : {}),
 });
 
-const PROTO_PATH = path.resolve(
-  __dirname,
-  "../../../api/proto/egaop/v1/execution.proto"
-);
-
-const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
-  keepCase: true,
-  longs: String,
-  enums: String,
-  defaults: true,
-  oneofs: true,
-  includeDirs: [path.resolve(__dirname, "../../../api/proto")],
-});
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const egaopProto = grpc.loadPackageDefinition(packageDefinition) as any;
-const observabilityService = egaopProto["egaop"]?.["v1"]?.["ObservabilityService"];
-
 const server = new grpc.Server({
   interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor(), createTraceServerInterceptor()],
 });
-
-if (observabilityService?.service) {
-  server.addService(observabilityService.service, {
-    ExportTrace: (
-      call: grpc.ServerUnaryCall<unknown, unknown>,
-      callback: grpc.sendUnaryData<unknown>
-    ) => {
-      const request = call.request as Record<string, unknown>;
-      logger.info(
-        { span: request["span_id"], name: request["name"] },
-        "Recording execution trace"
-      );
-      callback(null, {
-        success: true,
-        span_id: request["span_id"],
-        timestamp: { seconds: Math.floor(Date.now() / 1000) },
-      });
-    },
-
-    GetExecutionReplay: (
-      call: grpc.ServerUnaryCall<unknown, unknown>,
-      callback: grpc.sendUnaryData<unknown>
-    ) => {
-      const request = call.request as Record<string, unknown>;
-      logger.info(
-        { executionId: request["execution_id"] },
-        "Retrieving execution replay"
-      );
-      callback(null, {
-        execution_id: request["execution_id"],
-        spans: [],
-        total_cost: "$0.00",
-        status: "NOT_FOUND",
-      });
-    },
-  });
-}
 
 server.addService(HEALTH_SERVICE, {
   check: (_call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) => {
@@ -148,36 +92,15 @@ if (process.env.NODE_ENV !== "test") {
     }
   );
 
-  const healthServer = http.createServer((req, res) => {
-    if (req.url === "/healthz" || req.url === "/readyz") {
-      const service = PolicyPlaneService.getInstance();
-      const stats = service.getStats();
-      const status =
-        stats.circuitState === "OPEN" ? "NOT_SERVING" : "SERVING";
-      const code = stats.circuitState === "OPEN" ? 503 : 200;
-      res.writeHead(code, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status,
-          service: "policy-plane",
-          circuit_breaker: stats.circuitState,
-          cache_size: stats.cacheSize,
-          timestamp: new Date().toISOString(),
-        })
-      );
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-  healthServer.listen(HEALTH_PORT, "0.0.0.0", () => {
-    logger.info(`Health endpoint listening on port ${HEALTH_PORT}`);
+  const policyHttpServer = http.createServer(createPolicyHttpHandler());
+  policyHttpServer.listen(HEALTH_PORT, "0.0.0.0", () => {
+    logger.info(`Policy HTTP API + health endpoints listening on port ${HEALTH_PORT}`);
   });
 
   const shutdown = async () => {
     logger.info("Shutting down Policy Plane...");
     server.tryShutdown(async () => {
-      healthServer.close();
+      policyHttpServer.close();
       await shutdownTracing();
       logger.info("Policy Plane shut down");
       process.exit(0);

@@ -1,3 +1,9 @@
+// Optional gRPC interceptor library for wrapping any gRPC server with
+// policy checks. NOT mounted by policy-plane's own servers — production
+// policy enforcement happens via workflow-engine's evaluatePolicy activity
+// calling the HTTP /v1/data API (see src/http-api.ts). Kept as a tested
+// opt-in building block, not a live enforcement path.
+
 import crypto from "crypto";
 import * as grpc from "@grpc/grpc-js";
 import { PolicyPlaneService, type PolicyInput, type PolicyDecision } from "./service";
