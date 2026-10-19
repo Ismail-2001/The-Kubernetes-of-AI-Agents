@@ -1,21 +1,9 @@
 import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, SLOTracker, DEFAULT_SLO_DEFINITIONS, toProblemDetails, buildHealthResponse, healthToHttpStatus, checkPostgres } from "@e-gaop/shared";
+import { installProcessGuards } from "./process-guards";
 
-process.on("uncaughtException", (err: Error & { code?: string }) => {
-  if (err.code === "ERR_STREAM_WRITE_AFTER_END" || err.message?.includes("write after end")) {
-    process.stderr.write(JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: "warn",
-      message: `Suppressed ${err.code}: ${err.message}`,
-    }) + "\n");
-    return;
-  }
-  process.stderr.write(JSON.stringify({
-    timestamp: new Date().toISOString(),
-    level: "error",
-    message: `Uncaught exception: ${err.message}`,
-    stack: err.stack,
-  }) + "\n");
-});
+// P1-3: single fail-closed crash guard (suppress only benign
+// write-after-end / headers-sent errors, exit(1) on everything else).
+installProcessGuards();
 
 initTracing("api-server");
 loadSecretsIntoEnv();
@@ -135,29 +123,10 @@ server.addService(HEALTH_SERVICE, {
   }
 });
 
-// ── Suppress Fastify v5 ERR_HTTP_HEADERS_SENT crashes ────────────────────
-// This error occurs when res.writeHead() is called twice in the Fastify
-// lifecycle. It is harmless (the first response was already sent) but
-// crashes the process. We suppress it at every possible level.
-function isHeadersSentError(err: unknown): boolean {
-  if (err instanceof Error) {
-    if ((err as NodeJS.ErrnoException).code === "ERR_HTTP_HEADERS_SENT") return true;
-    if (err.message.includes("ERR_HTTP_HEADERS_SENT")) return true;
-    if (err.message.includes("headers have already been sent")) return true;
-  }
-  return false;
-}
-process.on("uncaughtException", (err) => {
-  if (isHeadersSentError(err)) return;
-  // eslint-disable-next-line no-console
-  console.error("[FATAL] Uncaught exception:", err);
-  process.exit(1);
-});
-process.on("unhandledRejection", (reason) => {
-  if (isHeadersSentError(reason)) return;
-  // eslint-disable-next-line no-console
-  console.error("[ERROR] Unhandled rejection:", reason);
-});
+// ── Process crash guards ──────────────────────────────────────────────────────
+// P1-3: previously two contradictory uncaughtException listeners lived here
+// (one never exited, the other exited anyway) plus a duplicate unhandledRejection
+// logger. Now consolidated in process-guards.ts and installed at import time.
 
 // ── REST API (BFF for frontend) ──────────────────────────────────────────────
 
