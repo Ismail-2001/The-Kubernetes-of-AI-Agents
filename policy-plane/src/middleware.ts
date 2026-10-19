@@ -70,17 +70,17 @@ function verifyHS256JWT(
   try {
     const payload = JSON.parse(base64UrlDecode(payloadB64).toString("utf8"));
 
-    // Validate expiration (exp)
-    if (typeof payload.exp === "number") {
-      const nowSec = Math.floor(Date.now() / 1000);
-      if (nowSec > payload.exp) {
-        return { valid: false, payload: null, error: "Token expired" };
-      }
+    // P1-4: exp is mandatory — reject non-expiring tokens.
+    if (typeof payload.exp !== "number") {
+      return { valid: false, payload: null, error: "Token missing expiration" };
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (nowSec > payload.exp) {
+      return { valid: false, payload: null, error: "Token expired" };
     }
 
     // Validate not-before (nbf)
     if (typeof payload.nbf === "number") {
-      const nowSec = Math.floor(Date.now() / 1000);
       if (nowSec < payload.nbf) {
         return { valid: false, payload: null, error: "Token not yet valid" };
       }
@@ -152,11 +152,16 @@ function extractClaims(
     return (result.payload ?? {}) as AgentClaims;
   }
 
-  try {
-    return JSON.parse(claimsStr) as AgentClaims;
-  } catch {
-    return {};
-  }
+  // P1-4: fail closed — without a secret, claims cannot be verified and
+  // must never be trusted (previously raw JSON was parsed and accepted).
+  process.stderr.write(
+    JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "warn",
+      message: "JWT verification skipped: no secret configured — rejecting claims",
+    }) + "\n"
+  );
+  return {};
 }
 
 // ─── Helper: Create ServiceError ──────────────────────────────────────────

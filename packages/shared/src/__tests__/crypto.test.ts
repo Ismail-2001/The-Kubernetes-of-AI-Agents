@@ -203,5 +203,30 @@ describe("Crypto Module", () => {
       const token = signJWT(claims, "secret", -10);
       expect(verifyJWT(token, "secret")).toBeNull();
     });
+
+    // ── P1-4: verification contract hardening ──
+    const b64url = (obj: object) => Buffer.from(JSON.stringify(obj)).toString("base64url");
+    const craftJWT = (header: object, payload: object, secret: string): string => {
+      const h = b64url(header);
+      const p = b64url(payload);
+      const sig = crypto.createHmac("sha256", secret).update(`${h}.${p}`).digest("base64url");
+      return `${h}.${p}.${sig}`;
+    };
+
+    it("should reject a token whose header claims a non-HS256 algorithm (P1-4)", () => {
+      // Valid HMAC signature but header says RS256 — header must be enforced.
+      const token = craftJWT({ alg: "RS256", typ: "JWT" }, { sub: "user-1", exp: Math.floor(Date.now() / 1000) + 600 }, "secret");
+      expect(verifyJWT(token, "secret")).toBeNull();
+    });
+
+    it("should reject a validly-signed token without exp (non-expiring token, P1-4)", () => {
+      const token = craftJWT({ alg: "HS256", typ: "JWT" }, { sub: "user-1" }, "secret");
+      expect(verifyJWT(token, "secret")).toBeNull();
+    });
+
+    it("should reject a token with a non-numeric exp (P1-4)", () => {
+      const token = craftJWT({ alg: "HS256", typ: "JWT" }, { sub: "user-1", exp: "never" }, "secret");
+      expect(verifyJWT(token, "secret")).toBeNull();
+    });
   });
 });

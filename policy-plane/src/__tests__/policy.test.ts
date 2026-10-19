@@ -1,4 +1,4 @@
-import nock from "nock";
+﻿import nock from "nock";
 import crypto from "crypto";
 import {
   PolicyPlaneService,
@@ -150,7 +150,7 @@ describe("PolicyPlaneService", () => {
     });
 
     it("must not reuse a cached decision across inputs differing only in nested values (P0-2)", async () => {
-      // Same top-level shape, same action/namespace/agentId — only subject.clearance differs.
+      // Same top-level shape, same action/namespace/agentId â€” only subject.clearance differs.
       // With the old array-replacer hash both inputs collided on one cache key, so a
       // low-clearance subject could be served the cached allow of a high-clearance one.
       const scope = nock(OPA_HOST)
@@ -458,10 +458,11 @@ describe("verifyHS256JWT", () => {
   }
 
   it("should verify a valid JWT", () => {
-    const token = createJWT({ sub: "agent-1", clearance: 3 });
+    const token = createJWT({ sub: "agent-1", clearance: 3, exp: Math.floor(Date.now() / 1000) + 600 });
     const result = verifyHS256JWT(token, secret);
     expect(result.valid).toBe(true);
-    expect(result.payload).toEqual({ sub: "agent-1", clearance: 3 });
+    expect(result.payload).toMatchObject({ sub: "agent-1", clearance: 3 });
+    expect(typeof result.payload?.exp).toBe("number");
   });
 
   it("should reject an invalid signature", () => {

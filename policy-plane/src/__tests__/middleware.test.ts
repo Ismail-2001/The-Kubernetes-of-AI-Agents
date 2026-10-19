@@ -1,4 +1,4 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
 import * as grpc from "@grpc/grpc-js";
 import { PolicyPlaneService } from "../service";
 import {
@@ -72,12 +72,19 @@ describe("verifyHS256JWT", () => {
 
   it("should reject token that is not yet valid", () => {
     const token = createJWT(
-      { sub: "agent-1", nbf: Math.floor(Date.now() / 1000) + 60 },
+      { sub: "agent-1", nbf: Math.floor(Date.now() / 1000) + 60, exp: Math.floor(Date.now() / 1000) + 600 },
       "secret"
     );
     const result = verifyHS256JWT(token, "secret");
     expect(result.valid).toBe(false);
     expect(result.error).toBe("Token not yet valid");
+  });
+
+  it("should reject token without exp (P1-4: non-expiring tokens)", () => {
+    const token = createJWT({ sub: "agent-1" }, "secret");
+    const result = verifyHS256JWT(token, "secret");
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe("Token missing expiration");
   });
 
   it("should reject token with invalid payload", () => {
@@ -118,19 +125,24 @@ describe("extractClaims", () => {
   });
 
   it("should parse JSON string claims", () => {
-    const call = makeCall({ claims: JSON.stringify({ sub: "agent-1", clearance: 3 }) });
-    expect(extractClaims(call)).toEqual({ sub: "agent-1", clearance: 3 });
+    const call = makeCall({ claims: createJWT({ sub: "agent-1", clearance: 3, exp: Math.floor(Date.now() / 1000) + 600 }, "sec") });
+    expect(extractClaims(call, "sec")).toEqual({ sub: "agent-1", clearance: 3, exp: expect.any(Number) });
   });
 
   it("should parse Buffer claims", () => {
     const metadata = {
-      get: jest.fn(() => [Buffer.from(JSON.stringify({ sub: "agent-2" }))]),
+      get: jest.fn(() => [Buffer.from(createJWT({ sub: "agent-2", exp: Math.floor(Date.now() / 1000) + 600 }, "sec"))]),
     };
     const call = {
       ...makeCall(),
       metadata,
     } as unknown as grpc.ServerUnaryCall<unknown, unknown>;
-    expect(extractClaims(call)).toEqual({ sub: "agent-2" });
+    expect(extractClaims(call, "sec")).toEqual({ sub: "agent-2", exp: expect.any(Number) });
+  });
+
+  it("should reject raw JSON claims when no JWT secret is configured (P1-4 fail-closed)", () => {
+    const call = makeCall({ claims: JSON.stringify({ sub: "attacker", role: "admin" }) });
+    expect(extractClaims(call)).toEqual({});
   });
 
   it("should return empty claims for invalid JSON", () => {
@@ -139,8 +151,8 @@ describe("extractClaims", () => {
   });
 
   it("should verify JWT claims when jwtSecret is provided", () => {
-    const call = makeCall({ claims: createJWT({ sub: "agent-1", clearance: 3 }, "sec") });
-    expect(extractClaims(call, "sec")).toEqual({ sub: "agent-1", clearance: 3 });
+    const call = makeCall({ claims: createJWT({ sub: "agent-1", clearance: 3, exp: Math.floor(Date.now() / 1000) + 600 }, "sec") });
+    expect(extractClaims(call, "sec")).toEqual({ sub: "agent-1", clearance: 3, exp: expect.any(Number) });
   });
 
   it("should return empty claims and warn when JWT verification fails", () => {
@@ -228,7 +240,7 @@ describe("createPolicyInterceptor", () => {
     } as unknown as PolicyPlaneService);
 
     const claims = createJWT(
-      { agentId: "agent-9", namespace: "tenant-b", clearance: 5 },
+      { agentId: "agent-9", namespace: "tenant-b", clearance: 5, exp: Math.floor(Date.now() / 1000) + 600 },
       "opt-secret"
     );
     const interceptor = createPolicyInterceptor({

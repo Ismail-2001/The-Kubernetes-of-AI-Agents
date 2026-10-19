@@ -196,13 +196,29 @@ export function verifyJWT(token: string, primarySecret: string, oldSecret?: stri
   const signature = parts[2] ?? "";
   const data = `${header}.${payload}`;
 
+  // P1-4: enforce the header contract — only HS256 tokens are accepted.
+  let parsedHeader: { alg?: unknown };
+  try {
+    parsedHeader = JSON.parse(base64urlDecode(header).toString("utf8")) as { alg?: unknown };
+  } catch {
+    return null;
+  }
+  if (parsedHeader.alg !== "HS256") return null;
+
   const verifyWith = (secret: string): JWTClaims | null => {
     const expectedSig = crypto.createHmac("sha256", secret).update(data).digest();
     const actualSig = base64urlDecode(signature);
     if (expectedSig.length !== actualSig.length) return null;
     if (!timingSafeEqual(expectedSig, actualSig)) return null;
 
-    const claims = JSON.parse(base64urlDecode(payload).toString("utf8")) as JWTClaims;
+    let claims: JWTClaims;
+    try {
+      claims = JSON.parse(base64urlDecode(payload).toString("utf8")) as JWTClaims;
+    } catch {
+      return null;
+    }
+    // P1-4: exp must exist and be a number — no non-expiring tokens.
+    if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp)) return null;
     const now = Math.floor(Date.now() / 1000);
     if (claims.exp < now) return null;
     return claims;

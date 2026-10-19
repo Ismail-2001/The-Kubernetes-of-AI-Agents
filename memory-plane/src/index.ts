@@ -8,7 +8,6 @@ if (process.env.NODE_ENV !== "test") {
 
 import path from "path";
 import http from "http";
-import crypto from "crypto";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
@@ -17,15 +16,7 @@ import { Pool } from "pg";
 import { getServerCredentials } from "@e-gaop/shared";
 import { MemoryPlaneRepository } from "./repository";
 import { MemoryWriteQueue } from "./write-queue";
-
-function verifyServiceToken(req: http.IncomingMessage): boolean {
-  const expectedToken = process.env.INTERNAL_SERVICE_TOKEN ?? "";
-  if (!expectedToken) return true;
-  const provided = (req.headers["x-service-token"] as string) ?? "";
-  const a = Buffer.from(expectedToken);
-  const b = Buffer.from(provided);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
+import { verifyServiceToken } from "./service-token";
 
 const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
