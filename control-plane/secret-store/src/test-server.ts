@@ -4,6 +4,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { createNamespaceServerInterceptor, encrypt, decrypt, extractNamespace, type EncryptedPayload } from "@e-gaop/shared";
 import { SecretRepository } from "./repository";
+import { upgradeLegacyRow } from "./migration";
 
 export const HEALTH_SERVICE: grpc.ServiceDefinition = {
   check: {
@@ -89,7 +90,20 @@ export async function createServerBundle(config: {
           return callback({ code: grpc.status.NOT_FOUND, message: `Secret ${namespace}/${name} not found` });
         }
         const payload: EncryptedPayload = JSON.parse(row.encryptedData);
-        const decryptedData = JSON.parse(await decrypt(payload, config.masterKey));
+        const plaintext = await decrypt(payload, config.masterKey);
+        try {
+          await upgradeLegacyRow({
+            repo: config.repo,
+            namespace,
+            name,
+            rowType: row.type,
+            payload,
+            plaintext,
+            masterKey: config.masterKey,
+            keyId: "v1",
+          });
+        } catch { /* lazy re-encryption is best-effort; the read already succeeded */ }
+        const decryptedData = JSON.parse(plaintext);
         callback(null, {
           metadata: { name, namespace },
           spec: { type: row.type, data: decryptedData }

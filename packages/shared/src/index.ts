@@ -13,6 +13,7 @@ export {
   signJWT,
   verifyJWT,
   reencryptWithNewKey,
+  isLegacyPayload,
   type EncryptedPayload,
   type EncryptedPayloadV2,
   type JWTClaims,

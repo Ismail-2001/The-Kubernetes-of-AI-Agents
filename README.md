@@ -116,7 +116,7 @@ flowchart TB
     subgraph CP["CONTROL PLANE"]
         API["API Server<br/>REST + gRPC + WebSocket<br/>JWT · Rate Limit · OpenAPI"]
         WF["Workflow Engine<br/>Temporal Workers<br/>ReAct · DLQ · HITL"]
-        SEC["Secret Store<br/>AES-256-GCM at Rest<br/>scrypt + Argon2id"]
+        SEC["Secret Store<br/>AES-256-GCM at Rest<br/>scrypt KDF"]
     end
 
     subgraph EP["EXECUTION PLANE"]

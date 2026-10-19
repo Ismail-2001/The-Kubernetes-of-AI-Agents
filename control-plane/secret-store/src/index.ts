@@ -13,6 +13,7 @@ import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
 import { getServerCredentials, encrypt, decrypt, extractNamespace, type EncryptedPayload } from "@e-gaop/shared";
 import { SecretRepository } from "./repository";
+import { upgradeLegacyRow } from "./migration";
 
 const SERVICE_VERSION = process.env.SERVICE_VERSION || "1.0.0";
 const healthStartTime = new Date();
@@ -78,7 +79,11 @@ server.addService(secretService.service, {
     const key = `${namespace}/${name}`;
     logger.info({ key, type }, "Encrypting and storing secret to PostgreSQL");
     try {
-      const encryptedPayload = await encrypt(JSON.stringify(data), MASTER_KEY);
+      const encryptedPayload = await encrypt(
+        JSON.stringify(data),
+        MASTER_KEY,
+        process.env.EGAOP_MASTER_KEY_ID || "v1"
+      );
       await repo.upsert({
         namespace,
         name,
@@ -161,7 +166,25 @@ server.addService(secretService.service, {
         return callback({ code: grpc.status.NOT_FOUND, message: `Secret ${key} not found` });
       }
       const payload: EncryptedPayload = JSON.parse(row.encryptedData);
-      const decryptedData = JSON.parse(await decrypt(payload, MASTER_KEY));
+      const plaintext = await decrypt(payload, MASTER_KEY);
+      try {
+        const { upgraded } = await upgradeLegacyRow({
+          repo,
+          namespace,
+          name,
+          rowType: row.type,
+          payload,
+          plaintext,
+          masterKey: MASTER_KEY,
+          keyId: process.env.EGAOP_MASTER_KEY_ID || "v1",
+        });
+        if (upgraded) {
+          logger.info({ key }, "Legacy secret payload re-encrypted with non-embedded keyId");
+        }
+      } catch (migErr: unknown) {
+        logger.warn({ key, err: migErr instanceof Error ? migErr.message : String(migErr) }, "Lazy re-encryption failed (read still served)");
+      }
+      const decryptedData = JSON.parse(plaintext);
 
       try {
         createAuditEntry(

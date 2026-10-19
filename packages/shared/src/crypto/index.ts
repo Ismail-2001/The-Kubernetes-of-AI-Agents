@@ -12,10 +12,13 @@ export interface EncryptedPayloadV2 {
   version: 2;
   algorithm: "aes-256-gcm";
   kdf: {
-    name: "argon2id";
-    memoryCost: number;
-    timeCost: number;
-    parallelism: number;
+    name: "scrypt" | "argon2id";
+    cost?: number;
+    blockSize?: number;
+    parallelization?: number;
+    memoryCost?: number;
+    timeCost?: number;
+    parallelism?: number;
   };
   salt: string;
   iv: string;
@@ -32,26 +35,33 @@ const IV_LENGTH = 12;
 const SALT_LENGTH = 16;
 const KEY_LENGTH = 32;
 
-const ARGON2_MEMORY_COST = 65536;
-const ARGON2_TIME_COST = 3;
-const ARGON2_PARALLELISM = 4;
+const SCRYPT_COST = 16384;
+const SCRYPT_BLOCK_SIZE = 8;
+const SCRYPT_PARALLELIZATION = 1;
+const SCRYPT_KEY_LENGTH = 64;
+const SCRYPT_SALT_LENGTH = 32;
+const DEFAULT_KEY_ID = "v1";
 
 export function generateNonce(): Buffer {
   return crypto.randomBytes(IV_LENGTH);
 }
 
-function deriveKeyV2(keyId: string, salt: Buffer): Buffer {
-  return scryptSync(keyId, salt, KEY_LENGTH, {
-    cost: 16384,
-    blockSize: 8,
-    parallelization: 1,
+function deriveKey(keyMaterial: string, salt: Buffer): Buffer {
+  return scryptSync(keyMaterial, salt, KEY_LENGTH, {
+    cost: SCRYPT_COST,
+    blockSize: SCRYPT_BLOCK_SIZE,
+    parallelization: SCRYPT_PARALLELIZATION,
     maxmem: 64 * 1024 * 1024,
   });
 }
 
-export async function encrypt(plaintext: string, keyId: string): Promise<EncryptedPayload> {
+export async function encrypt(
+  plaintext: string,
+  keyMaterial: string,
+  keyId: string = DEFAULT_KEY_ID
+): Promise<EncryptedPayload> {
   const salt = crypto.randomBytes(SALT_LENGTH);
-  const key = deriveKeyV2(keyId, salt);
+  const key = deriveKey(keyMaterial, salt);
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
   const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
@@ -61,10 +71,10 @@ export async function encrypt(plaintext: string, keyId: string): Promise<Encrypt
     version: 2,
     algorithm: "aes-256-gcm",
     kdf: {
-      name: "argon2id",
-      memoryCost: ARGON2_MEMORY_COST,
-      timeCost: ARGON2_TIME_COST,
-      parallelism: ARGON2_PARALLELISM,
+      name: "scrypt",
+      cost: SCRYPT_COST,
+      blockSize: SCRYPT_BLOCK_SIZE,
+      parallelization: SCRYPT_PARALLELIZATION,
     },
     salt: salt.toString("base64"),
     iv: iv.toString("base64"),
@@ -75,32 +85,35 @@ export async function encrypt(plaintext: string, keyId: string): Promise<Encrypt
   };
 }
 
-export async function decrypt(payload: EncryptedPayloadV2, keyId: string): Promise<string> {
+export async function decrypt(payload: EncryptedPayloadV2, keyMaterial: string): Promise<string> {
   const salt = Buffer.from(payload.salt, "base64");
   const iv = Buffer.from(payload.iv, "base64");
   const tag = Buffer.from(payload.tag, "base64");
   const ciphertext = Buffer.from(payload.ciphertext, "base64");
-  const key = deriveKeyV2(keyId, salt);
+  const key = deriveKey(keyMaterial, salt);
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
-  return decipher.update(ciphertext) + decipher.final("utf8");
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }
 
-export async function reencryptWithNewKey(oldPayload: EncryptedPayload, oldKeyId: string, newKeyId: string): Promise<EncryptedPayload> {
-  const plaintext = await decrypt(oldPayload, oldKeyId);
-  return encrypt(plaintext, newKeyId);
+export function isLegacyPayload(payload: EncryptedPayload, keyMaterial: string): boolean {
+  return payload.kdf?.name === "argon2id" || payload.keyId === keyMaterial;
+}
+
+export async function reencryptWithNewKey(
+  oldPayload: EncryptedPayload,
+  oldKeyMaterial: string,
+  newKeyMaterial: string,
+  newKeyId: string = DEFAULT_KEY_ID
+): Promise<EncryptedPayload> {
+  const plaintext = await decrypt(oldPayload, oldKeyMaterial);
+  return encrypt(plaintext, newKeyMaterial, newKeyId);
 }
 
 export function hashForCache(input: object): string {
   const canonical = JSON.stringify(input, Object.keys(input).sort());
   return crypto.createHash("sha256").update(canonical).digest("hex");
 }
-
-const SCRYPT_COST = 16384;
-const SCRYPT_BLOCK_SIZE = 8;
-const SCRYPT_PARALLELIZATION = 1;
-const SCRYPT_KEY_LENGTH = 64;
-const SCRYPT_SALT_LENGTH = 32;
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(SCRYPT_SALT_LENGTH);

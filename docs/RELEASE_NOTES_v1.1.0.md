@@ -5,7 +5,7 @@
 ### What's New in v1.1.0
 
 #### Security (Penetration Test Remediation)
-- Removed V1 weak encryption fallback — only V2 (scrypt + Argon2id + AES-256-GCM) remains
+- Removed V1 weak encryption fallback — only V2 (scrypt + AES-256-GCM) remains
 - Blocked `code_interpreter` host execution — must route through K8s sandbox runtime
 - Added JWT authentication to all WebSocket endpoints (`/api/ws/executions/:id`, `/api/ws/events`)
 - Pinned all 14 Docker images to specific versions (zero `:latest` tags)

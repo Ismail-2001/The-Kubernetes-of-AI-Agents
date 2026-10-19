@@ -3,6 +3,7 @@ jest.mock("pg", () => {
   return { Pool: jest.fn(() => mPool) };
 });
 
+import crypto from "crypto";
 import http from "http";
 import path from "path";
 import * as grpc from "@grpc/grpc-js";
@@ -149,6 +150,25 @@ describe("Secret Store — gRPC integration", () => {
       });
     });
 
+    it("should NOT persist the master key inside the encrypted payload (P0-1)", (done) => {
+      if (!bundle) return done();
+      client.CreateSecret({
+        name: "no-leak-secret",
+        namespace: "default",
+        data: { key: "sk-super-secret" },
+        type: "api_key"
+      }, async (err: any, _response: any) => {
+        expect(err).toBeNull();
+        const stored = await bundle!.repo.get("default", "no-leak-secret");
+        expect(stored).not.toBeNull();
+        expect(stored!.encryptedData).not.toContain(MASTER_KEY);
+        const payload = JSON.parse(stored!.encryptedData);
+        expect(payload.kdf.name).toBe("scrypt");
+        expect(payload.keyId).not.toBe(MASTER_KEY);
+        done();
+      });
+    });
+
     it("should default to api_key type when type is omitted", (done) => {
       if (!bundle) return done();
       client.CreateSecret({
@@ -212,6 +232,53 @@ describe("Secret Store — gRPC integration", () => {
           expect(response.spec.data.password).toBe("hunter2");
           done();
         });
+      });
+    });
+
+    it("should lazily re-encrypt a legacy row that embedded the master key (P0-1)", (done) => {
+      if (!bundle) return done();
+      // Build a legacy payload exactly as the pre-fix code did:
+      // key = scrypt(masterKey, salt), keyId field = the master key itself.
+      const salt = crypto.randomBytes(16);
+      const iv = crypto.randomBytes(12);
+      const key = crypto.scryptSync(MASTER_KEY, salt, 32, {
+        cost: 16384, blockSize: 8, parallelization: 1, maxmem: 64 * 1024 * 1024,
+      });
+      const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+      const plaintext = JSON.stringify({ legacy: "old-format" });
+      const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+      const legacyPayload = {
+        version: 2,
+        algorithm: "aes-256-gcm",
+        kdf: { name: "argon2id", memoryCost: 65536, timeCost: 3, parallelism: 4 },
+        salt: salt.toString("base64"),
+        iv: iv.toString("base64"),
+        tag: cipher.getAuthTag().toString("base64"),
+        ciphertext: ct.toString("base64"),
+        keyId: MASTER_KEY,
+        createdAt: new Date().toISOString(),
+      };
+      secrets.set("test-ns/legacy-row", {
+        id: "00000000-0000-0000-0000-000000000009",
+        namespace: "test-ns",
+        name: "legacy-row",
+        encrypted_data: JSON.stringify(legacyPayload),
+        type: "api_key",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      client.GetSecret({ name: "legacy-row", namespace: "test-ns", agent_id: "test-ns/agent-123" }, async (err: any, response: any) => {
+        expect(err).toBeNull();
+        expect(response.spec.data.legacy).toBe("old-format");
+        // Row must have been re-encrypted in place: no key material, truthful KDF label.
+        const stored = await bundle!.repo.get("test-ns", "legacy-row");
+        expect(stored).not.toBeNull();
+        expect(stored!.encryptedData).not.toContain(MASTER_KEY);
+        const upgraded = JSON.parse(stored!.encryptedData);
+        expect(upgraded.kdf.name).toBe("scrypt");
+        expect(upgraded.keyId).not.toBe(MASTER_KEY);
+        done();
       });
     });
 

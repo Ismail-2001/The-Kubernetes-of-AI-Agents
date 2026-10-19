@@ -74,42 +74,34 @@ Every service calls `validateSecrets()` from `@e-gaop/shared` before starting:
 
 ## Key Rotation — `EGAOP_MASTER_ENCRYPTION_KEY`
 
-### The Problem
-Existing encrypted data is tied to the old key. Deleting the old key breaks decryption.
+### How encryption works
 
-### The Solution: Key Versioning
+- Algorithm: **AES-256-GCM** (12-byte random IV, 16-byte salt, 16-byte auth tag).
+- Key derivation: **scrypt** (`cost=16384, blockSize=8, parallelization=1`) over the
+  master key material + per-secret random salt. There is no Argon2id in the codebase.
+- The stored payload's `keyId` field is a **non-secret label** (e.g. `v1`), never key
+  material. Optionally set `EGAOP_MASTER_KEY_ID` to change the label on new writes.
+- `decrypt(payload, masterKey)` derives from the master key + the payload's salt. The
+  `keyId` label is informational only.
 
-Each `EncryptedPayload` includes a `keyId` field. The rotation procedure:
+### Legacy rows (pre-hardening)
+
+Rows written before this hardening embedded the master key in the `keyId` field and
+mislabelled the KDF as `argon2id`. Those rows still decrypt (same scrypt derivation).
+On the next `GetSecret`, secret-store **lazily re-encrypts** the row in place with a
+non-embedded `keyId` and truthful KDF metadata. No offline migration job is required;
+reads never fail because of the upgrade (upgrade errors are logged, the decrypted
+value is still returned).
+
+### Rotation procedure
 
 1. **Keep the old key** accessible (do NOT delete from vault/secrets manager)
 2. **Generate a new key**: `openssl rand -hex 32`
-3. **Update the env var** with the new key
-4. **All new encryptions** use the new key
-5. **Decryption checks `keyId`** — if it matches the old key, uses old key; if new, uses new key
-
-### Implementation
-
-```typescript
-// In secret-store, derive key from keyId:
-function deriveKeyFromId(keyId: string): Buffer {
-  return crypto.createHash("sha256").update(keyId).digest();
-}
-
-// Encrypt uses the current master key
-const payload = await encrypt(plaintext, currentKeyId);
-
-// Decrypt uses the keyId stored in the payload
-const plaintext = await decrypt(payload, payload.keyId);
-```
-
-### Step-by-Step Rotation
-
-1. **Before rotation**: Verify old key still decrypts all data
-2. **Generate new key**: `openssl rand -hex 32`
-3. **Set new key**: Update `EGAOP_MASTER_ENCRYPTION_KEY` in secrets manager
-4. **Deploy**: Rolling restart of secret-store pods
-5. **Verify**: New encryptions use new key, old data still decrypts with old key
-6. **Clean up** (optional): After all old data is re-encrypted or expired, you can remove the old key from the keyring
+3. **Update the env var** with the new key (optionally bump `EGAOP_MASTER_KEY_ID`)
+4. **Re-encrypt existing rows** with `reencryptWithNewKey(oldPayload, oldKey, newKey)`
+   (used by the lazy-upgrade path; a batch job can walk all rows the same way)
+5. **All new encryptions** use the new key automatically
+6. **Verify**: spot-check `GetSecret`, then retire the old key
 
 ### Backup Rule
 

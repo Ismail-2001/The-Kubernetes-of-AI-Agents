@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import {
   encrypt,
   decrypt,
@@ -36,6 +37,49 @@ describe("Crypto Module", () => {
     it("should reject wrong key", async () => {
       const encrypted = await encrypt(plaintext, testKey);
       await expect(decrypt(encrypted, "wrong-key-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")).rejects.toThrow();
+    });
+
+    it("should NOT embed key material in the stored payload (P0-1)", async () => {
+      const encrypted = await encrypt(plaintext, testKey);
+      const serialized = JSON.stringify(encrypted);
+      expect(serialized).not.toContain(testKey);
+      expect(encrypted.keyId).not.toBe(testKey);
+    });
+
+    it("should report truthful scrypt KDF metadata, not argon2id (P0-1)", async () => {
+      const encrypted = await encrypt(plaintext, testKey);
+      expect(encrypted.kdf.name).toBe("scrypt");
+      expect(encrypted.kdf.cost).toBe(16384);
+      expect(encrypted.kdf.blockSize).toBe(8);
+      expect(encrypted.kdf.parallelization).toBe(1);
+    });
+
+    it("should accept an explicit non-secret key label", async () => {
+      const encrypted = await encrypt(plaintext, testKey, "v2");
+      expect(encrypted.keyId).toBe("v2");
+      expect(await decrypt(encrypted, testKey)).toBe(plaintext);
+    });
+
+    it("should decrypt legacy payloads that embedded the key in keyId (P0-1)", async () => {
+      // Simulate a row written by the pre-fix code: key = scrypt(masterKey, salt),
+      // kdf mislabeled "argon2id", keyId field contains the master key itself.
+      const salt = crypto.randomBytes(16);
+      const iv = crypto.randomBytes(12);
+      const key = crypto.scryptSync(testKey, salt, 32, { cost: 16384, blockSize: 8, parallelization: 1, maxmem: 64 * 1024 * 1024 });
+      const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+      const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+      const legacy = {
+        version: 2 as const,
+        algorithm: "aes-256-gcm" as const,
+        kdf: { name: "argon2id" as const, memoryCost: 65536, timeCost: 3, parallelism: 4 },
+        salt: salt.toString("base64"),
+        iv: iv.toString("base64"),
+        tag: cipher.getAuthTag().toString("base64"),
+        ciphertext: ct.toString("base64"),
+        keyId: testKey,
+        createdAt: new Date().toISOString(),
+      };
+      expect(await decrypt(legacy, testKey)).toBe(plaintext);
     });
   });
 
