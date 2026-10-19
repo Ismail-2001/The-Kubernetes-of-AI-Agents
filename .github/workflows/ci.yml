@@ -56,6 +56,23 @@ jobs:
       - name: Run rego unit tests
         run: opa test policy-plane/policies -v --v0-compatible
 
+  helm:
+    name: Helm Chart Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.0"
+      - name: Helm lint (validates values.schema.json)
+        run: helm lint charts/e-gaop
+      - name: Helm template with kind values
+        run: helm template egaop charts/e-gaop -f charts/e-gaop/values-kind.yml > /dev/null
+      - name: Helm template with staging values
+        run: helm template egaop charts/e-gaop -f charts/e-gaop/values-staging.yaml > /dev/null
+      - name: Helm template with production values
+        run: helm template egaop charts/e-gaop -f charts/e-gaop/values-production.yaml > /dev/null
+
   coverage-gate:
     name: Coverage Gate
     runs-on: ubuntu-latest
@@ -133,7 +150,7 @@ jobs:
   build-and-push:
     name: Build & Push Image
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, test, openapi-lint, opa-test]
+    needs: [lint-and-typecheck, test, openapi-lint, opa-test, helm]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
