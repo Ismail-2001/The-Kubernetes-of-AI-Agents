@@ -228,7 +228,7 @@ function clearCookie(reply: FastifyReply, name: string): void {
 export async function authenticate(
   request: FastifyRequest,
   reply: FastifyReply
-): Promise<void> {
+): Promise<FastifyReply | undefined> {
   let token: string | null = null;
 
   // Check Authorization header first
@@ -245,20 +245,20 @@ export async function authenticate(
   if (!token) {
     const traceId = getTraceId(reply);
     sendProblem(reply, "UNAUTHORIZED", "Missing Authorization header. Include: Authorization: Bearer <your-token>", request.url, traceId);
-    return;
+    return reply;
   }
 
   const claims = verifyJWT(token, JWT_SECRET);
   if (!claims) {
     const traceId = getTraceId(reply);
     sendProblem(reply, "UNAUTHORIZED", "Invalid or expired token. Login at POST /api/auth/login to get a new token", request.url, traceId);
-    return;
+    return reply;
   }
 
   if (await isTokenRevoked(token)) {
     const traceId = getTraceId(reply);
     sendProblem(reply, "UNAUTHORIZED", "Token has been revoked. Login at POST /api/auth/login to get a new token", request.url, traceId);
-    return;
+    return reply;
   }
 
   // Attach claims to request for downstream use

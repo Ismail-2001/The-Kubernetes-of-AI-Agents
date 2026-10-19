@@ -39,6 +39,7 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 import crypto from "crypto";
+import zlib from "zlib";
 import path from "path";
 import http from "http";
 import * as grpc from "@grpc/grpc-js";
@@ -438,9 +439,8 @@ fastify.addHook("onSend", async (_request, reply, payload) => {
 
   const contentType = String(reply.getHeader("content-type") || "");
   if (typeof payload === "string" && payload.length > 1024 && (contentType.includes("json") || contentType.includes("text"))) {
-    const { gzip } = await import("zlib");
     const compressed = await new Promise<Buffer>((resolve, reject) => {
-      gzip(Buffer.from(payload), (err, result) => err ? reject(err) : resolve(result));
+      zlib.gzip(Buffer.from(payload), (err, result) => err ? reject(err) : resolve(result));
     });
     reply.header("Content-Encoding", "gzip");
     reply.header("Content-Length", compressed.length);
@@ -455,8 +455,7 @@ fastify.addHook("onSend", async (request, reply, payload) => {
   const contentType = String(reply.getHeader("content-type") || "");
   if (!contentType.includes("json")) return payload;
 
-  const { createHash } = await import("crypto");
-  const etag = `"${createHash("sha256").update(typeof payload === "string" ? payload : JSON.stringify(payload)).digest("hex").slice(0, 16)}"`;
+  const etag = `"${crypto.createHash("sha256").update(typeof payload === "string" ? payload : JSON.stringify(payload)).digest("hex").slice(0, 16)}"`;
   reply.header("ETag", etag);
 
   const ifNoneMatch = request.headers["if-none-match"];
@@ -472,19 +471,88 @@ fastify.addHook("preHandler", async (request, reply) => {
   // Skip auth for public routes
   const publicRoutes = ["/health", "/api/health", "/api/auth/login", "/api/auth/register"];
   if (publicRoutes.includes(request.url) || request.url.startsWith("/api/auth/")) return;
-  await authenticate(request, reply);
+  const authFailure = await authenticate(request, reply);
+  if (authFailure) return authFailure;
 
-  // RBAC: check namespace access for resource-scoped routes
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JWT claims on request
   const user = (request as any).user;
-  if (user?.namespace_access && Array.isArray(user.namespace_access) && user.namespace_access.length > 0) {
-    const ns = (request.query as Record<string, string>)?.namespace
-      || (request.params as Record<string, string>)?.name
-      || (request.params as Record<string, string>)?.namespace;
-    // Only enforce if the route specifies a namespace and user has restricted access
-    if (ns && !user.namespace_access.includes(ns) && !user.namespace_access.includes("*")) {
-      reply.code(403).send({ error: { message: "Access denied to namespace", code: "FORBIDDEN" } });
+  if (!user) {
+    reply.code(401).send({ error: { message: "Unauthenticated", code: "UNAUTHORIZED" } });
+    return reply;
+  }
+
+  const access: string[] = Array.isArray(user.namespace_access) ? user.namespace_access : [];
+  const urlPath = request.url.split("?")[0] ?? "";
+
+  // Fail-closed: a user without any namespace access has no access at all
+  if (access.length === 0) {
+    reply.code(403).send({ error: { message: "Access denied: no namespace access", code: "FORBIDDEN" } });
+    return reply;
+  }
+
+  // Admin-only routes (user directory)
+  if (urlPath === "/api/users" && !access.includes("*") && user.role !== "platform_admin") {
+    reply.code(403).send({ error: { message: "Access denied: admin only", code: "FORBIDDEN" } });
+    return reply;
+  }
+
+  // Wildcard admins pass every namespace check
+  if (access.includes("*")) return;
+
+  const isScoped =
+    urlPath.startsWith("/api/agents") ||
+    urlPath.startsWith("/api/executions") ||
+    urlPath.startsWith("/api/namespaces") ||
+    urlPath.startsWith("/api/traces");
+
+  if (!isScoped) {
+    // Audit log has no namespace filter — restricted users must not read it
+    if (urlPath === "/api/audit-log") {
+      reply.code(403).send({ error: { message: "Access denied: audit log is admin-only", code: "FORBIDDEN" } });
+      return reply;
     }
+    // Global read-only routes (metrics, slos, policies, ...) stay authenticated-only
+    return;
+  }
+
+  const q = (request.query ?? {}) as Record<string, string>;
+  const p = (request.params ?? {}) as Record<string, string>;
+  const body = (typeof request.body === "object" && request.body !== null ? request.body : {}) as Record<string, unknown>;
+
+  // Effective namespace: query → path param → body → handler default
+  let ns: string | undefined;
+  if (q.namespace) ns = q.namespace;
+  else if (p.namespace) ns = p.namespace;
+  else if (urlPath.startsWith("/api/namespaces/") && p.name) ns = p.name;
+  else if (typeof body.namespace === "string" && body.namespace) ns = body.namespace;
+  else if (request.method === "POST" && urlPath === "/api/namespaces") {
+    const raw = body.name ?? body.displayName;
+    if (typeof raw === "string" && raw) ns = raw.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  }
+
+  if (!ns) {
+    // Namespace list is filtered per-user inside the route
+    if (request.method === "GET" && urlPath === "/api/namespaces") return;
+    // Unscoped agent list is an enumeration attempt for restricted users
+    if (request.method === "GET" && urlPath === "/api/agents") {
+      reply.code(403).send({ error: { message: "Access denied: specify a namespace", code: "FORBIDDEN" } });
+      return reply;
+    }
+    // Handlers on these routes fall back to the "default" namespace
+    if (
+      urlPath.startsWith("/api/agents") ||
+      urlPath.startsWith("/api/executions") ||
+      urlPath.startsWith("/api/traces")
+    ) {
+      ns = "default";
+    } else {
+      return;
+    }
+  }
+
+  if (!access.includes(ns)) {
+    reply.code(403).send({ error: { message: "Access denied to namespace", code: "FORBIDDEN" } });
+    return reply;
   }
 });
 
@@ -539,7 +607,7 @@ fastify.get("/api/agents", async (request) => {
           status: a.status?.phase?.toLowerCase() ?? "pending",
           health: a.status?.health_status ?? "Healthy",
           createdAt: a.metadata?.created_at
-            ? new Date(a.created_at.seconds * 1000).toISOString()
+            ? new Date(a.metadata.created_at.seconds * 1000).toISOString()
             : new Date().toISOString(),
           lastExecution: undefined,
           spec: a.spec ?? {},
@@ -1043,7 +1111,13 @@ fastify.get("/api/namespaces", async (request) => {
             toolCallsPerMinute: n.quotas?.max_tool_calls_per_minute ?? 20,
           },
         }));
-        resolve(apiResponse(paginate(ns, page, limit)));
+        // P1-1: restricted users only see namespaces in their access list
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JWT claims on request
+        const access: string[] = (request as any).user?.namespace_access ?? [];
+        const visible = access.includes("*")
+          ? ns
+          : ns.filter((n: { name: string }) => access.includes(n.name));
+        resolve(apiResponse(paginate(visible, page, limit)));
       }
     );
   });
