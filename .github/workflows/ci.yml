@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -23,7 +23,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint --workspaces --if-present
-      - run: npx tsc --noEmit --project control-plane/api-server/tsconfig.json 2>/dev/null || true
+      - name: Typecheck all workspaces (gates on failure)
+        run: npm run typecheck --workspaces --if-present
 
   test:
     name: Test Suite
@@ -35,12 +36,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      - name: Run shared package tests
-        run: cd packages/shared && npx jest --silent --coverage --coverageReporters=text-summary --coverageThreshold='{"global":{"statements":80,"branches":75,"functions":80,"lines":80}}'
-      - name: Run API server tests
-        run: cd control-plane/api-server && npx jest --silent --testTimeout=15000 --coverage --coverageReporters=text-summary --coverageThreshold='{"global":{"statements":80,"branches":75,"functions":80,"lines":80}}'
-      - name: Run workflow engine tests
-        run: cd control-plane/workflow-engine && npx jest --silent --testTimeout=15000
+      # Root script runs every workspace's test script. workflow-engine's test
+      # script also runs scripts/check-no-fake-policy.ts, so fake Rego wiring
+      # is a hard failure here (previously bypassed by calling jest directly).
+      - name: Run all workspace tests
+        run: npm run test --workspaces --if-present
 
   opa-test:
     name: OPA Policy Tests
@@ -107,7 +107,7 @@ jobs:
       - name: Install spectral
         run: npm install -g @stoplight/spectral-cli
       - name: Lint OpenAPI spec
-        run: spectral lint api/openapi.yaml --ruleset .spectral.yaml 2>/dev/null || spectral lint api/openapi.yaml
+        run: spectral lint api/openapi.yaml --ruleset .spectral.yaml
 
   container-scan:
     name: Container Security Scan
@@ -118,18 +118,17 @@ jobs:
       - name: Build API server image
         run: docker build -t egaop-api:test -f control-plane/api-server/Dockerfile .
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: egaop-api:test
           format: table
           exit-code: 1
           severity: CRITICAL,HIGH
-        continue-on-error: true
+          ignore-unfixed: true
       - name: Run Hadolint on Dockerfiles
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: control-plane/api-server/Dockerfile
-        continue-on-error: true
 
   build-and-push:
     name: Build & Push Image
@@ -178,8 +177,8 @@ jobs:
       - run: npm ci
       - name: Generate coverage
         run: |
-          cd packages/shared && npx jest --coverage --coverageReporters=json-summary --silent 2>/dev/null || true
-          cd ../../control-plane/api-server && npx jest --coverage --coverageReporters=json-summary --silent --testTimeout=15000 2>/dev/null || true
+          cd packages/shared && npx jest --coverage --coverageReporters=json-summary --silent
+          cd ../../control-plane/api-server && npx jest --coverage --coverageReporters=json-summary --silent --testTimeout=15000
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
