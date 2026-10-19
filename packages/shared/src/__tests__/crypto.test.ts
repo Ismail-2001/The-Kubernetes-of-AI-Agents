@@ -132,6 +132,26 @@ describe("Crypto Module", () => {
       expect(h1).toBe(h2);
       expect(h1).toMatch(/^[a-f0-9]{64}$/);
     });
+
+    it("should produce different hashes for objects differing only in nested values (P0-2)", () => {
+      const h1 = hashForCache({
+        action: "x",
+        subject: { namespace: "finance", clearance: "high" },
+        resource: { namespace: "finance" },
+      });
+      const h2 = hashForCache({
+        action: "x",
+        subject: { namespace: "finance", clearance: "low" },
+        resource: { namespace: "finance" },
+      });
+      expect(h1).not.toBe(h2);
+    });
+
+    it("should hash nested key order independently (P0-2)", () => {
+      const h1 = hashForCache({ subject: { clearance: 1, namespace: "a" } });
+      const h2 = hashForCache({ subject: { namespace: "a", clearance: 1 } });
+      expect(h1).toBe(h2);
+    });
   });
 
   describe("signJWT / verifyJWT", () => {

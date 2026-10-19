@@ -1,6 +1,6 @@
 import http from "http";
-import crypto from "crypto";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
+import { hashForCache } from "@e-gaop/shared";
 
 const tracer = trace.getTracer("egaop-policy-plane", "1.0.0");
 
@@ -173,8 +173,7 @@ function logInfo(message: string, context?: Record<string, unknown>): void {
 // ─── Hashing ───────────────────────────────────────────────────────────────
 
 function hashInput(input: PolicyInput): string {
-  const canonical = JSON.stringify(input, Object.keys(input).sort());
-  return crypto.createHash("sha256").update(canonical).digest("hex");
+  return hashForCache(input);
 }
 
 // ─── OPA HTTP Client ──────────────────────────────────────────────────────

@@ -110,9 +110,25 @@ export async function reencryptWithNewKey(
   return encrypt(plaintext, newKeyMaterial, newKeyId);
 }
 
+function canonicalize(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return "[" + value.map(canonicalize).join(",") + "]";
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const parts: string[] = [];
+  for (const key of keys) {
+    if (obj[key] === undefined) continue;
+    parts.push(JSON.stringify(key) + ":" + canonicalize(obj[key]));
+  }
+  return "{" + parts.join(",") + "}";
+}
+
 export function hashForCache(input: object): string {
-  const canonical = JSON.stringify(input, Object.keys(input).sort());
-  return crypto.createHash("sha256").update(canonical).digest("hex");
+  return crypto.createHash("sha256").update(canonicalize(input)).digest("hex");
 }
 
 export async function hashPassword(password: string): Promise<string> {

@@ -148,6 +148,34 @@ describe("PolicyPlaneService", () => {
       expect(scope.isDone()).toBe(true);
       expect(nock.pendingMocks()).toHaveLength(0);
     });
+
+    it("must not reuse a cached decision across inputs differing only in nested values (P0-2)", async () => {
+      // Same top-level shape, same action/namespace/agentId — only subject.clearance differs.
+      // With the old array-replacer hash both inputs collided on one cache key, so a
+      // low-clearance subject could be served the cached allow of a high-clearance one.
+      const scope = nock(OPA_HOST)
+        .post(`/v1/data/${POLICY_PATH}`)
+        .twice()
+        .reply(200, (_uri: string, body: { input: { subject: { clearance: number } } }) => {
+          const clearance = body.input.subject.clearance;
+          return clearance >= 2
+            ? { result: { allow: true } }
+            : { result: { allow: false, reason: "Insufficient clearance" } };
+        });
+
+      const service = PolicyPlaneService.getInstance();
+      const high = makeInput({ subject: { namespace: "default", clearance: 3 } });
+      const low = makeInput({ subject: { namespace: "default", clearance: 1 } });
+
+      const first = await service.evaluatePolicy(POLICY_PATH, high);
+      const second = await service.evaluatePolicy(POLICY_PATH, low);
+
+      expect(first.allow).toBe(true);
+      expect(second.allow).toBe(false);
+      expect(second.reason).toBe("Insufficient clearance");
+      expect(scope.isDone()).toBe(true);
+      expect(nock.pendingMocks()).toHaveLength(0);
+    });
   });
 
   describe("Stats", () => {
