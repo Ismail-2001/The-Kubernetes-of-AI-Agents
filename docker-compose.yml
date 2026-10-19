@@ -593,6 +593,7 @@ services:
       RATE_LIMIT_RPM: ${RATE_LIMIT_TOOL_PROXY_RPM:-60}
       TOOL_PROXY_PORT: "50052"
       TOOL_PROXY_HEALTH_PORT: "15052"
+      SANDBOX_IP_ALLOWLIST_CIDRS: 172.30.0.0/16
       EGAOP_MASTER_ENCRYPTION_KEY: ${EGAOP_MASTER_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
@@ -952,3 +953,8 @@ networks:
     name: egaop-sandbox
     driver: bridge
     internal: true
+    ipam:
+      config:
+        # Pinned so tool-proxy can allowlist exactly this sandbox network
+        # (SANDBOX_IP_ALLOWLIST_CIDRS below) instead of all RFC1918 ranges.
+        - subnet: 172.30.0.0/16

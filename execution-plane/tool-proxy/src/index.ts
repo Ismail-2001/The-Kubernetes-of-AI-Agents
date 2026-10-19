@@ -115,6 +115,56 @@ function isPrivateIP(ip: string): boolean {
   return false;
 }
 
+// ── Sandbox IP allowlisting (P1-2: sandbox_ip is caller-supplied) ──
+// Always denied first: loopback, link-local (cloud metadata), CGNAT,
+// unspecified, multicast/reserved — even if an allowlist CIDR overlaps.
+const ALWAYS_DENIED_CIDRS = [
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "100.64.0.0/10",
+  "0.0.0.0/8",
+  "224.0.0.0/4",
+];
+// Fallback when SANDBOX_IP_ALLOWLIST_CIDRS is unset: RFC1918 only
+// (docker bridge / k8s pod CIDR ranges where sandbox containers live).
+const DEFAULT_SANDBOX_CIDRS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
+
+function parseIPv4(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    if (p.length > 1 && p[0] === "0") return null; // reject octal-style "010"
+    const v = Number(p);
+    if (v > 255) return null;
+    n = ((n << 8) | v) >>> 0;
+  }
+  return n;
+}
+
+function ipInCIDR(ipNum: number, cidr: string): boolean {
+  const [netStr, bitsStr] = cidr.split("/");
+  const bits = Number(bitsStr);
+  const net = parseIPv4(netStr ?? "");
+  if (net === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (ipNum & mask) >>> 0 === (net & mask) >>> 0;
+}
+
+function isAllowedSandboxIP(ip: string): boolean {
+  const ipNum = parseIPv4(ip);
+  if (ipNum === null) return false;
+  if (ALWAYS_DENIED_CIDRS.some((c) => ipInCIDR(ipNum, c))) return false;
+  const raw = process.env.SANDBOX_IP_ALLOWLIST_CIDRS;
+  const allowed =
+    raw === undefined
+      ? DEFAULT_SANDBOX_CIDRS
+      : raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (allowed.length === 0) return false; // set-but-blank config denies all (fail-closed)
+  return allowed.some((c) => ipInCIDR(ipNum, c));
+}
+
 function isBlockedURL(urlStr: string): boolean {
   try {
     const parsed = new URL(urlStr);
@@ -278,11 +328,11 @@ server.addService(toolService.service, {
             latency_ms: Date.now() - startTime,
           });
         }
-        if (isPrivateIP(sandbox_ip)) {
-          logger.warn({ sandbox_ip }, "SSRF blocked: private/internal IP");
+        if (!isAllowedSandboxIP(sandbox_ip)) {
+          logger.warn({ sandbox_ip }, "SSRF blocked: sandbox IP outside allowed sandbox network");
           return callback(null, {
             status: "failed",
-            error_message: "Sandbox IP resolves to a private network address",
+            error_message: "Sandbox IP is not in an allowed sandbox network",
             latency_ms: Date.now() - startTime,
           });
         }
@@ -290,7 +340,9 @@ server.addService(toolService.service, {
         logger.info({ tool_name, sandbox_ip, url }, "Sandbox-routed tool: constructed URL");
       }
 
-      const creds = injectCredentials(tool_name);
+      // P1-2: never attach API credentials to sandbox-routed requests — the
+      // target IP is caller-supplied and must not receive platform secrets.
+      const creds = SANDBOX_TOOLS.has(tool_name) ? {} : injectCredentials(tool_name);
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "User-Agent": "EGAOP-Tool-Proxy/1.0",
@@ -298,7 +350,14 @@ server.addService(toolService.service, {
         ...creds,
       };
 
-      const fetchOpts: RequestInit & { body?: string } = { method: config.method, headers, signal: AbortSignal.timeout(30000) };
+      const fetchOpts: RequestInit & { body?: string } = {
+        method: config.method,
+        headers,
+        signal: AbortSignal.timeout(30000),
+        // P1-2: redirects could bounce an allowlisted target onto an
+        // internal address — never follow them.
+        redirect: "manual",
+      };
       if (config.method === "POST" && args) {
         fetchOpts.body = JSON.stringify(args);
       }
@@ -318,6 +377,14 @@ server.addService(toolService.service, {
       }
 
       const response = await fetchWithRetry(url, fetchOpts);
+      if (response.status >= 300 && response.status < 400) {
+        logger.warn({ tool_name, status: response.status }, "SSRF blocked: redirect not followed");
+        return callback(null, {
+          status: "failed",
+          error_message: `Redirects are not followed (got HTTP ${response.status})`,
+          latency_ms: Date.now() - startTime,
+        });
+      }
       const body = response.ok ? await response.text() : `HTTP ${response.status}`;
 
       const latency = Date.now() - startTime;
@@ -420,6 +487,7 @@ export {
   scanForPII,
   detectedPIIPatterns,
   isPrivateIP as isPrivateOrInternalIP,
+  isAllowedSandboxIP,
   isBlockedURL,
   isAllowedWebFetchHost,
   validateSandboxArgs,

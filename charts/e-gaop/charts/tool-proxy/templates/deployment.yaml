@@ -39,6 +39,13 @@ spec:
 {{- include "e-gaop.commonEnv" (dict "serviceName" "tool-proxy" "healthPort" .Values.healthPort) | nindent 12 }}
             - name: SERVICE_GRPC_PORT
               value: "{{ .Values.grpcPort }}"
+{{- if .Values.sandboxIpAllowlistCidrs }}
+            # P1-2: caller-supplied sandbox_ip must fall inside this CIDR.
+            # When unset, the proxy allows RFC1918 ranges only (and always
+            # denies loopback/link-local/CGNAT regardless of config).
+            - name: SANDBOX_IP_ALLOWLIST_CIDRS
+              value: {{ .Values.sandboxIpAllowlistCidrs | quote }}
+{{- end }}
 {{- include "e-gaop.coreSecrets" . | nindent 12 }}
 {{- include "e-gaop.probes" . | nindent 10 }}
           resources:

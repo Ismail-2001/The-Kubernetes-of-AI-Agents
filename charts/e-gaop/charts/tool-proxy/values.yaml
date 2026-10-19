@@ -5,6 +5,9 @@ replicas: 2
 grpcPort: 50052
 healthPort: 15052
 rateLimitRpm: 60
+# Comma-separated CIDRs sandbox_ip requests may target (P1-2).
+# Empty = RFC1918 defaults inside the proxy; set the sandbox/pod CIDR to tighten.
+sandboxIpAllowlistCidrs: ""
 resources:
   requests:
     cpu: 200m

@@ -2,6 +2,7 @@ import {
   isPrivateOrInternalIP,
   isBlockedURL,
   isAllowedWebFetchHost,
+  isAllowedSandboxIP,
   validateSandboxArgs,
   detectedPIIPatterns,
   injectCredentials,
@@ -9,6 +10,57 @@ import {
 } from "../index";
 
 describe("Tool Proxy - SSRF Protection", () => {
+  describe("isAllowedSandboxIP", () => {
+    afterEach(() => {
+      delete process.env.SANDBOX_IP_ALLOWLIST_CIDRS;
+    });
+
+    it("allows RFC1918 sandbox IPs by default", () => {
+      expect(isAllowedSandboxIP("10.0.0.1")).toBe(true);
+      expect(isAllowedSandboxIP("172.30.0.5")).toBe(true);
+      expect(isAllowedSandboxIP("192.168.1.1")).toBe(true);
+    });
+
+    it("always denies loopback, link-local, CGNAT, and reserved ranges", () => {
+      expect(isAllowedSandboxIP("127.0.0.1")).toBe(false);
+      expect(isAllowedSandboxIP("169.254.169.254")).toBe(false);
+      expect(isAllowedSandboxIP("100.64.0.1")).toBe(false);
+      expect(isAllowedSandboxIP("0.0.0.0")).toBe(false);
+      expect(isAllowedSandboxIP("224.0.0.1")).toBe(false);
+    });
+
+    it("denies hostnames and non-IPv4 values", () => {
+      expect(isAllowedSandboxIP("evil.example.com")).toBe(false);
+      expect(isAllowedSandboxIP("[::1]")).toBe(false);
+      expect(isAllowedSandboxIP("::1")).toBe(false);
+      expect(isAllowedSandboxIP("")).toBe(false);
+      expect(isAllowedSandboxIP("999.1.1.1")).toBe(false);
+      expect(isAllowedSandboxIP("010.0.0.1")).toBe(false);
+    });
+
+    it("denies public IPs", () => {
+      expect(isAllowedSandboxIP("8.8.8.8")).toBe(false);
+      expect(isAllowedSandboxIP("1.1.1.1")).toBe(false);
+    });
+
+    it("restricts to the configured allowlist CIDRs", () => {
+      process.env.SANDBOX_IP_ALLOWLIST_CIDRS = "172.30.0.0/16";
+      expect(isAllowedSandboxIP("172.30.0.5")).toBe(true);
+      expect(isAllowedSandboxIP("10.0.0.5")).toBe(false);
+      expect(isAllowedSandboxIP("192.168.1.5")).toBe(false);
+    });
+
+    it("deny-list wins even when allowlist overlaps", () => {
+      process.env.SANDBOX_IP_ALLOWLIST_CIDRS = "127.0.0.0/8,169.254.0.0/16";
+      expect(isAllowedSandboxIP("127.0.0.1")).toBe(false);
+      expect(isAllowedSandboxIP("169.254.169.254")).toBe(false);
+    });
+
+    it("empty allowlist string denies everything (fail-closed)", () => {
+      process.env.SANDBOX_IP_ALLOWLIST_CIDRS = "  ";
+      expect(isAllowedSandboxIP("10.0.0.1")).toBe(false);
+    });
+  });
   describe("isPrivateOrInternalIP", () => {
     it("detects loopback", () => {
       expect(isPrivateOrInternalIP("127.0.0.1")).toBe(true);
