@@ -163,23 +163,20 @@ describe("temporal client", () => {
     expect(mockHandle.result).toHaveBeenCalled();
   });
 
-  it.skip("rejects with a timeout when the result never arrives", async () => {
-    jest.useFakeTimers();
-    try {
-      mockHandle.result.mockReturnValueOnce(
-        new Promise(() => {
-          // never resolves
-        })
-      );
+  it("rejects with a timeout when the result never arrives", async () => {
+    // Real short timer: waitForResult arms its setTimeout only after the
+    // awaited getClient() resolves, so fake timers ran before the timer
+    // existed and the test hung (it was previously skipped for this).
+    mockHandle.result.mockReturnValueOnce(
+      new Promise(() => {
+        // never resolves
+      })
+    );
 
-      const promise = waitForResult("agent-exec-exec-1", 1000);
-      const assertion = expect(promise).rejects.toThrow("Workflow timeout");
-      jest.runAllTimers();
-      await assertion;
-    } finally {
-      jest.useRealTimers();
-    }
-  });
+    await expect(waitForResult("agent-exec-exec-1", 50)).rejects.toThrow(
+      "Workflow timeout after 50ms",
+    );
+  }, 8000);
 
   it("starts a HITL approval workflow", async () => {
     const result = await startHITLApproval({
