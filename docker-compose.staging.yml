@@ -18,9 +18,9 @@ services:
   # ─── Staging infrastructure ────────────────────────────────────────────────
   staging-redis:
     image: redis:7-alpine
-    command: redis-server --requirepass staging-redis-pw
+    command: redis-server --requirepass ${STAGING_REDIS_PASSWORD:?set STAGING_REDIS_PASSWORD (min 24 chars)}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "staging-redis-pw", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"${STAGING_REDIS_PASSWORD:?set STAGING_REDIS_PASSWORD (min 24 chars)}\" ping || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -44,7 +44,7 @@ services:
     image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: egaop
-      POSTGRES_PASSWORD: staging-pg-pw
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD (min 24 chars)}
       POSTGRES_DB: egaop
     command:
       - "postgres"
@@ -135,18 +135,19 @@ services:
 
   migrate:
     environment:
-      POSTGRES_URL: postgresql://egaop:staging-pg-pw@staging-postgres:5432/egaop
-    depends_on:
+      POSTGRES_URL: postgresql://egaop:${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD (min 24 chars)}@staging-postgres:5432/egaop
+    # !override: base depends on the disabled `postgres` service; replace it.
+    depends_on: !override
       staging-postgres:
         condition: service_healthy
 
   api-server:
     environment:
-      REDIS_URL: redis://:staging-redis-pw@staging-redis:6379
+      REDIS_URL: redis://:${STAGING_REDIS_PASSWORD:?set STAGING_REDIS_PASSWORD (min 24 chars)}@staging-redis:6379
       POSTGRES_HOST: staging-postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: egaop
-      POSTGRES_PASSWORD: staging-pg-pw
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD (min 24 chars)}
       POSTGRES_DB: egaop
       # mTLS off for staging
       TLS_ENABLED: "false"
@@ -158,7 +159,12 @@ services:
       # LLM points to mock
       OPENAI_API_KEY: sk-mock-key
       OPENAI_BASE_URL: http://mock-llm:8080/v1
-    depends_on:
+    # !override: drop base deps on disabled postgres/pgbouncer/redis.
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
       staging-postgres:
         condition: service_healthy
       staging-redis:
@@ -172,8 +178,12 @@ services:
       LOG_LEVEL: debug
       POSTGRES_HOST: staging-postgres
       POSTGRES_PORT: 5432
-      POSTGRES_PASSWORD: staging-pg-pw
-    depends_on:
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD (min 24 chars)}
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
       staging-postgres:
         condition: service_healthy
 
@@ -181,11 +191,15 @@ services:
     environment:
       TLS_ENABLED: "false"
       LOG_LEVEL: debug
-      REDIS_URL: redis://:staging-redis-pw@staging-redis:6379
-      POSTGRES_PASSWORD: staging-pg-pw
+      REDIS_URL: redis://:${STAGING_REDIS_PASSWORD:?set STAGING_REDIS_PASSWORD (min 24 chars)}@staging-redis:6379
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD (min 24 chars)}
       OPENAI_API_KEY: sk-mock-key
       LLM_ROUTER_ADDR: mock-llm:8080
-    depends_on:
+    depends_on: !override
+      otel-collector:
+        condition: service_started
+      policy-plane:
+        condition: service_started
       staging-postgres:
         condition: service_healthy
       staging-redis:
@@ -201,7 +215,9 @@ services:
       LLM_TIMEOUT_MS: "5000"
       LLM_MAX_RETRIES: "1"
       RATE_LIMIT_RPM: "500"
-    depends_on:
+    depends_on: !override
+      otel-collector:
+        condition: service_started
       mock-llm:
         condition: service_healthy
 
@@ -222,12 +238,14 @@ services:
       LOG_LEVEL: debug
       REDIS_HOST: staging-redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: staging-redis-pw
-      REDIS_URL: redis://:staging-redis-pw@staging-redis:6379
+      REDIS_PASSWORD: ${STAGING_REDIS_PASSWORD:?set STAGING_REDIS_PASSWORD (min 24 chars)}
+      REDIS_URL: redis://:${STAGING_REDIS_PASSWORD:?set STAGING_REDIS_PASSWORD (min 24 chars)}@staging-redis:6379
       POSTGRES_HOST: staging-postgres
       POSTGRES_PORT: 5432
-      POSTGRES_PASSWORD: staging-pg-pw
-    depends_on:
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD (min 24 chars)}
+    depends_on: !override
+      otel-collector:
+        condition: service_started
       staging-postgres:
         condition: service_healthy
       staging-redis:
@@ -239,15 +257,17 @@ services:
       LOG_LEVEL: debug
       POSTGRES_HOST: staging-postgres
       POSTGRES_PORT: 5432
-      POSTGRES_PASSWORD: staging-pg-pw
-    depends_on:
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD (min 24 chars)}
+    depends_on: !override
+      otel-collector:
+        condition: service_started
       staging-postgres:
         condition: service_healthy
 
   admin-console:
     environment:
       LOG_LEVEL: debug
-      POSTGRES_PASSWORD: staging-pg-pw
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD (min 24 chars)}
       OPENAI_API_KEY: sk-mock-key
       NEXT_PUBLIC_API_URL: http://api-server:50051
       NEXT_PUBLIC_SSE_URL: http://api-server:3001
