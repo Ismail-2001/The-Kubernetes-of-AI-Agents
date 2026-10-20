@@ -129,6 +129,34 @@ describe("Observability Plane", () => {
         done();
       });
     });
+
+    it("should evict oldest traces when TRACE_STORE_MAX_TRACES is exceeded (P3)", async () => {
+      traceStore.clear();
+      process.env.TRACE_STORE_MAX_TRACES = "3";
+      const exportSpan = (executionId: string) =>
+        new Promise<void>((resolve, reject) => {
+          client.ExportTrace({
+            execution_id: executionId,
+            span_id: `span-${executionId}`,
+            name: "llm_call",
+            start_time: { seconds: 1, nanos: 0 },
+            end_time: { seconds: 2, nanos: 0 },
+            attributes: { fields: {} },
+          }, (err: any) => (err ? reject(err) : resolve()));
+        });
+      try {
+        for (let i = 1; i <= 5; i++) {
+          await exportSpan(`cap-exec-${i}`);
+        }
+        expect(traceStore.size).toBeLessThanOrEqual(3);
+        expect(traceStore.has("cap-exec-1")).toBe(false);
+        expect(traceStore.has("cap-exec-2")).toBe(false);
+        expect(traceStore.has("cap-exec-5")).toBe(true);
+      } finally {
+        delete process.env.TRACE_STORE_MAX_TRACES;
+        traceStore.clear();
+      }
+    });
   });
 
   describe("GetExecutionReplay", () => {

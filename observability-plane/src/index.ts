@@ -79,7 +79,16 @@ interface StoredSpan {
 }
 
 // In-memory cache for hot traces (recent spans quick access)
+// Exported for tests (and via index exports below).
 const traceStore: Map<string, StoredSpan[]> = new Map();
+
+// P3: bound the hot cache — oldest execution traces are evicted first
+// (Map preserves insertion order). Default 5000 traces; override with
+// TRACE_STORE_MAX_TRACES. Durable copy still goes to PostgreSQL.
+function traceStoreCap(): number {
+  const raw = parseInt(process.env.TRACE_STORE_MAX_TRACES || "5000", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5000;
+}
 
 const server = new grpc.Server({
   interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor(), createTraceServerInterceptor()],
@@ -95,6 +104,12 @@ server.addService(obsService.service, {
     const existing = traceStore.get(execution_id as string) || [];
     existing.push({ span_id: span_id as string, name: name as string, start_time: start_time as StoredSpan['start_time'], end_time: end_time as StoredSpan['end_time'], attributes: attributes as StoredSpan['attributes'] });
     traceStore.set(execution_id as string, existing);
+    // P3: evict oldest traces beyond the cap (insertion-order FIFO)
+    while (traceStore.size > traceStoreCap()) {
+      const oldestKey = traceStore.keys().next().value;
+      if (oldestKey === undefined) break;
+      traceStore.delete(oldestKey);
+    }
 
     // Durable path: persist to PostgreSQL
     try {
