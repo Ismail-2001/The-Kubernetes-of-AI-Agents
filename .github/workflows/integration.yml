@@ -186,6 +186,25 @@ jobs:
           chmod +x tests/integration.sh
           bash tests/integration.sh
 
+      # ─── Namespace Isolation Suite (live gRPC via port-forward) ─────────────
+      # Runs the previously skip-gated tests/security/namespace-isolation suite
+      # against the live cluster. Expected to be RED until the documented
+      # namespace-enforcement residual (clients never attach x-agent-claims)
+      # is fixed — red here is intended signal, not flake.
+      - name: Run namespace isolation security suite
+        run: |
+          set -euo pipefail
+          for pair in "api-server 50051" "tool-proxy 50052" "sandbox-runtime 50054" "memory-plane 50055"; do
+            SVC="${pair%% *}"
+            PORT="${pair##* }"
+            POD=$(kubectl get pod -n egaop -l "app.kubernetes.io/name=${SVC}" -o jsonpath='{.items[0].metadata.name}')
+            kubectl -n egaop port-forward "pod/${POD}" "${PORT}:${PORT}" >/dev/null 2>&1 &
+          done
+          sleep 8
+          EGAOP_RUN_INTEGRATION_TESTS=1 \
+          EGAOP_INTERNAL_SERVICE_TOKEN="ci-internal-service-token-48-characters-long!!ok" \
+            npx jest --config tests/jest.config.ts --selectProjects security --testTimeout=30000
+
       # ─── Collect Debug Info on Failure ────────────────────────────────────────
       - name: Collect debug info on failure
         if: failure()

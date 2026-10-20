@@ -9,6 +9,17 @@
  * localhost). Skipped by default; enable with:
  *   EGAOP_RUN_INTEGRATION_TESTS=1 npx jest --config tests/jest.config.ts --selectProjects security
  * Individual endpoints are configurable via EGAOP_*_GRPC_ADDR env vars.
+ *
+ * Auth: every deployed service sets INTERNAL_SERVICE_TOKEN (validateSecrets
+ * fail-closed), and the shared gRPC service-token interceptor then requires
+ * x-service-token on every call. Set EGAOP_INTERNAL_SERVICE_TOKEN to the same
+ * value the stack was deployed with, or all calls will be UNAUTHENTICATED.
+ *
+ * Known gap: the shared namespace-enforcement interceptor is a no-op in
+ * production because clients never attach x-agent-claims (documented
+ * residual, tracked for fix). Some cross-namespace expectations here may
+ * fail against a live stack until that is implemented — red results are
+ * signal, not flake.
  */
 
 import path from "path";
@@ -37,6 +48,11 @@ function loadProto(protoFile: string): any {
 function createMetadata(namespace: string, token?: string): grpc.Metadata {
   const meta = new grpc.Metadata();
   meta.add("x-egaop-namespace", namespace);
+  // Deployed stacks require x-service-token (INTERNAL_SERVICE_TOKEN is
+  // always set by validateSecrets). Dev stacks without the env keep
+  // working: the interceptor skips validation when the env is unset.
+  const serviceToken = token ?? process.env.EGAOP_INTERNAL_SERVICE_TOKEN;
+  if (serviceToken) meta.add("x-service-token", serviceToken);
   if (token) meta.add("authorization", `Bearer ${token}`);
   return meta;
 }
