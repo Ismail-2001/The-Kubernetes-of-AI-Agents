@@ -28,27 +28,42 @@ jobs:
       matrix:
         include:
           - service: api-server
-            context: control-plane/api-server
+            dockerfile: control-plane/api-server/Dockerfile
           - service: workflow-engine
-            context: control-plane/workflow-engine
+            dockerfile: control-plane/workflow-engine/Dockerfile
           - service: secret-store
-            context: control-plane/secret-store
+            dockerfile: control-plane/secret-store/Dockerfile
           - service: llm-router
-            context: execution-plane/llm-router
+            dockerfile: execution-plane/llm-router/Dockerfile
           - service: tool-proxy
-            context: execution-plane/tool-proxy
+            dockerfile: execution-plane/tool-proxy/Dockerfile
           - service: sandbox-runtime
-            context: execution-plane/sandbox-runtime
+            dockerfile: execution-plane/sandbox-runtime/Dockerfile
+          - service: policy-plane
+            dockerfile: policy-plane/Dockerfile
+          - service: memory-plane
+            dockerfile: memory-plane/Dockerfile
+          - service: observability-plane
+            dockerfile: observability-plane/Dockerfile
           - service: admin-console
+            dockerfile: admin-console/Dockerfile
             context: admin-console
     steps:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t egaop/${{ matrix.service }}:scan ${{ matrix.context }}
+        # Service Dockerfiles COPY root files (package.json, tsconfig.base.json,
+        # packages/shared, api/proto) -> root context with -f. Only admin-console
+        # is self-contained (its own package.json/lock at context root).
+        run: |
+          if [ -n "${{ matrix.context }}" ]; then
+            docker build -t "egaop/${{ matrix.service }}:scan" -f "${{ matrix.dockerfile }}" "${{ matrix.context }}"
+          else
+            docker build -t "egaop/${{ matrix.service }}:scan" -f "${{ matrix.dockerfile }}" .
+          fi
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: "egaop/${{ matrix.service }}:scan"
           format: table
