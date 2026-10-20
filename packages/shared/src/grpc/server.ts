@@ -52,6 +52,12 @@ export class GrpcServer {
   async start(): Promise<void> {
     const { serviceName, port, healthPort, services, enableMTLS, certDir } = this.config;
 
+    // P3: fail-closed — requesting mTLS without a certDir must not silently
+    // downgrade to a plaintext server.
+    if (enableMTLS && !certDir) {
+      throw new Error("enableMTLS requires certDir — refusing to start with plaintext fallback");
+    }
+
     const credentials = enableMTLS && certDir
       ? createMTLSServerCredentials(certDir)
       : grpc.ServerCredentials.createInsecure();
