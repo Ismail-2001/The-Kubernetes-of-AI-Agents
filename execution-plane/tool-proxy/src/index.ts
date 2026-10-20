@@ -89,7 +89,12 @@ interface ToolConfig {
 
 const TOOL_REGISTRY: Record<string, ToolConfig> = {
   google_search: { endpoint: "https://api.serpapi.com/search", method: "GET" },
-  web_fetch: { endpoint: "https://r.jina.ai/http://__URL__", method: "GET" },
+  // P3: template overridable so deployments are not hard-wired to a
+  // third-party proxy (r.jina.ai sees every fetched URL by default).
+  web_fetch: {
+    endpoint: process.env.WEB_FETCH_ENDPOINT_TEMPLATE || "https://r.jina.ai/http://__URL__",
+    method: "GET",
+  },
   code_interpreter: { endpoint: "http://localhost:8080/execute", method: "POST" },
   file_read: { endpoint: "http://localhost:8080/read", method: "GET" },
   file_write: { endpoint: "http://localhost:8080/write", method: "POST" },
@@ -320,6 +325,24 @@ server.addService(toolService.service, {
         url = url.replace("__URL__", encodeURIComponent(argsUrl));
       }
 
+      // P3: GET tools without a URL placeholder (google_search) never
+      // received their args — the query string is appended here. The
+      // serpapi api_key is a query parameter (headers are ignored by
+      // the API) and is added only for google_search when configured.
+      if (config.method === "GET" && !url.includes("__URL__")) {
+        const params = new URLSearchParams();
+        for (const [k, v] of Object.entries(args ?? {})) {
+          if (typeof v === "string" || typeof v === "number") {
+            params.set(k, String(v));
+          }
+        }
+        if (tool_name === "google_search" && process.env.TOOL_GOOGLE_SEARCH_API_KEY) {
+          params.set("api_key", process.env.TOOL_GOOGLE_SEARCH_API_KEY);
+        }
+        const qs = params.toString();
+        if (qs) url += (url.includes("?") ? "&" : "?") + qs;
+      }
+
       if (SANDBOX_TOOLS.has(tool_name)) {
         if (!sandbox_ip) {
           return callback(null, {
@@ -400,11 +423,19 @@ server.addService(toolService.service, {
         );
       } catch { /* audit failure is non-fatal */ }
 
+      // P3: non-2xx upstream responses are failures, not successes.
+      if (!response.ok) {
+        return callback(null, {
+          status: "failed",
+          error_message: `Upstream returned HTTP ${response.status}`,
+          latency_ms: latency,
+        });
+      }
+
       callback(null, {
         result: { value: "SUCCESS", message: body.slice(0, 10000) },
         status: "succeeded",
         latency_ms: latency,
-        cost: "$0.002",
       });
     } catch (err: unknown) {
       const errObj = err instanceof Error ? err : new Error(String(err));

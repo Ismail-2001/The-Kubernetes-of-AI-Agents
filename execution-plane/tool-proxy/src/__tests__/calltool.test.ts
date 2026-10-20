@@ -94,6 +94,56 @@ describe("CallTool handler", () => {
     expect(result.result.value).toBe("SUCCESS");
   });
 
+  it("marks non-2xx HTTP responses as failed, not succeeded (P3)", async () => {
+    mockFetch.mockResolvedValue(new Response("upstream boom", { status: 500 }));
+    (createAuditEntry as jest.Mock).mockImplementation(() => {});
+
+    const { err, result } = await callTool({
+      agent_id: "default/agent-1",
+      execution_id: "exec-http-err",
+      tool_name: "google_search",
+      args: { q: "k8s" },
+    });
+    expect(err).toBeNull();
+    expect(result.status).toBe("failed");
+    expect(result.error_message).toMatch(/HTTP 500/);
+    expect(result.cost).toBeUndefined();
+  });
+
+  it("appends google_search args as query parameters (P3)", async () => {
+    mockFetch.mockResolvedValue(new Response("ok", { status: 200 }));
+    (createAuditEntry as jest.Mock).mockImplementation(() => {});
+
+    await callTool({
+      agent_id: "default/agent-1",
+      execution_id: "exec-q",
+      tool_name: "google_search",
+      args: { q: "test query", num: 5 },
+    });
+    const calledUrl = String(mockFetch.mock.calls[0][0]);
+    expect(calledUrl).toContain("https://api.serpapi.com/search?");
+    expect(calledUrl).toContain("q=test+query");
+    expect(calledUrl).toContain("num=5");
+  });
+
+  it("passes serpapi api_key as a query parameter when configured (P3)", async () => {
+    process.env.TOOL_GOOGLE_SEARCH_API_KEY = "serp-secret";
+    mockFetch.mockResolvedValue(new Response("ok", { status: 200 }));
+    (createAuditEntry as jest.Mock).mockImplementation(() => {});
+    try {
+      await callTool({
+        agent_id: "default/agent-1",
+        execution_id: "exec-key",
+        tool_name: "google_search",
+        args: { q: "k8s" },
+      });
+      const calledUrl = String(mockFetch.mock.calls[0][0]);
+      expect(calledUrl).toContain("api_key=serp-secret");
+    } finally {
+      delete process.env.TOOL_GOOGLE_SEARCH_API_KEY;
+    }
+  });
+
   it("blocks internal hostname URLs in web_fetch", async () => {
     const { err, result } = await callTool({
       agent_id: "default/agent-1",
