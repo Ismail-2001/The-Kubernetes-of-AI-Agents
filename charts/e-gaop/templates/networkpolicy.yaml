@@ -466,20 +466,26 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "e-gaop.fullname" . }}-tool-proxy-to-sandbox-agent
+  name: {{ include "e-gaop.fullname" . }}-tool-proxy-egress-sandbox-agent
   namespace: {{ .Release.Namespace }}
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: sandbox-agent
+      app.kubernetes.io/name: tool-proxy
+      app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: tool-proxy
-              app.kubernetes.io/instance: {{ .Release.Name }}
+    - Egress
+  egress:
+    # P3: sandbox agents are docker containers on node-private bridge
+    # ranges (not k8s pods) listening on 8080 — without this rule the
+    # default-deny egress blocked every sandbox-routed tool call.
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+        - ipBlock:
+            cidr: 172.16.0.0/12
+        - ipBlock:
+            cidr: 192.168.0.0/16
       ports:
         - protocol: TCP
           port: 8080
