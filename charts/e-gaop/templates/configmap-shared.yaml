@@ -18,5 +18,3 @@ data:
   TEMPORAL_HOST: "{{ .Release.Name }}-temporal-frontend"
   TEMPORAL_PORT: "7233"
   TEMPORAL_NAMESPACE: {{ .Values.temporal.namespace | quote }}
-  OPA_ADDR: "http://{{ .Release.Name }}-opa:8181"
-  OTEL_COLLECTOR_ADDR: "http://{{ .Release.Name }}-otel-collector:4317"
