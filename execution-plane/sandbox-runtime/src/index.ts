@@ -11,7 +11,7 @@ import http from "http";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
-import { getServerCredentials, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, createAuditEntry } from "@e-gaop/shared";
+import { getServerCredentials, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, createAuditEntry, requireNamespace } from "@e-gaop/shared";
 import type { SandboxDriver } from "@e-gaop/shared";
 
 const logger = pino({
@@ -69,17 +69,31 @@ const server = new grpc.Server({
   interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor(), createTraceServerInterceptor()],
 });
 
+// Sandbox ownership: sandbox_id -> creating caller's namespace (from call metadata).
+// Cross-namespace status/terminate is rejected fail-closed. In-memory per-pod; a
+// restart clears associations (documented residual in THREAT-MODEL.md).
+const sandboxNamespaces = new Map<string, string>();
+
 server.addService(runtimeService.service, {
   CreateSandbox: async (call: grpc.ServerUnaryCall<Record<string, unknown>, Record<string, unknown>>, callback: grpc.sendUnaryData<Record<string, unknown>>) => {
     const { agent_id, execution_id, image, isolation_level, resources, env_vars, init_commands } = call.request;
 
     logger.info({ agent_id, execution_id, isolation_level }, "Creating sandbox...");
 
+    let callerNs: string;
+    try {
+      callerNs = requireNamespace(call);
+    } catch (nsErr) {
+      const msg = nsErr instanceof Error ? nsErr.message : "Missing namespace metadata";
+      callback({ code: grpc.status.INVALID_ARGUMENT, message: msg } as never);
+      return;
+    }
+
     try {
       const result = await sandboxDriver.createSandbox({
         executionId: execution_id as string,
         agentId: agent_id as string,
-        namespace: process.env.POD_NAMESPACE || "egaop",
+        namespace: callerNs,
         image: (image as string) || "egaop-base-runtime:latest",
         isolationLevel: isolation_level as string | undefined,
         cpu: (resources as { cpu?: string } | undefined)?.cpu,
@@ -87,6 +101,7 @@ server.addService(runtimeService.service, {
         envVars: (env_vars as Record<string, string> | undefined) || {},
         initCommands: (init_commands as string[] | undefined) || [],
       });
+      sandboxNamespaces.set(result.sandboxId, callerNs);
 
       try {
         createAuditEntry(
@@ -121,8 +136,24 @@ server.addService(runtimeService.service, {
     const { sandbox_id, reason } = call.request;
     logger.info({ sandbox_id, reason }, "Terminating sandbox...");
 
+    let callerNs: string;
     try {
+      callerNs = requireNamespace(call);
+    } catch (nsErr) {
+      const msg = nsErr instanceof Error ? nsErr.message : "Missing namespace metadata";
+      callback({ code: grpc.status.INVALID_ARGUMENT, message: msg } as never);
+      return;
+    }
+
+    try {
+      const owner = sandboxNamespaces.get(sandbox_id as string);
+      if (owner !== undefined && owner !== callerNs) {
+        logger.warn({ sandbox_id, owner, callerNs }, "Cross-namespace terminate rejected");
+        callback(null, { success: false });
+        return;
+      }
       const success = await sandboxDriver.terminateSandbox(sandbox_id as string);
+      if (success) sandboxNamespaces.delete(sandbox_id as string);
 
       try {
         createAuditEntry(
@@ -146,6 +177,20 @@ server.addService(runtimeService.service, {
 
   GetSandboxStatus: async (call: grpc.ServerUnaryCall<Record<string, unknown>, Record<string, unknown>>, callback: grpc.sendUnaryData<Record<string, unknown>>) => {
     const { sandbox_id } = call.request;
+    let callerNs: string;
+    try {
+      callerNs = requireNamespace(call);
+    } catch (nsErr) {
+      const msg = nsErr instanceof Error ? nsErr.message : "Missing namespace metadata";
+      callback({ code: grpc.status.INVALID_ARGUMENT, message: msg } as never);
+      return;
+    }
+    const owner = sandboxNamespaces.get(sandbox_id as string);
+    if (owner !== undefined && owner !== callerNs) {
+      logger.warn({ sandbox_id, owner, callerNs }, "Cross-namespace status rejected");
+      callback({ code: grpc.status.NOT_FOUND, message: "Sandbox not found" } as never);
+      return;
+    }
     try {
       const status = await sandboxDriver.getSandboxStatus(sandbox_id as string);
 

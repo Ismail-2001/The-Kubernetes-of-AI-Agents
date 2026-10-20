@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import pino from "pino";
 import { getAgentRepository, type AgentRow } from "./repository";
-import { createAuditEntry } from "@e-gaop/shared";
+import { createAuditEntry, resolveScope, namespaceError } from "@e-gaop/shared";
 
 const logger = pino({
   level: process.env.NODE_ENV === "test" ? "silent" : (process.env.LOG_LEVEL || "info"),
@@ -73,14 +73,31 @@ function toProtoAgent(agent: StoredAgent): Record<string, unknown> {
   };
 }
 
+type AgentCall = {
+  request: Record<string, unknown>;
+  metadata?: { get(k: string): Array<string | Buffer> };
+};
+type AgentCallback = (err: Error | null, response?: Record<string, unknown>) => void;
+
 export const agentHandlers = {
-  CreateAgent: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+  CreateAgent: async (call: AgentCall, callback: AgentCallback) => {
     try {
+      let scope: { namespace: string; crossNamespace: boolean };
+      try {
+        scope = resolveScope(call, (call.request.metadata as Record<string, unknown> | undefined)?.namespace);
+      } catch (scopeErr) {
+        callback(scopeErr as Error);
+        return;
+      }
+      if (scope.crossNamespace) {
+        callback(namespaceError("CreateAgent namespace does not match caller namespace"));
+        return;
+      }
+      const namespace = scope.namespace;
       const repo = getAgentRepository();
       const req = call.request;
       const metadata = req.metadata as Record<string, unknown> | undefined;
       const name = (metadata?.name as string) ?? `agent-${crypto.randomUUID().slice(0, 8)}`;
-      const namespace = (metadata?.namespace as string) ?? "default";
 
       const existing = await repo.findByNamespaceAndName(namespace, name);
       if (existing) {
@@ -119,11 +136,22 @@ export const agentHandlers = {
     }
   },
 
-  GetAgent: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+  GetAgent: async (call: AgentCall, callback: AgentCallback) => {
     try {
+      let scope: { namespace: string; crossNamespace: boolean };
+      try {
+        scope = resolveScope(call, call.request.namespace);
+      } catch (scopeErr) {
+        callback(scopeErr as Error);
+        return;
+      }
+      if (scope.crossNamespace) {
+        callback(new Error("Agent not found"));
+        return;
+      }
+      const namespace = scope.namespace;
       const repo = getAgentRepository();
       const name = call.request.name as string;
-      const namespace = (call.request.namespace as string) ?? "default";
 
       const agent = await repo.findByNamespaceAndName(namespace, name);
       if (!agent) {
@@ -137,11 +165,22 @@ export const agentHandlers = {
     }
   },
 
-  ListAgents: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+  ListAgents: async (call: AgentCall, callback: AgentCallback) => {
     try {
+      let scope: { namespace: string; crossNamespace: boolean };
+      try {
+        scope = resolveScope(call, call.request.namespace);
+      } catch (scopeErr) {
+        callback(scopeErr as Error);
+        return;
+      }
+      if (scope.crossNamespace) {
+        callback(null, { agents: [], next_cursor: "", total_count: 0 });
+        return;
+      }
+      const namespace = scope.namespace;
       const repo = getAgentRepository();
       const req = call.request;
-      const namespace = req.namespace as string;
       const filters = (req.filters as Record<string, unknown>) ?? {};
       const pagination = (req.pagination as Record<string, unknown>) ?? {};
 
@@ -167,11 +206,22 @@ export const agentHandlers = {
     }
   },
 
-  UpdateAgent: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+  UpdateAgent: async (call: AgentCall, callback: AgentCallback) => {
     try {
+      let scope: { namespace: string; crossNamespace: boolean };
+      try {
+        scope = resolveScope(call, call.request.namespace);
+      } catch (scopeErr) {
+        callback(scopeErr as Error);
+        return;
+      }
+      if (scope.crossNamespace) {
+        callback(new Error("Agent not found"));
+        return;
+      }
+      const namespace = scope.namespace;
       const repo = getAgentRepository();
       const req = call.request;
-      const namespace = req.namespace as string;
       const name = req.name as string;
 
       const updated = await repo.update(namespace, name, {
@@ -193,10 +243,21 @@ export const agentHandlers = {
     }
   },
 
-  DeleteAgent: async (call: { request: Record<string, unknown> }, callback: (err: Error | null, response?: Record<string, unknown>) => void) => {
+  DeleteAgent: async (call: AgentCall, callback: AgentCallback) => {
     try {
+      let scope: { namespace: string; crossNamespace: boolean };
+      try {
+        scope = resolveScope(call, call.request.namespace);
+      } catch (scopeErr) {
+        callback(scopeErr as Error);
+        return;
+      }
+      if (scope.crossNamespace) {
+        callback(new Error("Agent not found"));
+        return;
+      }
+      const namespace = scope.namespace;
       const repo = getAgentRepository();
-      const namespace = call.request.namespace as string;
       const name = call.request.name as string;
 
       const deleted = await repo.softDelete(namespace, name);

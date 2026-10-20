@@ -45,7 +45,8 @@ not listed should be assumed absent, not merely undocumented.
 
 | Gap | Risk | Notes |
 |-----|------|-------|
-| gRPC namespace-enforcement interceptor no-op in production | High | No client attaches `x-agent-claims`; downstream never reads `x-caller-*`. REST and memory-plane paths do enforce namespaces. Live isolation suite in CI will fail until redesigned. |
+| gRPC namespace scoping relies on self-asserted `x-egaop-namespace` metadata | Medium | Handler-level enforcement is fail-closed (missing/malformed → INVALID_ARGUMENT; body namespace cannot override metadata; AgentService/MemoryService/RuntimeService all scope by metadata). Residual: under the shared service token any authenticated mesh member can assert any namespace. A signed per-service identity (SPIFFE-style) would close this; redesign documented in FAANG-AUDIT-REPORT follow-ups. |
+| Sandbox namespace-ownership map is in-memory per pod | Low | Cross-namespace status/terminate rejected while the creating pod lives; a restart clears associations (fail-open to unauthenticated-container ops only, still inside the mesh token boundary). |
 | mTLS client-cert verification disabled | Medium | `@grpc/grpc-js` upstream issue; server can request certs but does not verify. See SECURITY.md. |
 | Tool-proxy auth to serpapi relies on query param | Low | Header injection kept for other tools. |
 | REST secret-store check-then-use race | Low | Single-instance deployments only affected. |

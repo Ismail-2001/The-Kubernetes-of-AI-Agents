@@ -196,20 +196,39 @@ afterAll(async () => {
 
 async function callAgentHandler<T>(
   handler: (call: any, callback: any) => void,
-  request: Record<string, unknown>
+  request: Record<string, unknown>,
+  metaNs?: string
 ): Promise<T> {
+  const ns =
+    metaNs ??
+    ((request.metadata as { namespace?: string } | undefined)?.namespace as string | undefined) ??
+    (request.namespace as string | undefined) ??
+    "default";
   return new Promise((resolve, reject) => {
-    handler({ request }, (err: Error | null, response?: Record<string, unknown>) => {
-      if (err) reject(err);
-      else resolve(response as T);
-    });
+    handler(
+      {
+        request,
+        metadata: { get: (k: string) => (k === "x-egaop-namespace" ? [ns] : []) },
+      },
+      (err: Error | null, response?: Record<string, unknown>) => {
+        if (err) reject(err);
+        else resolve(response as T);
+      }
+    );
   });
 }
 
 
 
-function createMockCall(request: Record<string, unknown>): { request: Record<string, unknown> } {
-  return { request };
+function createMockCall(request: Record<string, unknown>): { request: Record<string, unknown>; metadata: { get(k: string): string[] } } {
+  const ns =
+    ((request.metadata as { namespace?: string } | undefined)?.namespace as string | undefined) ??
+    (request.namespace as string | undefined) ??
+    "default";
+  return {
+    request,
+    metadata: { get: (k: string) => (k === "x-egaop-namespace" ? [ns] : []) },
+  };
 }
 
 function createMockCallback(): {

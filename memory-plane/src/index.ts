@@ -1,4 +1,4 @@
-import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, createAuditEntry, buildHealthResponse, healthToHttpStatus, checkPostgres, checkRedis } from "@e-gaop/shared";
+import { initTracing, shutdownTracing, createNamespaceServerInterceptor, createServiceTokenServerInterceptor, createTraceServerInterceptor, validateSecrets, loadSecretsIntoEnv, createAuditEntry, buildHealthResponse, healthToHttpStatus, checkPostgres, checkRedis, requireNamespace } from "@e-gaop/shared";
 
 initTracing("memory-plane");
 loadSecretsIntoEnv();
@@ -115,12 +115,20 @@ function sanitizeKeyComponent(value: unknown): string {
 
 server.addService(memoryService.service, {
   Read: async (call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) => {
-    const { agent_id, namespace, memory_type, key } = call.request as Record<string, unknown>;
+    const { agent_id, memory_type, key } = call.request as Record<string, unknown>;
 
-    logger.info({ agent_id, namespace, memory_type, key }, "Memory read request");
+    let ns: string;
+    try {
+      ns = requireNamespace(call);
+    } catch (nsErr) {
+      callback(nsErr as Error, null);
+      return;
+    }
+
+    logger.info({ agent_id, namespace: ns, memory_type, key }, "Memory read request");
 
     try {
-      const safeNs = sanitizeKeyComponent(namespace);
+      const safeNs = sanitizeKeyComponent(ns);
       const safeAgent = sanitizeKeyComponent(agent_id);
       const safeType = sanitizeKeyComponent(memory_type);
       const safeKey = sanitizeKeyComponent(key);
@@ -136,7 +144,7 @@ server.addService(memoryService.service, {
       // Slow path: fall back to PostgreSQL if not in Redis
       if (!data) {
         try {
-          const entry = await memRepo.get(namespace as string, agent_id as string, key as string);
+          const entry = await memRepo.get(ns, agent_id as string, key as string);
           if (entry) {
             data = entry.value;
             // Backfill Redis for faster subsequent reads
@@ -156,12 +164,20 @@ server.addService(memoryService.service, {
   },
 
   Write: async (call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) => {
-    const { agent_id, namespace, memory_type, key, data, ttl_seconds } = call.request as Record<string, unknown>;
+    const { agent_id, memory_type, key, data, ttl_seconds } = call.request as Record<string, unknown>;
 
-    logger.info({ agent_id, namespace, memory_type, key }, "Memory write request");
+    let ns: string;
+    try {
+      ns = requireNamespace(call);
+    } catch (nsErr) {
+      callback(nsErr as Error, null);
+      return;
+    }
+
+    logger.info({ agent_id, namespace: ns, memory_type, key }, "Memory write request");
 
     try {
-      const safeNs = sanitizeKeyComponent(namespace);
+      const safeNs = sanitizeKeyComponent(ns);
       const safeAgent = sanitizeKeyComponent(agent_id);
       const safeType = sanitizeKeyComponent(memory_type);
       const safeKey = sanitizeKeyComponent(key);
@@ -186,13 +202,13 @@ server.addService(memoryService.service, {
         createAuditEntry(
           "agent.tool_call",
           "info",
-          { type: "agent", id: agent_id as string, namespace: namespace as string },
+          { type: "agent", id: agent_id as string, namespace: ns },
           { name: "memory.Write", result: "allowed" },
-          { type: "memory", id: `${namespace}/${memory_type}/${key}`, namespace: namespace as string },
+          { type: "memory", id: `${ns}/${memory_type}/${key}`, namespace: ns },
         );
       } catch { /* audit failure is non-fatal */ }
 
-      callback(null, { status: "success", version: `rev-${Date.now()}` });
+      callback(null, { status: "success", version: `rev-${Date.now()}`, namespace: safeNs });
     } catch (err: unknown) {
       logger.error({ err: err instanceof Error ? err.message : String(err) }, "Memory write error");
       callback(null, { status: "error", version: "" });
@@ -200,9 +216,16 @@ server.addService(memoryService.service, {
   },
 
   Delete: async (call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) => {
-    const { agent_id, namespace, memory_type, key } = call.request as Record<string, unknown>;
+    const { agent_id, memory_type, key } = call.request as Record<string, unknown>;
+    let ns: string;
     try {
-      const safeNs = sanitizeKeyComponent(namespace);
+      ns = requireNamespace(call);
+    } catch (nsErr) {
+      callback(nsErr as Error, null);
+      return;
+    }
+    try {
+      const safeNs = sanitizeKeyComponent(ns);
       const safeAgent = sanitizeKeyComponent(agent_id);
       const safeType = sanitizeKeyComponent(memory_type);
       const safeKey = sanitizeKeyComponent(key);
@@ -211,16 +234,16 @@ server.addService(memoryService.service, {
       await redis.del(redisKey);
 
       // Also soft-delete from PostgreSQL
-      memRepo.delete(namespace as string, agent_id as string, key as string)
+      memRepo.delete(ns, agent_id as string, key as string)
         .catch((pgErr) => logger.warn({ err: pgErr.message }, "PostgreSQL delete failed"));
 
       try {
         createAuditEntry(
           "agent.tool_call",
           "info",
-          { type: "agent", id: agent_id as string, namespace: namespace as string },
+          { type: "agent", id: agent_id as string, namespace: ns },
           { name: "memory.Delete", result: "allowed" },
-          { type: "memory", id: `${namespace}/${memory_type}/${key}`, namespace: namespace as string },
+          { type: "memory", id: `${ns}/${memory_type}/${key}`, namespace: ns },
         );
       } catch { /* audit failure is non-fatal */ }
 
@@ -231,9 +254,16 @@ server.addService(memoryService.service, {
   },
 
   List: async (call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) => {
-    const { agent_id, namespace, memory_type } = call.request as Record<string, unknown>;
+    const { agent_id, memory_type } = call.request as Record<string, unknown>;
+    let ns: string;
     try {
-      const safeNs = sanitizeKeyComponent(namespace);
+      ns = requireNamespace(call);
+    } catch (nsErr) {
+      callback(nsErr as Error, null);
+      return;
+    }
+    try {
+      const safeNs = sanitizeKeyComponent(ns);
       const safeAgent = sanitizeKeyComponent(agent_id);
       const safeType = sanitizeKeyComponent(memory_type);
 
@@ -252,7 +282,7 @@ server.addService(memoryService.service, {
       // Fall back to PostgreSQL if Redis returned nothing
       if (entries.length === 0) {
         try {
-          const pgEntries = await memRepo.list(namespace as string, agent_id as string);
+          const pgEntries = await memRepo.list(ns, agent_id as string);
           for (const entry of pgEntries) {
             entries.push({ key: entry.key, data: entry.value });
           }

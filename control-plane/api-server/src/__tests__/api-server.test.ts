@@ -112,6 +112,12 @@ afterAll(async () => {
   server.forceShutdown();
 });
 
+function nsMd(ns: string) {
+  const md = new grpc.Metadata();
+  md.set("x-egaop-namespace", ns);
+  return md;
+}
+
 describe("API Server", () => {
   let port: number;
   let client: any;
@@ -133,7 +139,7 @@ describe("API Server", () => {
       client.CreateAgent({
         metadata: { name: "test-agent", namespace: "default" },
         spec: { version: "v1", description: "test", runtime: { isolation_level: "Enhanced" } }
-      }, (err: any, response: any) => {
+      }, nsMd("default"), (err: any, response: any) => {
         expect(err).toBeNull();
         expect(response.metadata.uid).toBeDefined();
         expect(response.metadata.uid.length).toBeGreaterThan(0);
@@ -149,11 +155,11 @@ describe("API Server", () => {
       client.CreateAgent({
         metadata: { name: "agent-a", namespace: "default" },
         spec: {}
-      }, (_err1: any, r1: any) => {
+      }, nsMd("default"), (_err1: any, r1: any) => {
         client.CreateAgent({
           metadata: { name: "agent-b", namespace: "default" },
           spec: {}
-        }, (_err2: any, r2: any) => {
+        }, nsMd("default"), (_err2: any, r2: any) => {
           expect(r1.metadata.uid).not.toBe(r2.metadata.uid);
           done();
         });
@@ -163,7 +169,7 @@ describe("API Server", () => {
 
   describe("GetAgent", () => {
     it("should return Pending phase for existing agent", (done) => {
-      client.GetAgent({ name: "test-agent", namespace: "default" }, (err: any, response: any) => {
+      client.GetAgent({ name: "test-agent", namespace: "default" }, nsMd("default"), (err: any, response: any) => {
         expect(err).toBeNull();
         expect(response.status.phase).toBe("Pending");
         expect(response.status.health_status).toBe("Healthy");

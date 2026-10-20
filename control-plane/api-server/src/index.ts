@@ -563,8 +563,15 @@ fastify.get("/api/agents", async (request) => {
 
   return new Promise((resolve) => {
     agentHandlers.ListAgents(
+      // REST bridge: mirror the query namespace as mesh metadata (P1-1 REST RBAC gates access).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto
-      { request: { namespace: q.namespace ?? "", filters, pagination: { page_size: limit } } } as any,
+      {
+        request: { namespace: q.namespace ?? "", filters, pagination: { page_size: limit } },
+        metadata: {
+          get: (k: string) =>
+            k === "x-egaop-namespace" ? [q.namespace && q.namespace.length > 0 ? q.namespace : "default"] : [],
+        },
+      } as any,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto callback
       (_err: any, response: any) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamically loaded proto response

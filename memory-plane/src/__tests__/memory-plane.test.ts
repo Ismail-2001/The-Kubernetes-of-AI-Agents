@@ -69,6 +69,13 @@ describe("Memory Plane", () => {
     port = await startServer(server);
     const MemoryService = egaopProto.egaop.v1.MemoryService;
     client = new MemoryService(`localhost:${port}`, grpc.credentials.createInsecure());
+    // Namespace-scoped RPCs require x-egaop-namespace metadata (fail-closed contract).
+    const nsMd = new grpc.Metadata();
+    nsMd.set("x-egaop-namespace", "default");
+    for (const m of ["Write", "Read", "Delete", "List"]) {
+      const orig = client[m].bind(client);
+      client[m] = (req: unknown, cb: unknown) => orig(req, nsMd, cb);
+    }
     healthClient = createHealthClient(port);
   });
 

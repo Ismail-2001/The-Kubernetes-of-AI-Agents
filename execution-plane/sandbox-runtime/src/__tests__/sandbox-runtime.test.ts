@@ -70,6 +70,13 @@ describe("Sandbox Runtime", () => {
     port = await startServer(server);
     const RuntimeService = egaopProto.egaop.v1.RuntimeService;
     client = new RuntimeService(`localhost:${port}`, grpc.credentials.createInsecure());
+    // Namespace-scoped RPCs require x-egaop-namespace metadata (fail-closed contract).
+    const nsMd = new grpc.Metadata();
+    nsMd.set("x-egaop-namespace", "default");
+    for (const m of ["CreateSandbox", "GetSandboxStatus", "TerminateSandbox"]) {
+      const orig = client[m].bind(client);
+      client[m] = (req: unknown, cb: unknown) => orig(req, nsMd, cb);
+    }
     healthClient = createHealthClient(port);
   });
 

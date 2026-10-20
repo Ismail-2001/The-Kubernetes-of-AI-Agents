@@ -50,6 +50,13 @@ export {
   shutdownMetrics,
 } from "./metrics/index.js";
 export { spanEnrichmentInterceptor } from "./grpc/span-enrichment.js";
+export {
+  NAMESPACE_METADATA_KEY,
+  isValidNamespace,
+  requireNamespace,
+  resolveScope,
+  namespaceError,
+} from "./grpc/namespace.js";
 export { createTraceServerInterceptor } from "./grpc/trace-propagation.js";
 export {
   createNamespaceEnforcementInterceptor,
