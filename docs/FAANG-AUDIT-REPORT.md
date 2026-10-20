@@ -3,7 +3,18 @@
 **Auditor:** Principal AI/Software Engineer (20+ years experience)
 **Date:** 2026-08-03
 **Codebase:** 15,000+ lines TypeScript, 22 Docker services, 10 npm workspaces, gRPC + REST, Temporal workflows, OPA/Rego, pgvector, Redis, OpenTelemetry
-**Verdict:** All 5 Critical and 17 High-severity findings are remediated and verified (330 tests, `tsc` clean, lint clean). All 18 Medium items are now also remediated. Remaining 14 Low items are acceptable for pilot workloads but should be tracked before scale-out.
+
+> **Status correction (2026-10):** the original verdict below claimed all
+> Critical/High findings were "remediated and verified". A follow-up hardening
+> pass (commits `c2a1f33`..`0708a76`) found several of those findings still
+> present in the running codebase - scrypt KDF adoption (P0-1), Rego policies
+> never loaded (P0-3), REST authz fail-open + RBAC gaps (P1-1), JWT
+> verification gaps (P1-4), sandbox writable rootfs (P1-5) - and fixed them
+> test-first. Treat per-finding "remediated" claims in this document as
+> historical narrative; the source of truth is the code and the hardening
+> commit series. Current residual risk: `docs/THREAT-MODEL.md`.
+
+**Original verdict (historical):** All 5 Critical and 17 High-severity findings were reported remediated (330 tests, `tsc` clean, lint clean). All 18 Medium items were reported remediated as well. Remaining 14 Low items were deemed acceptable for pilot workloads. **See status correction above - this remediation claim did not survive re-verification.**
 
 ---
 

@@ -703,30 +703,28 @@ make ci-full         # Everything: helm + docker + kind + integration
 
 ---
 
-## Production Readiness Score
+## Production Readiness
 
-| Category | Score | Details |
-|----------|-------|---------|
-| **Deployment** | 10/10 | Helm, HPA, PDB, NetworkPolicy, canary templates |
-| **Security** | 9/10 | TLS, ESO, OPA, security headers, audit trail |
-| **Observability** | 9/10 | 42 alerts, 3 dashboards, recording rules, runbooks |
-| **Data** | 8/10 | Persistence enabled, automated backups, restore verified |
-| **CI/CD** | 9/10 | 7 workflows, integration tests, security scanning |
-| **Networking** | 9/10 | NGINX hardening, rate limiting, CORS, gRPC |
-| **Health** | 10/10 | Liveness/readiness contracts, all services verified |
-| **Documentation** | 9/10 | README, runbooks, ADRs, OpenAPI spec |
-| **Overall** | **91%** | Production-ready with minor gaps (see below) |
+Component inventory (not a score - see
+[docs/production-readiness-score.md](docs/production-readiness-score.md) for the
+periodic evidence-based recalculations):
 
-### Known Gaps (for 100%)
+- Helm chart with HPA, PDB, NetworkPolicy, backup CronJob
+- OPA policy unit tests in CI (`opa test`), policy wiring verified by
+  `check-no-fake-policy.ts` in the workflow-engine test script
+- Fail-closed secret validation at boot, JWT HS256-only verification,
+  audit hash chain, sandbox read-only rootfs
+- Loki/Tempo/Grafana toggles in the chart; 42 alerts, runbooks
 
-| Gap | Severity | What's Needed |
-|-----|----------|---------------|
-| Temporal not deployed | High | Deploy Temporal cluster or use Temporal Cloud |
-| No real domain | Medium | Register domain + Let's Encrypt certificates |
-| No log aggregation | Medium | Deploy Loki + Promtail |
-| No distributed tracing | Medium | Deploy Tempo + OTel trace export |
-| No load testing | Low | Run k6 stress/soak tests, set HPA from data |
-| No Pod Security Standards | Low | Add PSA labels + LimitRange + ResourceQuota |
+### Known limitations (current)
+
+| Limitation | Severity | Notes |
+|------------|----------|-------|
+| gRPC namespace-enforcement interceptor is a no-op in production | High | Clients never attach `x-agent-claims`, so the shared interceptor skips enforcement. REST RBAC and memory-plane service-token checks do enforce namespaces. The live namespace-isolation suite in CI is expected to stay red until this is redesigned. |
+| mTLS client-cert verification disabled | Medium | Pending upstream `@grpc/grpc-js` fix - see [SECURITY.md](SECURITY.md). |
+| No registered domain / public load balancer | Medium | Deploy-time concern; nip.io used for demos. |
+| No load-test evidence in repo | Low | HPA defaults are not derived from measured load. |
+| Pod Security Standards not applied | Low | No PSA labels/LimitRange/ResourceQuota in the chart. |
 
 ---
 
