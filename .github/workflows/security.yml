@@ -63,7 +63,7 @@ jobs:
           fi
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: "egaop/${{ matrix.service }}:scan"
           format: table
@@ -86,7 +86,8 @@ jobs:
       - name: Check for secrets in chart templates
         run: |
           echo "=== Checking for hardcoded secrets ==="
-          if grep -r "password:" charts/e-gaop/templates/ | grep -v "existingSecret\|secretKeyRef\|valueFrom\|{{-\|{#\|//"; then
+          # Templated lines ({{ ... }}) reference vars/Secrets, not literals.
+          if grep -r "password:" charts/e-gaop/templates/ | grep -v "existingSecret\|secretKeyRef\|valueFrom\|{{\|{#\|//"; then
             echo "WARNING: Possible hardcoded passwords in chart templates"
             exit 1
           fi

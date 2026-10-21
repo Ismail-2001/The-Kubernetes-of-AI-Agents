@@ -22,6 +22,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      # Fresh runners have no dist/; @e-gaop/shared publishes types via
+      # dist/index.d.ts, so cross-workspace typecheck needs shared built first.
+      - name: Build shared, then all workspaces
+        run: |
+          npm run build -w @e-gaop/shared
+          npm run build --workspaces --if-present
       - run: npm run lint --workspaces --if-present
       - name: Typecheck all workspaces (gates on failure)
         run: npm run typecheck --workspaces --if-present
@@ -36,6 +42,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      # Tests import @e-gaop/shared at runtime (main: dist/index.js); build first.
+      - name: Build shared, then all workspaces
+        run: |
+          npm run build -w @e-gaop/shared
+          npm run build --workspaces --if-present
       # Root script runs every workspace's test script. workflow-engine's test
       # script also runs scripts/check-no-fake-policy.ts, so fake Rego wiring
       # is a hard failure here (previously bypassed by calling jest directly).
@@ -84,6 +95,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - name: Build shared (coverage imports cross-workspace dist)
+        run: npm run build -w @e-gaop/shared
       - name: Generate coverage summaries
         run: |
           cd packages/shared && npx jest --silent --coverage --coverageReporters=json-summary --coverageDirectory=coverage
@@ -135,7 +148,7 @@ jobs:
       - name: Build API server image
         run: docker build -t egaop-api:test -f control-plane/api-server/Dockerfile .
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: egaop-api:test
           format: table
@@ -192,6 +205,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - name: Build shared (coverage imports cross-workspace dist)
+        run: npm run build -w @e-gaop/shared
       - name: Generate coverage
         run: |
           cd packages/shared && npx jest --coverage --coverageReporters=json-summary --silent
