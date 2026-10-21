@@ -60,7 +60,12 @@ describe("RateLimiter", () => {
   });
 
   it("should return retryAfterMs based on oldest request", async () => {
-    const shortLimiter = new RateLimiter(2, 200); // 2 per 200ms
+    // Wide window: under parallel jest workers the 50ms sleep can stall for
+    // hundreds of ms, which used to age the oldest request out of a 200ms
+    // window and flip the expected rejection. The assertion under test is
+    // "over-limit rejects with a retry bounded by the window", not scheduler
+    // precision, so keep a large jitter budget.
+    const shortLimiter = new RateLimiter(2, 2000); // 2 per 2000ms
     try {
       shortLimiter.check("agent-1"); // t=0
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -69,7 +74,7 @@ describe("RateLimiter", () => {
       const result = shortLimiter.check("agent-1"); // rejected
       expect(result.allowed).toBe(false);
       expect(result.retryAfterMs).toBeGreaterThan(0);
-      expect(result.retryAfterMs).toBeLessThanOrEqual(200);
+      expect(result.retryAfterMs).toBeLessThanOrEqual(2000);
     } finally {
       shortLimiter.dispose();
     }
