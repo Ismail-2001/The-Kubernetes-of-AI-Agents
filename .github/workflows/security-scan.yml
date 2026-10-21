@@ -152,6 +152,7 @@ jobs:
           - sandbox-runtime
           - memory-plane
           - observability-plane
+          - policy-plane
           - admin-console
     steps:
       - uses: actions/checkout@v4
@@ -160,21 +161,24 @@ jobs:
       - name: Map Dockerfile path
         id: paths
         run: |
+          # Service Dockerfiles COPY root files -> root context with -f.
+          # Only admin-console is self-contained (own package.json/lock).
           case "${{ matrix.service }}" in
-            api-server)       echo "df=control-plane/api-server/Dockerfile" ;;
-            secret-store)     echo "df=control-plane/secret-store/Dockerfile" ;;
-            workflow-engine)  echo "df=control-plane/workflow-engine/Dockerfile" ;;
-            llm-router)       echo "df=execution-plane/llm-router/Dockerfile" ;;
-            tool-proxy)       echo "df=execution-plane/tool-proxy/Dockerfile" ;;
-            sandbox-runtime)  echo "df=execution-plane/sandbox-runtime/Dockerfile" ;;
-            memory-plane)     echo "df=memory-plane/Dockerfile" ;;
-            observability-plane) echo "df=observability-plane/Dockerfile" ;;
-            admin-console)    echo "df=admin-console/Dockerfile" ;;
+            api-server)       echo "df=control-plane/api-server/Dockerfile"; echo "ctx=." ;;
+            secret-store)     echo "df=control-plane/secret-store/Dockerfile"; echo "ctx=." ;;
+            workflow-engine)  echo "df=control-plane/workflow-engine/Dockerfile"; echo "ctx=." ;;
+            llm-router)       echo "df=execution-plane/llm-router/Dockerfile"; echo "ctx=." ;;
+            tool-proxy)       echo "df=execution-plane/tool-proxy/Dockerfile"; echo "ctx=." ;;
+            sandbox-runtime)  echo "df=execution-plane/sandbox-runtime/Dockerfile"; echo "ctx=." ;;
+            memory-plane)     echo "df=memory-plane/Dockerfile"; echo "ctx=." ;;
+            observability-plane) echo "df=observability-plane/Dockerfile"; echo "ctx=." ;;
+            policy-plane)     echo "df=policy-plane/Dockerfile"; echo "ctx=." ;;
+            admin-console)    echo "df=admin-console/Dockerfile"; echo "ctx=admin-console" ;;
           esac >> "$GITHUB_OUTPUT"
       - name: Build image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ steps.paths.outputs.ctx }}
           file: ${{ steps.paths.outputs.df }}
           tags: ${{ matrix.service }}:scan-${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
@@ -190,7 +194,8 @@ jobs:
           cache-dir: /tmp/.trivy-cache
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        # Only when the scan produced output (build failure => no SARIF).
+        if: always() && hashFiles(format('trivy-image-{0}.sarif', matrix.service)) != ''
         with:
           sarif_file: trivy-image-${{ matrix.service }}.sarif
           category: image-${{ matrix.service }}
