@@ -1,14 +1,23 @@
 import { z } from "zod";
 import {
+  validate,
   PaginationQuerySchema,
+  NamespaceQuerySchema,
+  IdParamSchema,
+  NameParamSchema,
   LoginSchema,
   RegisterSchema,
   ChangePasswordSchema,
+  RefreshTokenSchema,
+  UpdateAgentSchema,
   CreateAgentSchema,
   RunAgentSchema,
   RollbackAgentSchema,
   AgentListQuerySchema,
+  TraceListQuerySchema,
   SLOQuerySchema,
+  type ValidationReply,
+  type ValidationRequest,
 } from "../validation/index.js";
 
 describe("Zod validation schemas", () => {
@@ -143,5 +152,162 @@ describe("Zod validation schemas", () => {
       const result = SLOQuerySchema.safeParse({ window: 9999 });
       expect(result.success).toBe(false);
     });
+  });
+
+  describe("NamespaceQuerySchema", () => {
+    it("defaults namespace to default and enforces length", () => {
+      const result = NamespaceQuerySchema.safeParse({});
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.namespace).toBe("default");
+      }
+      expect(NamespaceQuerySchema.safeParse({ namespace: "" }).success).toBe(false);
+      expect(NamespaceQuerySchema.safeParse({ namespace: "a".repeat(254) }).success).toBe(false);
+    });
+  });
+
+  describe("IdParamSchema", () => {
+    it("accepts uuid and rejects non-uuid", () => {
+      const uuid = "123e4567-e89b-12d3-a456-426614174000";
+      expect(IdParamSchema.safeParse({ id: uuid }).success).toBe(true);
+      expect(IdParamSchema.safeParse({ id: "not-a-uuid" }).success).toBe(false);
+    });
+  });
+
+  describe("NameParamSchema", () => {
+    it("accepts valid DNS label", () => {
+      expect(NameParamSchema.safeParse({ name: "my-agent-1" }).success).toBe(true);
+    });
+
+    it("rejects invalid DNS label", () => {
+      expect(NameParamSchema.safeParse({ name: "-leading" }).success).toBe(false);
+      expect(NameParamSchema.safeParse({ name: "UPPER" }).success).toBe(false);
+      expect(NameParamSchema.safeParse({ name: "" }).success).toBe(false);
+    });
+  });
+
+  describe("RefreshTokenSchema", () => {
+    it("accepts empty object (cookie case) and provided token", () => {
+      expect(RefreshTokenSchema.safeParse({}).success).toBe(true);
+      expect(RefreshTokenSchema.safeParse({ refresh_token: "abc" }).success).toBe(true);
+      expect(RefreshTokenSchema.safeParse({ refresh_token: "" }).success).toBe(false);
+    });
+  });
+
+  describe("UpdateAgentSchema", () => {
+    it("rejects empty patch and accepts non-empty patch", () => {
+      expect(UpdateAgentSchema.safeParse({}).success).toBe(false);
+      expect(UpdateAgentSchema.safeParse({ labels: { team: "x" } }).success).toBe(true);
+    });
+  });
+
+  describe("TraceListQuerySchema", () => {
+    it("extends pagination and defaults namespace", () => {
+      const result = TraceListQuerySchema.safeParse({});
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.page).toBe(1);
+        expect(result.data.namespace).toBe("default");
+      }
+    });
+  });
+});
+
+// ── validate() preHandler middleware ─────────────────────────────────────────
+
+describe("validate() middleware", () => {
+  function makeReply(headers: Record<string, unknown> = {}) {
+    const reply: ValidationReply = {
+      getHeader: jest.fn((name: string) => headers[name]),
+      status: jest.fn(() => reply),
+      send: jest.fn(),
+    };
+    return reply;
+  }
+
+  it("replaces parsed body on success without responding", async () => {
+    const request = { body: { page: "2", limit: "50" }, url: "/agents" } as ValidationRequest;
+    const reply = makeReply({ "X-Request-ID": "trace-abc" });
+
+    await validate("body", PaginationQuerySchema)(request, reply);
+
+    expect(reply.status).not.toHaveBeenCalled();
+    expect(reply.send).not.toHaveBeenCalled();
+    expect(request.body).toEqual({ page: 2, limit: 50 });
+  });
+
+  it("sends RFC 7807 problem with traceId on failure", async () => {
+    const request = { body: { limit: 9999 }, url: "/agents" } as ValidationRequest;
+    const reply = makeReply({ "X-Request-ID": "trace-abc" });
+
+    await validate("body", PaginationQuerySchema)(request, reply);
+
+    expect(reply.status).toHaveBeenCalledWith(400);
+    const problem = reply.send.mock.calls[0][0] as {
+      type: string;
+      status: number;
+      instance: string;
+      traceId: string;
+      detail: string;
+      errors: Array<{ path: string; code: string }>;
+    };
+    expect(problem.type).toBe("https://api.egaop.io/errors/validation");
+    expect(problem.status).toBe(400);
+    expect(problem.instance).toBe("/agents");
+    expect(problem.traceId).toBe("trace-abc");
+    expect(problem.detail).toContain("1 error(s)");
+    expect(problem.errors[0].path).toBe("limit");
+    expect(problem.errors[0].code).toBe("too_big");
+    expect(request.body).toEqual({ limit: 9999 });
+  });
+
+  it("validates and replaces query params", async () => {
+    const request = { query: { page: "3" }, url: "/traces" } as ValidationRequest;
+    const reply = makeReply({ "X-Request-ID": "trace-q" });
+
+    await validate("query", PaginationQuerySchema)(request, reply);
+
+    expect(reply.status).not.toHaveBeenCalled();
+    expect(request.query).toEqual({ page: 3, limit: 20 });
+  });
+
+  it("validates and replaces route params", async () => {
+    const request = {
+      params: { id: "123e4567-e89b-12d3-a456-426614174000" },
+      url: "/agents/123e4567-e89b-12d3-a456-426614174000",
+    } as ValidationRequest;
+    const reply = makeReply({ "X-Request-ID": "trace-p" });
+
+    await validate("params", IdParamSchema)(request, reply);
+
+    expect(reply.status).not.toHaveBeenCalled();
+    expect((request.params as { id: string }).id).toBe("123e4567-e89b-12d3-a456-426614174000");
+  });
+
+  it("generates a traceId when the request-id header is absent", async () => {
+    const request = { body: { limit: 9999 }, url: "/agents" } as ValidationRequest;
+    const reply = makeReply();
+
+    await validate("body", PaginationQuerySchema)(request, reply);
+
+    const problem = reply.send.mock.calls[0][0] as { traceId: string };
+    expect(problem.traceId).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it("generates a traceId when getHeader throws", async () => {
+    const request = { body: { limit: 9999 }, url: "/agents" } as ValidationRequest;
+    const reply: ValidationReply = {
+      getHeader: jest.fn(() => {
+        throw new Error("header access failed");
+      }),
+      status: jest.fn(() => reply),
+      send: jest.fn(),
+    };
+
+    await validate("body", PaginationQuerySchema)(request, reply);
+
+    expect(reply.status).toHaveBeenCalledWith(400);
+    const problem = reply.send.mock.calls[0][0] as { traceId: string };
+    expect(problem.traceId).toMatch(/^[0-9a-f-]{36}$/i);
   });
 });
