@@ -824,8 +824,11 @@ sandbox-runtime:
     limits:
       memory: 128Mi
 
+# Enabled: the namespace-isolation security suite port-forwards
+# memory-plane:50055 and asserts cross-namespace denial against it.
 memory-plane:
-  enabled: false
+  enabled: true
+  replicas: 1
 
 observability-plane:
   enabled: false
