@@ -183,7 +183,7 @@ otelCollector:
   enabled: true
   image:
     repository: otel/opentelemetry-collector-contrib
-    tag: latest
+    tag: "0.162.0"
     pullPolicy: IfNotPresent
   ports:
     grpc: 4317
@@ -220,7 +220,7 @@ defaults:
 api-server:
   enabled: true
   image: egaop/api-server
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   grpcPort: 50051
   healthPort: 15051
@@ -245,7 +245,7 @@ api-server:
 secret-store:
   enabled: true
   image: egaop/secret-store
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   grpcPort: 50057
   healthPort: 15057
@@ -262,7 +262,7 @@ secret-store:
 workflow-engine:
   enabled: true
   image: egaop/workflow-engine
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   healthPort: 15058
   temporalNamespace: default
@@ -281,7 +281,7 @@ workflow-engine:
 llm-router:
   enabled: true
   image: egaop/llm-router
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   grpcPort: 50053
   healthPort: 15053
@@ -308,7 +308,7 @@ llm-router:
 tool-proxy:
   enabled: true
   image: egaop/tool-proxy
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   grpcPort: 50052
   healthPort: 15052
@@ -326,7 +326,7 @@ tool-proxy:
 sandbox-runtime:
   enabled: true
   image: egaop/sandbox-runtime
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   grpcPort: 50054
   healthPort: 15054
@@ -343,7 +343,7 @@ sandbox-runtime:
 memory-plane:
   enabled: true
   image: egaop/memory-plane
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   grpcPort: 50055
   healthPort: 15055
@@ -360,7 +360,7 @@ memory-plane:
 observability-plane:
   enabled: true
   image: egaop/observability-plane
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   grpcPort: 50056
   healthPort: 15056
@@ -377,7 +377,7 @@ observability-plane:
 policy-plane:
   enabled: true
   image: egaop/policy-plane
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   grpcPort: 50059
   healthPort: 15059
@@ -394,7 +394,7 @@ policy-plane:
 admin-console:
   enabled: true
   image: egaop/admin-console
-  tag: latest
+  tag: "1.0.0"
   replicas: 1
   port: 3000
   tls:
@@ -511,7 +511,7 @@ canary:
     - name: api-server
       enabled: true
       image: egaop/api-server
-      tag: latest
+      tag: "1.0.0"
       grpcPort: 50051
       healthPort: 15051
       weight: 10
@@ -519,7 +519,7 @@ canary:
     - name: llm-router
       enabled: true
       image: egaop/llm-router
-      tag: latest
+      tag: "1.0.0"
       grpcPort: 50053
       healthPort: 15053
       weight: 10
@@ -527,7 +527,7 @@ canary:
     - name: workflow-engine
       enabled: true
       image: egaop/workflow-engine
-      tag: latest
+      tag: "1.0.0"
       grpcPort: 50058
       healthPort: 15058
       weight: 10
