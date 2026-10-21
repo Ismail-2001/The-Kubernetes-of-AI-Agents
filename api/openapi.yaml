@@ -330,6 +330,8 @@ components:
           properties:
             items:
               type: array
+              items:
+                type: object
             total:
               type: number
             page:
@@ -379,7 +381,7 @@ components:
           type: string
           format: uri
           description: URI reference identifying the specific occurrence
-          example: "/api/agents/agent-123"
+          example: "https://egaop.example/api/agents/agent-123"
         traceId:
           type: string
           format: uuid
