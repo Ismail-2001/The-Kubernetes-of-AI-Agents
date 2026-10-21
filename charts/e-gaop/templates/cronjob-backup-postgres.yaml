@@ -100,18 +100,18 @@ spec:
                       name: {{ .Values.postgresql.auth.existingSecret | default (printf "%s-postgresql" .Release.Name) }}
                       key: {{ .Values.postgresql.auth.secretKeys.userPasswordKey | default "password" }}
               {{- if .Values.backup.s3.enabled }}
-              - name: AWS_ACCESS_KEY_ID
-                valueFrom:
-                  secretKeyRef:
-                    name: {{ .Release.Name }}-backup-s3-credentials
-                    key: aws-access-key-id
-                    optional: true
-              - name: AWS_SECRET_ACCESS_KEY
-                valueFrom:
-                  secretKeyRef:
-                    name: {{ .Release.Name }}-backup-s3-credentials
-                    key: aws-secret-access-key
-                    optional: true
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-backup-s3-credentials
+                      key: aws-access-key-id
+                      optional: true
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-backup-s3-credentials
+                      key: aws-secret-access-key
+                      optional: true
               {{- end }}
               volumeMounts:
                 - name: backup-scripts
