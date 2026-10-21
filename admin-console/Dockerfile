@@ -18,6 +18,9 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder /app/admin-console/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/admin-console/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/admin-console/.next/static ./.next/static
+# npm/npx are build-time tools; this image only runs prebuilt JS. Dropping npm's
+# bundled transitive deps removes fixable CVEs that fail the Trivy image gate.
+RUN rm -rf /usr/local/lib/node_modules/npm && rm -f /usr/local/bin/npm /usr/local/bin/npx
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000

@@ -20,6 +20,11 @@ RUN npm run build -w control-plane/api-server
 COPY control-plane/api-server/patch-fastify.js ./patch-fastify.js
 RUN node patch-fastify.js && rm patch-fastify.js
 
+# Runtime image must not ship devDependencies (jest, typescript, eslint, …):
+# they bloat the image and carry fixable CRITICAL/HIGH CVEs that fail the
+# Trivy gate. Builds are done; prune everything not in "dependencies".
+RUN npm prune --omit=dev --ignore-scripts
+
 # Stage 2: Production
 FROM node:22-alpine AS runner
 WORKDIR /app
@@ -31,6 +36,9 @@ RUN rm -rf node_modules/@e-gaop/shared
 COPY --from=builder /app/packages/shared ./node_modules/@e-gaop/shared
 RUN cp -r node_modules/@e-gaop/shared/node_modules/* node_modules/ 2>/dev/null; rm -rf node_modules/@e-gaop/shared/node_modules
 COPY --from=builder /app/api/proto /api/proto
+# npm/npx are build-time tools; this image only runs prebuilt JS. Dropping npm's
+# bundled transitive deps removes fixable CVEs that fail the Trivy image gate.
+RUN rm -rf /usr/local/lib/node_modules/npm && rm -f /usr/local/bin/npm /usr/local/bin/npx
 USER egaop
 EXPOSE 50051 3001 15051
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

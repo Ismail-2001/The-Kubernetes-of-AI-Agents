@@ -28,6 +28,9 @@ RUN rm -rf node_modules/@e-gaop/shared
 COPY --from=builder /app/packages/shared ./node_modules/@e-gaop/shared
 RUN cp -r node_modules/@e-gaop/shared/node_modules/* node_modules/ 2>/dev/null; rm -rf node_modules/@e-gaop/shared/node_modules
 COPY --from=builder /app/api/proto /api/proto
+# npm/npx are build-time tools; this image only runs prebuilt JS. Dropping npm's
+# bundled transitive deps removes fixable CVEs that fail the Trivy image gate.
+RUN rm -rf /usr/local/lib/node_modules/npm && rm -f /usr/local/bin/npm /usr/local/bin/npx
 USER egaop
 EXPOSE 50057 15057
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
