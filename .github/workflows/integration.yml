@@ -104,6 +104,7 @@ jobs:
             "admin-console:admin-console"
             "memory-plane:memory-plane"
             "observability-plane:observability-plane"
+            "policy-plane:policy-plane"
           )
           for svc in "${SERVICES[@]}"; do
             NAME="${svc%%:*}"
@@ -138,11 +139,14 @@ jobs:
             --wait --timeout 2m
 
       # ─── Install NGINX Ingress ───────────────────────────────────────────────
+      # NodePort: Kind has no cloud load balancer, so the chart default
+      # LoadBalancer service stays <pending> forever and --wait times out.
       - name: Install NGINX Ingress Controller
         run: |
           helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
           helm install ingress-nginx ingress-nginx/ingress-nginx \
             -n ingress-nginx --create-namespace \
+            --set controller.service.type=NodePort \
             --set controller.config.use-http2="true" \
             --wait --timeout 3m
 
@@ -163,20 +167,23 @@ jobs:
             --dry-run=client -o yaml | kubectl apply -f -
 
       # ─── Deploy via Helm ─────────────────────────────────────────────────────
+      # Subchart schema is `image` (repository string) + sibling `tag`;
+      # `--set X.image.tag=ci` would coerce image to a map ("map[tag:ci]:ci").
       - name: Helm install E-GAOP
         run: |
           helm install egaop charts/e-gaop \
             -n egaop --create-namespace \
             --values charts/e-gaop/values-kind.yml \
-            --set api-server.image.tag=ci \
-            --set workflow-engine.image.tag=ci \
-            --set secret-store.image.tag=ci \
-            --set llm-router.image.tag=ci \
-            --set tool-proxy.image.tag=ci \
-            --set sandbox-runtime.image.tag=ci \
-            --set admin-console.image.tag=ci \
-            --set memory-plane.image.tag=ci \
-            --set observability-plane.image.tag=ci \
+            --set api-server.tag=ci \
+            --set workflow-engine.tag=ci \
+            --set secret-store.tag=ci \
+            --set llm-router.tag=ci \
+            --set tool-proxy.tag=ci \
+            --set sandbox-runtime.tag=ci \
+            --set admin-console.tag=ci \
+            --set memory-plane.tag=ci \
+            --set observability-plane.tag=ci \
+            --set policy-plane.tag=ci \
             --timeout 5m
 
       # ─── Wait for Pods ───────────────────────────────────────────────────────
