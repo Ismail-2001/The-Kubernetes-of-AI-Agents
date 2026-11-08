@@ -101,6 +101,8 @@ export { executeSandboxTool, isAllowedTool } from "./sandbox/executor.js";
 export type { SandboxRequest, SandboxResponse } from "./sandbox/executor.js";
 export type { Sandbox } from "./sandbox/k8s-sandbox-runtime.js";
 export type { SandboxDriver, SandboxSpec, SandboxResult } from "./sandbox/sandbox-driver.js";
+export type { ISandboxRegistry, SandboxRecord } from "./sandbox/registry.js";
+export { InMemorySandboxRegistry, getSandboxRegistry, setSandboxRegistry } from "./sandbox/registry.js";
 export type { K8sSandboxRuntime } from "./sandbox/k8s-sandbox-runtime.js";
 export { createAuditEntry, getAuditChain, verifyAuditChain } from "./audit/index.js";
 export type { AuditEntry, AuditEventType, AuditSeverity, AuditActor, AuditTarget, AuditAction } from "./audit/index.js";

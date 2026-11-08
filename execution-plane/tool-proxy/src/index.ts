@@ -11,7 +11,7 @@ import http from "http";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import pino from "pino";
-import { RateLimiter, extractNamespace, getServerCredentials } from "@e-gaop/shared";
+import { RateLimiter, extractNamespace, getServerCredentials, getSandboxRegistry, type ISandboxRegistry, type SandboxRecord } from "@e-gaop/shared";
 
 const SERVICE_VERSION = process.env.SERVICE_VERSION || "1.0.0";
 const healthStartTime = new Date();
@@ -258,6 +258,68 @@ async function fetchWithRetry(url: string, opts: RequestInit, maxRetries = 3): P
   throw lastErr;
 }
 
+const sandboxRegistry: ISandboxRegistry = getSandboxRegistry();
+const MAX_SANDBOX_RESPONSE_BYTES = 1024 * 1024; // 1 MiB
+
+interface StreamReaderLike {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+  cancel(): Promise<void>;
+  releaseLock?(): void;
+}
+
+interface StreamBodyLike {
+  getReader(): StreamReaderLike;
+}
+
+async function readResponseCapped(response: Response, maxBytes: number): Promise<string> {
+  const body = response.body;
+  if (!body) {
+    return response.text ? await response.text() : "";
+  }
+
+  // Handle stream if getReader is available (standard fetch)
+  const streamBody = body as unknown as StreamBodyLike;
+  if (typeof streamBody.getReader === "function") {
+    const reader = streamBody.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    let reading = true;
+    try {
+      while (reading) {
+        const { done, value } = await reader.read();
+        if (done) {
+          reading = false;
+          break;
+        }
+        if (value) {
+          if (totalBytes + value.byteLength > maxBytes) {
+            const remaining = maxBytes - totalBytes;
+            if (remaining > 0) {
+              chunks.push(value.subarray(0, remaining));
+              totalBytes += remaining;
+            }
+            await reader.cancel();
+            reading = false;
+            break;
+          }
+          chunks.push(value);
+          totalBytes += value.byteLength;
+        }
+      }
+    } finally {
+      reader.releaseLock?.();
+    }
+    return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf-8");
+  }
+
+  // Mock or non-stream environment fallback
+  const text = await response.text();
+  if (Buffer.byteLength(text) > maxBytes) {
+    return Buffer.from(text).subarray(0, maxBytes).toString("utf-8");
+  }
+  return text;
+}
+
 const server = new grpc.Server({
   interceptors: [createNamespaceServerInterceptor(), createServiceTokenServerInterceptor(), createTraceServerInterceptor()],
 });
@@ -343,28 +405,63 @@ server.addService(toolService.service, {
         if (qs) url += (url.includes("?") ? "&" : "?") + qs;
       }
 
+      let sandboxRecord: SandboxRecord | null = null;
       if (SANDBOX_TOOLS.has(tool_name)) {
-        if (!sandbox_ip) {
+        if (!execution_id) {
           return callback(null, {
             status: "failed",
-            error_message: `Sandbox IP not provided for sandbox-execution tool: ${tool_name}`,
+            error_message: `execution_id is required for sandbox-execution tool: ${tool_name}`,
             latency_ms: Date.now() - startTime,
           });
         }
-        if (!isAllowedSandboxIP(sandbox_ip)) {
-          logger.warn({ sandbox_ip }, "SSRF blocked: sandbox IP outside allowed sandbox network");
+
+        sandboxRecord = await sandboxRegistry.get(execution_id);
+        if (!sandboxRecord) {
+          return callback(null, {
+            status: "failed",
+            error_message: `No sandbox found for execution: ${execution_id}`,
+            latency_ms: Date.now() - startTime,
+          });
+        }
+
+        // Verify caller's namespace owns the sandbox
+        const callerNs = (call.metadata?.get("x-egaop-namespace")?.[0] as string | undefined) || extractNamespace(agent_id);
+        if (sandboxRecord.namespace !== callerNs) {
+          logger.warn(
+            { execution_id, callerNs, sandboxNamespace: sandboxRecord.namespace },
+            "Cross-namespace sandbox access denied"
+          );
+          return callback(null, {
+            status: "failed",
+            error_message: `Cross-namespace sandbox access denied (caller: ${callerNs}, sandbox: ${sandboxRecord.namespace})`,
+            latency_ms: Date.now() - startTime,
+          });
+        }
+
+        // Caller-supplied sandbox_ip is deprecated and ignored; warn if it disagrees
+        if (sandbox_ip && sandbox_ip !== sandboxRecord.ip) {
+          logger.warn(
+            { execution_id, callerProvidedIp: sandbox_ip, resolvedIp: sandboxRecord.ip },
+            "Caller-supplied sandbox_ip is deprecated and ignored; disagrees with resolved sandbox IP"
+          );
+        }
+
+        const targetIp = sandboxRecord.ip;
+        if (!isAllowedSandboxIP(targetIp)) {
+          logger.warn({ targetIp }, "SSRF blocked: resolved sandbox IP outside allowed sandbox network");
           return callback(null, {
             status: "failed",
             error_message: "Sandbox IP is not in an allowed sandbox network",
             latency_ms: Date.now() - startTime,
           });
         }
-        url = `http://${sandbox_ip}:8080/exec`;
-        logger.info({ tool_name, sandbox_ip, url }, "Sandbox-routed tool: constructed URL");
+
+        url = `http://${targetIp}:8080/exec`;
+        logger.info({ tool_name, sandboxIp: targetIp, url }, "Sandbox-routed tool: constructed URL");
       }
 
-      // P1-2: never attach API credentials to sandbox-routed requests — the
-      // target IP is caller-supplied and must not receive platform secrets.
+      // P1-2: never attach platform API credentials to sandbox-routed requests.
+      // Sandbox requests receive their per-sandbox token via Authorization header.
       const creds = SANDBOX_TOOLS.has(tool_name) ? {} : injectCredentials(tool_name);
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -373,10 +470,15 @@ server.addService(toolService.service, {
         ...creds,
       };
 
+      if (SANDBOX_TOOLS.has(tool_name) && sandboxRecord) {
+        headers["Authorization"] = `Bearer ${sandboxRecord.token}`;
+      }
+
+      const timeoutMs = SANDBOX_TOOLS.has(tool_name) ? 10000 : 30000;
       const fetchOpts: RequestInit & { body?: string } = {
         method: config.method,
         headers,
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(timeoutMs),
         // P1-2: redirects could bounce an allowlisted target onto an
         // internal address — never follow them.
         redirect: "manual",
@@ -408,7 +510,9 @@ server.addService(toolService.service, {
           latency_ms: Date.now() - startTime,
         });
       }
-      const body = response.ok ? await response.text() : `HTTP ${response.status}`;
+      const body = response.ok
+        ? (SANDBOX_TOOLS.has(tool_name) ? await readResponseCapped(response, MAX_SANDBOX_RESPONSE_BYTES) : await response.text())
+        : `HTTP ${response.status}`;
 
       const latency = Date.now() - startTime;
       logger.info({ tool_name, latency, status: response.status }, "Tool call completed");

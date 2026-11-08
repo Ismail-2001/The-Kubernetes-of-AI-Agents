@@ -1,5 +1,6 @@
+import crypto from "crypto";
 import Docker from "dockerode";
-import type { SandboxDriver, SandboxSpec, SandboxResult } from "@e-gaop/shared";
+import { getSandboxRegistry, type ISandboxRegistry, type SandboxDriver, type SandboxSpec, type SandboxResult } from "@e-gaop/shared";
 
 // Strict allowlist: every token may only contain alphanumerics and a small set of
 // safe punctuation. Any shell metacharacter (;&|$`(){}<>!*?[]'"~\\\n) is rejected.
@@ -31,14 +32,17 @@ function isInitCommandSafe(cmd: string): boolean {
 
 export class DockerSandboxDriver implements SandboxDriver {
   private docker: Docker;
+  private readonly registry: ISandboxRegistry;
+  private readonly sandboxExecutionIds = new Map<string, string>();
   private readonly activeContainers = new Set<string>();
   private readonly maxContainers: number;
   private readonly running = { current: 0 };
   private readonly waiters: Array<{ resolve: (value: boolean) => void; timer?: NodeJS.Timeout }> = [];
   private readonly seccompProfile: string | undefined;
 
-  constructor(docker?: Docker) {
+  constructor(docker?: Docker, registry?: ISandboxRegistry) {
     this.docker = docker ?? new Docker();
+    this.registry = registry ?? getSandboxRegistry();
     this.maxContainers = Math.max(1, parseInt(process.env.SANDBOX_MAX_CONTAINERS || "20", 10));
     const profile = process.env.SANDBOX_SECCOMP_PROFILE;
     this.seccompProfile = profile && profile.trim().length > 0 ? profile.trim() : undefined;
@@ -112,6 +116,12 @@ export class DockerSandboxDriver implements SandboxDriver {
       throw Object.assign(new Error(`Image not in allowlist: ${containerImage}`), { code: "INVALID_ARGUMENT" });
     }
 
+    const execToken = crypto.randomBytes(32).toString("hex");
+    const containerEnv = {
+      ...(spec.envVars ?? {}),
+      SANDBOX_EXEC_TOKEN: execToken,
+    };
+
     let container: Docker.Container | null = null;
     try {
       container = await this.docker.createContainer({
@@ -119,12 +129,13 @@ export class DockerSandboxDriver implements SandboxDriver {
         name: `egaop-agent-${spec.executionId}`,
         // P1-5: server.js lives outside /workspace so /workspace can be tmpfs.
         Cmd: ["node", "/opt/egaop/server.js"],
-        Env: Object.entries(spec.envVars ?? {}).map(([k, v]) => `${k}=${v}`),
+        Env: Object.entries(containerEnv).map(([k, v]) => `${k}=${v}`),
         HostConfig,
         Labels: {
           "egaop.agent.id": spec.agentId,
           "egaop.execution.id": spec.executionId,
           "egaop.plane": "execution",
+          "egaop.namespace": spec.namespace,
         },
       });
 
@@ -140,6 +151,15 @@ export class DockerSandboxDriver implements SandboxDriver {
       } catch {
         // non-fatal
       }
+
+      await this.registry.register({
+        executionId: spec.executionId,
+        agentId: spec.agentId,
+        namespace: spec.namespace,
+        ip: ipAddress,
+        token: execToken,
+      });
+      this.sandboxExecutionIds.set(container.id, spec.executionId);
 
       const initOutputs: string[] = [];
       const initCmds = spec.initCommands ?? [];
@@ -179,6 +199,11 @@ export class DockerSandboxDriver implements SandboxDriver {
 
   async terminateSandbox(sandboxId: string): Promise<boolean> {
     try {
+      const execId = this.sandboxExecutionIds.get(sandboxId);
+      if (execId) {
+        await this.registry.delete(execId);
+        this.sandboxExecutionIds.delete(sandboxId);
+      }
       const container = this.docker.getContainer(sandboxId);
       await container.remove({ force: true });
       this.activeContainers.delete(sandboxId);
@@ -193,6 +218,11 @@ export class DockerSandboxDriver implements SandboxDriver {
     const ids = Array.from(this.activeContainers);
     for (const id of ids) {
       try {
+        const execId = this.sandboxExecutionIds.get(id);
+        if (execId) {
+          await this.registry.delete(execId);
+          this.sandboxExecutionIds.delete(id);
+        }
         await this.docker.getContainer(id).remove({ force: true });
       } catch {
         // non-fatal
@@ -221,6 +251,17 @@ export class DockerSandboxDriver implements SandboxDriver {
       const statusCode = (e as Record<string, unknown>)?.statusCode;
       if (statusCode === 404) return { status: "NotFound", cpu: 0, memory: 0, startedAt: null };
       return { status: "Unknown", cpu: 0, memory: 0, startedAt: null };
+    }
+  }
+
+  async getSandboxNamespace(sandboxId: string): Promise<string | null> {
+    try {
+      const container = this.docker.getContainer(sandboxId);
+      const info = await container.inspect();
+      const labels = (info.Config as { Labels?: Record<string, string> } | undefined)?.Labels || {};
+      return labels["egaop.namespace"] || null;
+    } catch {
+      return null;
     }
   }
 

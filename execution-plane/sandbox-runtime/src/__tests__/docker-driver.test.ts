@@ -83,7 +83,33 @@ describe("DockerSandboxDriver", () => {
       const opts = mockDocker.createContainer.mock.calls[0][0];
       expect(opts.HostConfig.NanoCpus).toBe(500_000_000);
       expect(opts.HostConfig.SecurityOpt).toContain("no-new-privileges");
+      expect(opts.Labels["egaop.namespace"]).toBe("egaop");
       expect(opts.Env).toContain("FOO=bar");
+    });
+
+    it("should inject 32-byte SANDBOX_EXEC_TOKEN and register sandbox in registry", async () => {
+      const result = await driver.createSandbox({
+        executionId: "exec-reg-1",
+        agentId: "agent-reg-1",
+        namespace: "tenant-alpha",
+        image: "egaop-base-runtime:latest",
+        isolationLevel: "Standard",
+      });
+
+      const opts = mockDocker.createContainer.mock.calls[0][0];
+      const tokenEnv = opts.Env.find((e: string) => e.startsWith("SANDBOX_EXEC_TOKEN="));
+      expect(tokenEnv).toBeDefined();
+      const token = tokenEnv.split("=")[1];
+      expect(token).toHaveLength(64); // 32 bytes hex encoded = 64 hex characters
+
+      const reg = (driver as any).registry;
+      expect(reg).toBeDefined();
+      const record = await reg.get("exec-reg-1");
+      expect(record).not.toBeNull();
+      expect(record.token).toBe(token);
+      expect(record.namespace).toBe("tenant-alpha");
+      expect(record.agentId).toBe("agent-reg-1");
+      expect(record.ip).toBe(result.ipAddress);
     });
 
     it("should use a read-only rootfs with tmpfs scratch + workspace (P1-5)", async () => {
@@ -152,7 +178,8 @@ describe("DockerSandboxDriver", () => {
       expect(opts.HostConfig.NanoCpus).toBe(500_000_000);
       expect(opts.HostConfig.Memory).toBe(512 * 1024 * 1024);
       expect(opts.Image).toBe("egaop-base-runtime:latest");
-      expect(opts.Env).toEqual([]);
+      expect(opts.Env).toHaveLength(1);
+      expect(opts.Env[0]).toMatch(/^SANDBOX_EXEC_TOKEN=/);
     });
 
     it("should keep ipAddress unknown when the sandbox network is absent", async () => {
@@ -251,6 +278,22 @@ describe("DockerSandboxDriver", () => {
   });
 
   describe("terminateSandbox", () => {
+    it("should remove container and deregister from registry", async () => {
+      await driver.createSandbox({
+        executionId: "exec-term-1",
+        agentId: "agent-term-1",
+        namespace: "tenant-term",
+        image: "egaop-base-runtime:latest",
+        isolationLevel: "Standard",
+      });
+      const reg = (driver as any).registry;
+      expect(await reg.get("exec-term-1")).not.toBeNull();
+
+      const result = await driver.terminateSandbox("abc123def456");
+      expect(result).toBe(true);
+      expect(await reg.get("exec-term-1")).toBeNull();
+    });
+
     it("should remove container with force", async () => {
       const result = await driver.terminateSandbox("abc123def456");
       expect(result).toBe(true);
@@ -344,6 +387,22 @@ describe("DockerSandboxDriver", () => {
 
       await driver.cleanup();
       expect(driver.activeContainerCount).toBe(0);
+    });
+  });
+
+  describe("getSandboxNamespace", () => {
+    it("should return namespace from container labels", async () => {
+      mockContainer.inspect.mockResolvedValueOnce({
+        Config: { Labels: { "egaop.namespace": "production-tenant" } },
+      });
+      const ns = await driver.getSandboxNamespace("abc123def456");
+      expect(ns).toBe("production-tenant");
+    });
+
+    it("should return null if container inspect fails", async () => {
+      mockContainer.inspect.mockRejectedValueOnce(new Error("Container not found"));
+      const ns = await driver.getSandboxNamespace("nonexistent");
+      expect(ns).toBeNull();
     });
   });
 
