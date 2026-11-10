@@ -288,7 +288,6 @@ async function readResponseCapped(response: Response, maxBytes: number): Promise
       while (reading) {
         const { done, value } = await reader.read();
         if (done) {
-          reading = false;
           break;
         }
         if (value) {
@@ -299,7 +298,6 @@ async function readResponseCapped(response: Response, maxBytes: number): Promise
               totalBytes += remaining;
             }
             await reader.cancel();
-            reading = false;
             break;
           }
           chunks.push(value);
