@@ -18,9 +18,14 @@ const mockFetch = jest.fn();
 global.fetch = mockFetch as any;
 
 import { server } from "../index";
-import { createAuditEntry } from "@e-gaop/shared";
+import { createAuditEntry, getSandboxRegistry } from "@e-gaop/shared";
 
 const handlers = (server as any).handlers as Map<string, { func: any }>;
+const registry = getSandboxRegistry();
+
+beforeEach(async () => {
+  await registry.clear?.();
+});
 
 afterEach(() => {
   jest.clearAllMocks();
@@ -182,7 +187,7 @@ describe("CallTool handler", () => {
     expect(result.status).toBe("succeeded");
   });
 
-  it("rejects sandbox tool without sandbox_ip", async () => {
+  it("rejects sandbox tool when sandbox is not registered", async () => {
     const { err, result } = await callTool({
       agent_id: "default/agent-1",
       execution_id: "exec-1",
@@ -191,10 +196,17 @@ describe("CallTool handler", () => {
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");
-    expect(result.error_message).toMatch(/Sandbox IP not provided/);
+    expect(result.error_message).toMatch(/No sandbox found/);
   });
 
   it("allows sandbox tool for RFC1918 sandbox_ip by default", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "10.0.0.1",
+      token: "tok",
+    });
     mockFetch.mockResolvedValue(new Response("sandbox output", { status: 200 }));
     (createAuditEntry as jest.Mock).mockImplementation(() => {});
 
@@ -203,19 +215,24 @@ describe("CallTool handler", () => {
       execution_id: "exec-1",
       tool_name: "code_interpreter",
       args: { code: "print('hi')" },
-      sandbox_ip: "10.0.0.1",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("succeeded");
   });
 
   it("rejects loopback sandbox_ip", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "127.0.0.1",
+      token: "tok",
+    });
     const { err, result } = await callTool({
       agent_id: "default/agent-1",
       execution_id: "exec-1",
       tool_name: "code_interpreter",
       args: { code: "print('hi')" },
-      sandbox_ip: "127.0.0.1",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");
@@ -223,12 +240,18 @@ describe("CallTool handler", () => {
   });
 
   it("rejects link-local metadata sandbox_ip", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "169.254.169.254",
+      token: "tok",
+    });
     const { err, result } = await callTool({
       agent_id: "default/agent-1",
       execution_id: "exec-1",
       tool_name: "code_interpreter",
       args: { code: "print('hi')" },
-      sandbox_ip: "169.254.169.254",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");
@@ -236,6 +259,13 @@ describe("CallTool handler", () => {
   });
 
   it("rejects non-IP sandbox_ip (hostname)", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "evil.example.com",
+      token: "tok",
+    });
     mockFetch.mockResolvedValue(new Response("should not be reached", { status: 200 }));
     (createAuditEntry as jest.Mock).mockImplementation(() => {});
 
@@ -244,7 +274,6 @@ describe("CallTool handler", () => {
       execution_id: "exec-1",
       tool_name: "code_interpreter",
       args: { code: "print('hi')" },
-      sandbox_ip: "evil.example.com",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");
@@ -253,6 +282,13 @@ describe("CallTool handler", () => {
   });
 
   it("honours SANDBOX_IP_ALLOWLIST_CIDRS to allow inside the sandbox network", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "10.0.0.5",
+      token: "tok",
+    });
     process.env.SANDBOX_IP_ALLOWLIST_CIDRS = "10.0.0.0/8";
     try {
       mockFetch.mockResolvedValue(new Response("sandbox output", { status: 200 }));
@@ -263,7 +299,6 @@ describe("CallTool handler", () => {
         execution_id: "exec-1",
         tool_name: "code_interpreter",
         args: { code: "print('hi')" },
-        sandbox_ip: "10.0.0.5",
       });
       expect(err).toBeNull();
       expect(result.status).toBe("succeeded");
@@ -273,6 +308,13 @@ describe("CallTool handler", () => {
   });
 
   it("honours SANDBOX_IP_ALLOWLIST_CIDRS to deny outside the sandbox network", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "192.168.1.5",
+      token: "tok",
+    });
     process.env.SANDBOX_IP_ALLOWLIST_CIDRS = "172.30.0.0/16";
     try {
       const { err, result } = await callTool({
@@ -280,7 +322,6 @@ describe("CallTool handler", () => {
         execution_id: "exec-1",
         tool_name: "code_interpreter",
         args: { code: "print('hi')" },
-        sandbox_ip: "192.168.1.5",
       });
       expect(err).toBeNull();
       expect(result.status).toBe("failed");
@@ -291,6 +332,13 @@ describe("CallTool handler", () => {
   });
 
   it("does not attach credentials to sandbox-routed calls", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "172.30.0.5",
+      token: "sandbox-secret-token",
+    });
     process.env.TOOL_DEFAULT_API_KEY = "sekret-default-key";
     try {
       mockFetch.mockResolvedValue(new Response("sandbox output", { status: 200 }));
@@ -301,18 +349,25 @@ describe("CallTool handler", () => {
         execution_id: "exec-1",
         tool_name: "code_interpreter",
         args: { code: "print('hi')" },
-        sandbox_ip: "172.30.0.5",
       });
       expect(err).toBeNull();
       expect(result.status).toBe("succeeded");
       const opts = mockFetch.mock.calls[0][1] as { headers?: Record<string, string> };
-      expect(opts.headers?.Authorization).toBeUndefined();
+      expect(opts.headers?.Authorization).not.toBe("Bearer sekret-default-key");
+      expect(opts.headers?.Authorization).toBe("Bearer sandbox-secret-token");
     } finally {
       delete process.env.TOOL_DEFAULT_API_KEY;
     }
   });
 
   it("does not follow redirects on sandbox calls", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "172.30.0.5",
+      token: "tok",
+    });
     mockFetch.mockResolvedValue(
       new Response("", { status: 302, headers: { Location: "http://169.254.169.254/" } })
     );
@@ -323,7 +378,6 @@ describe("CallTool handler", () => {
       execution_id: "exec-1",
       tool_name: "code_interpreter",
       args: { code: "print('hi')" },
-      sandbox_ip: "172.30.0.5",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");
@@ -333,12 +387,18 @@ describe("CallTool handler", () => {
   });
 
   it("validates sandbox tool args", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "172.30.0.5",
+      token: "tok",
+    });
     const { err, result } = await callTool({
       agent_id: "default/agent-1",
       execution_id: "exec-1",
       tool_name: "code_interpreter",
       args: {},
-      sandbox_ip: "172.30.0.5",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");
@@ -346,6 +406,13 @@ describe("CallTool handler", () => {
   });
 
   it("executes sandbox tool successfully", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "172.30.0.5",
+      token: "tok",
+    });
     mockFetch.mockResolvedValue(new Response("sandbox output", { status: 200 }));
     (createAuditEntry as jest.Mock).mockImplementation(() => {});
 
@@ -354,7 +421,6 @@ describe("CallTool handler", () => {
       execution_id: "exec-1",
       tool_name: "code_interpreter",
       args: { code: "print('hello')" },
-      sandbox_ip: "172.30.0.5",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("succeeded");
@@ -393,12 +459,18 @@ describe("CallTool handler", () => {
   });
 
   it("validates database_query args (blocked chars)", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "172.30.0.5",
+      token: "tok",
+    });
     const { err, result } = await callTool({
       agent_id: "default/agent-1",
       execution_id: "exec-1",
       tool_name: "database_query",
       args: { query: "SELECT 1; DROP TABLE users;" },
-      sandbox_ip: "172.30.0.5",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");
@@ -406,12 +478,18 @@ describe("CallTool handler", () => {
   });
 
   it("validates file_write args (oversized)", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "172.30.0.5",
+      token: "tok",
+    });
     const { err, result } = await callTool({
       agent_id: "default/agent-1",
       execution_id: "exec-1",
       tool_name: "file_write",
       args: { path: "/tmp/out.txt", content: "x".repeat(1000001) },
-      sandbox_ip: "172.30.0.5",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");
@@ -419,12 +497,18 @@ describe("CallTool handler", () => {
   });
 
   it("validates file_read args (traversal)", async () => {
+    await registry.register({
+      executionId: "exec-1",
+      agentId: "default/agent-1",
+      namespace: "default",
+      ip: "172.30.0.5",
+      token: "tok",
+    });
     const { err, result } = await callTool({
       agent_id: "default/agent-1",
       execution_id: "exec-1",
       tool_name: "file_read",
       args: { path: "../secret" },
-      sandbox_ip: "172.30.0.5",
     });
     expect(err).toBeNull();
     expect(result.status).toBe("failed");

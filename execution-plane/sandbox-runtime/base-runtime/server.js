@@ -2,8 +2,26 @@ const http = require("http");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 
-const PORT = 8080;
+const EXPECTED_TOKEN = process.env.SANDBOX_EXEC_TOKEN;
+if (!EXPECTED_TOKEN || EXPECTED_TOKEN.trim() === "") {
+  // eslint-disable-next-line no-console
+  console.error("FATAL: SANDBOX_EXEC_TOKEN environment variable must be set");
+  process.exit(1);
+}
+
+const PORT = parseInt(process.env.PORT, 10) || 8080;
 const HOST = "0.0.0.0";
+
+function timingSafeCompare(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 // ─── Tool Executors (structured, no shell) ─────────────────────────────────
 
@@ -57,24 +75,6 @@ const TOOLS = {
 
 const ALLOWED_TOOLS = new Set(Object.keys(TOOLS));
 
-// ─── Legacy command execution (blocklist) ──────────────────────────────────
-
-const BLOCKED_PATTERNS = [
-  /[;&|`$(){}!<>]/,
-  /\b(rm\s+-rf|mkfs|dd\s+if=|:()\s*\{\s*:\|:&\s*\};)\b/,
-  /\b(curl|wget)\s+.*\|\s*(bash|sh|python|node)\b/,
-  /\bbase64\s+--decode\b/,
-];
-
-function isCommandSafe(command) {
-  if (typeof command !== "string" || command.length === 0) return false;
-  if (command.length > 4096) return false;
-  for (const p of BLOCKED_PATTERNS) {
-    if (p.test(command)) return false;
-  }
-  return true;
-}
-
 // ─── HTTP Server ────────────────────────────────────────────────────────────
 
 const server = http.createServer((req, res) => {
@@ -82,11 +82,25 @@ const server = http.createServer((req, res) => {
 
   if (req.url === "/healthz" && req.method === "GET") {
     res.writeHead(200);
-    res.end(JSON.stringify({ status: "ok", pid: process.pid }));
+    res.end(JSON.stringify({ status: "ok" }));
     return;
   }
 
   if (req.url === "/exec" && req.method === "POST") {
+    const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+    if (!authHeader || typeof authHeader !== "string") {
+      res.writeHead(401);
+      res.end(JSON.stringify({ error: "Missing Authorization header" }));
+      return;
+    }
+
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!match || !timingSafeCompare(match[1], EXPECTED_TOKEN)) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ error: "Unauthorized" }));
+      return;
+    }
+
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", async () => {
@@ -94,30 +108,16 @@ const server = http.createServer((req, res) => {
         const parsed = JSON.parse(body);
 
         // Structured execution: { tool, args }
-        if (parsed.tool && ALLOWED_TOOLS.has(parsed.tool)) {
+        if (parsed && parsed.tool && ALLOWED_TOOLS.has(parsed.tool)) {
           const handler = TOOLS[parsed.tool];
           const result = await handler(parsed.args || {});
-          res.writeHead(result.exitCode === 0 ? 200 : 200);
-          res.end(JSON.stringify(result));
-          return;
-        }
-
-        // Legacy command execution: { command }
-        const command = parsed && parsed.command;
-        if (command) {
-          if (!isCommandSafe(command)) {
-            res.writeHead(403);
-            res.end(JSON.stringify({ error: "command rejected by security policy", stdout: "", stderr: "", exitCode: 1 }));
-            return;
-          }
-          const result = await spawnTool(["/bin/sh", "-c", command]);
-          res.writeHead(result.exitCode === 0 ? 200 : 200);
+          res.writeHead(200);
           res.end(JSON.stringify(result));
           return;
         }
 
         res.writeHead(400);
-        res.end(JSON.stringify({ error: "tool or command required" }));
+        res.end(JSON.stringify({ error: "valid tool required; raw command execution is disabled" }));
       } catch (e) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: "Invalid JSON body" }));
